@@ -2,7 +2,10 @@ package core
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -44,7 +47,7 @@ func (w WaitStrategy) withDefaults() WaitStrategy {
 // It contains zero LLM calls — that's the whole point.
 type Executor struct {
 	wait    WaitStrategy
-	secrets map[string]bool // filled values to mask, keyed by step index
+	metrics *RunMetrics // owned by one run
 
 	// cache is the M4 resolution cache (cache.go). It is nil-safe: a nil
 	// cache makes every cache lookup/record a no-op, so caching is purely
@@ -53,7 +56,7 @@ type Executor struct {
 }
 
 func NewExecutor(w WaitStrategy) *Executor {
-	return &Executor{wait: w.withDefaults(), secrets: map[string]bool{}}
+	return &Executor{wait: w.withDefaults()}
 }
 
 // WithCache attaches a resolution cache (M4). Chainable.
@@ -69,6 +72,8 @@ type RunError struct {
 	Action    Action
 	Err       error
 }
+
+func (e *RunError) Unwrap() error { return e.Err }
 
 func (e *RunError) Error() string {
 	return fmt.Sprintf("step %d (%s): %v", e.StepIndex, e.Action.Kind, e.Err)
@@ -99,40 +104,13 @@ func (x *Executor) ExecuteFrom(ctx context.Context, p *Plan, from int, extracted
 			return nil, &RunError{StepIndex: i, Action: a, Err: err}
 		}
 
-		var res any
-		var err error
-		switch a.Kind {
-		case KindGoto:
-			err = x.doGoto(ctx, a)
-		case KindClick:
-			err = x.doClick(ctx, a)
-		case KindFill:
-			err = x.doFill(ctx, a)
-			if err == nil && a.Secret {
-				x.secrets[a.Text] = true
-			}
-		case KindSelect:
-			err = x.doSelect(ctx, a)
-		case KindKey:
-			err = x.doKey(ctx, a)
-		case KindScroll:
-			err = x.doScroll(ctx, a)
-		case KindWait:
-			err = x.doWait(ctx, a)
-		case KindExtract:
-			res, err = x.doExtract(ctx, a, extracted)
-		case KindPlanAgain:
-			// Executor treats this as a control transfer; the runner (runner.go)
-			// intercepts before Execute and handles replanning. Reaching here
-			// means the caller wired it wrong.
-			return nil, &RunError{StepIndex: i, Action: a,
-				Err: fmt.Errorf("plan_again reached executor; runner must intercept")}
-		case KindDone:
+		if a.Kind == KindDone {
 			return a.Result, nil
-		default:
-			return nil, &RunError{StepIndex: i, Action: a,
-				Err: fmt.Errorf("unhandled kind %q", a.Kind)}
 		}
+		if a.Kind == KindPlanAgain {
+			return nil, &RunError{StepIndex: i, Action: a, Err: fmt.Errorf("replan requested: %s", a.Reason)}
+		}
+		res, err := x.executeAction(ctx, a, extracted)
 
 		if err != nil {
 			return nil, &RunError{StepIndex: i, Action: a, Err: err}
@@ -144,6 +122,32 @@ func (x *Executor) ExecuteFrom(ctx context.Context, p *Plan, from int, extracted
 	// Plan exhausted without Done — not fatal, but the caller should know.
 	return nil, &RunError{StepIndex: len(p.Steps) - 1,
 		Action: Action{Kind: "eof"}, Err: fmt.Errorf("plan ended without done")}
+}
+
+// executeAction bounds the entire action, including WaitVisible and navigation.
+func (x *Executor) executeAction(ctx context.Context, a Action, extracted extractStore) (any, error) {
+	stepCtx, cancel := context.WithTimeout(ctx, x.wait.Budget)
+	defer cancel()
+	switch a.Kind {
+	case KindGoto:
+		return nil, x.doGoto(stepCtx, a)
+	case KindClick:
+		return nil, x.doClick(stepCtx, a)
+	case KindFill:
+		return nil, x.doFill(stepCtx, a)
+	case KindSelect:
+		return nil, x.doSelect(stepCtx, a)
+	case KindKey:
+		return nil, x.doKey(stepCtx, a)
+	case KindScroll:
+		return nil, x.doScroll(stepCtx, a)
+	case KindWait:
+		return nil, x.doWait(stepCtx, a)
+	case KindExtract:
+		return x.doExtract(stepCtx, a, extracted)
+	default:
+		return nil, fmt.Errorf("unhandled kind %q", a.Kind)
+	}
 }
 
 // --- individual actions ---
@@ -275,24 +279,70 @@ func (x *Executor) doWait(ctx context.Context, a Action) error {
 // calls. Otherwise the executor returns raw page text, and the runner makes
 // one small LLM call to structure it against Schema. That call belongs to
 // the runner, not the executor, so "the executor has zero LLM calls" holds.
+// structureRequest transfers control to Runner after the deterministic text read.
+// The executor never invokes the model, even indirectly through a callback.
+type structureRequest struct {
+	Text   string
+	Schema json.RawMessage
+}
+
+func (*structureRequest) Error() string { return "extract requires schema structuring" }
+
 func (x *Executor) doExtract(ctx context.Context, a Action, store extractStore) (any, error) {
 	if len(a.Fields) > 0 {
-		out := map[string]string{}
-		for field, sel := range a.Fields {
-			var v string
-			err := chromedp.Run(ctx, chromedp.Evaluate(fmt.Sprintf(
-				`(document.querySelector(%q)?.innerText ?? document.querySelector(%q)?.value ?? "").trim()`,
-				sel, sel), &v))
-			if err != nil {
-				return nil, fmt.Errorf("extract field %q (%s): %v", field, sel, err)
+		out := map[string]any{}
+		failures := map[string]string{}
+		successes := 0
+		fields := make([]string, 0, len(a.Fields))
+		for f := range a.Fields {
+			fields = append(fields, f)
+		}
+		sort.Strings(fields)
+		for _, field := range fields {
+			sel := a.Fields[field]
+			var key CacheKey
+			var err error
+			if strings.HasPrefix(sel, "[") && strings.HasSuffix(sel, "]") {
+				if ref, e := strconv.Atoi(sel[1 : len(sel)-1]); e == nil {
+					sel, key, err = x.resolveRef(ctx, ref, string(KindExtract))
+				}
 			}
-			out[field] = v
+			var got struct {
+				Value string `json:"value"`
+				Error string `json:"error"`
+			}
+			if err == nil {
+				js := fmt.Sprintf(`(() => {try {const e=document.querySelector(%q);if(!e)return {error:"no matching element"};return {value:String(e.value ?? e.innerText ?? "").trim()}}catch(e){return {error:e.message}}})()`, sel)
+				err = chromedp.Run(ctx, chromedp.Evaluate(js, &got))
+				if err == nil && got.Error != "" {
+					err = fmt.Errorf("%s", got.Error)
+				}
+			}
+			x.recordOutcome(key, sel, err)
+			if err != nil {
+				out[field] = ""
+				failures[field] = err.Error()
+			} else {
+				out[field] = got.Value
+				successes++
+			}
+		}
+		if x.metrics != nil && len(failures) > 0 {
+			if x.metrics.ExtractErrors == nil {
+				x.metrics.ExtractErrors = map[string]string{}
+			}
+			for field, err := range failures {
+				x.metrics.ExtractErrors[field] = err
+			}
+		}
+		if successes == 0 {
+			return nil, fmt.Errorf("extract: all %d fields failed: %v", len(fields), failures)
 		}
 		return out, nil
 	}
-	// No fields: return text; runner structures via LLM against Schema.
 	var text string
-	err := chromedp.Run(ctx, chromedp.Evaluate(
-		`document.body.innerText.slice(0, 20000)`, &text))
-	return text, err
+	if err := chromedp.Run(ctx, chromedp.Evaluate(`document.body.innerText.slice(0,20000)`, &text)); err != nil {
+		return nil, err
+	}
+	return nil, &structureRequest{Text: text, Schema: a.Schema}
 }

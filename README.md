@@ -126,13 +126,13 @@ defer tab.Release()
 
 for _, goal := range goals {
 	// Empty StartURL runs against whatever page the tab is on.
-	result, m, err := runner.Run(ctx, tab, ferro.Task{Goal: goal})
+	result, m, err := runner.RunOn(ctx, tab, ferro.Task{Goal: goal})
 	...
 }
 ```
 
-`Runner.Run` never releases the tab; the caller owns its lifetime. A
-dedicated `RunOn` entry point is planned (see `docs/plan.md`, epic E7).
+`Runner.RunOn` and `ferro.RunOn` never release the tab; the caller owns its
+lifetime. `Runner.Run` remains an equivalent alias.
 
 ## Staying signed in
 
@@ -153,7 +153,7 @@ b, err := ferro.NewBrowser(ferro.BrowserConfig{
 | Option | Effect |
 |---|---|
 | `WithMaxRepairs(n)` | Cap single-step repairs per failed action (default 2) |
-| `WithResolutionCache(path)` | Persist learned ref-to-selector mappings so repeat runs skip model-driven resolution; empty path keeps it in memory |
+| `WithResolutionCache(path)` | Persist learned selector mappings and successful plans between runners; empty path keeps it in memory |
 
 `BrowserConfig` also exposes `PoolSize`, `MaxElements`, `AllocateTimeout`,
 `ExecPath`, `Proxy`, and `UserAgent`.
@@ -166,9 +166,57 @@ Every run returns `RunMetrics`:
 | `Plannings` | Re-plans after the first |
 | `Repairs` | Single-step repairs |
 | `CacheHits` | Ref resolutions served from the resolution cache |
+| `ReplayHits` | Plans served from the plan cache |
+| `PlannerRetries` | Retries after malformed planner output (at most one per planning call) |
+| `CacheErrors` | Nonfatal cache read/write errors |
+| `ExtractErrors` | Per-field extraction failures |
 | `EstimatedTokens` | Rough token count, `len(prompt+response)/4` |
 | `Duration` | Wall time |
 | `ErrorClass` | Error taxonomy label on failure (`stale_ref`, `timeout`, ...) |
+
+## Replay and extraction
+
+Set `Task.ReplayKey` to opt into replay. A reused `Runner` caches in memory;
+`WithResolutionCache(path)` retains plans and selectors between runners and
+process restarts. The key also includes the goal, starting URL, result schema,
+and initial snapshot. Changed refs or page structure cause a fresh planning
+call. Only successful, unrepaired plans are saved; secret-fill plans are never
+cached. A failed replay is invalidated and repaired in place without restarting
+already-executed actions. A warm plan containing schema extraction still needs
+its extraction model call; pure-selector plans can run with zero model calls.
+Use extraction templates for changing data rather than caching a literal answer.
+
+Each run flushes the versioned cache atomically, on success or failure. Cache
+files use mode 0600. Corrupt/obsolete caches start empty and report a warning
+in `CacheErrors`; write failures also appear there without undoing a successful
+task. Share one Runner across goroutines, but give each process its own cache
+file. Concurrent independent cache objects writing the same file are unsupported.
+
+CSS extraction resolves `[N]` selectors as snapshot refs. Missing elements or
+invalid selectors produce an empty field and `ExtractErrors`; the step fails
+only if every field fails. `{{extract.last.field}}` works in subsequent actions
+and nested `done.result` values. A whole-result `{{extract.last}}` preserves the
+object/array type. Missing templates return errors.
+
+Schema extraction pauses the deterministic executor, asks the model to structure
+the page text, validates the response, then resumes at the next step. `Task.Schema`
+also validates the final result. Supported JSON Schema keywords: `type` (single
+object/array/string/number/integer/boolean/null), `properties`, `required`,
+`additionalProperties` (boolean), `items` (single schema), `enum`, `minimum`,
+`maximum`, `minLength`, `maxLength`, `minItems`, `maxItems`, and annotation strings
+`$schema`, `title`, `description`. Unsupported keywords fail explicitly.
+
+Planner envelopes and repair actions are validated locally. Envelope drift,
+unknown fields, and fields belonging to the wrong action kind produce
+`*ferro.ErrPlanShape`. The planner gets one bounded correction attempt.
+`OpenAICompatible.UseJSONSchema` optionally sends a JSON Schema with `strict:false`
+to capable endpoints (the action vocabulary allows arbitrary result objects).
+The default remains `json_object` for compatible local endpoints. Custom clients
+can implement `ferro.SchemaCompleter`; local checks apply either way.
+
+`WithMaxRepairs(0)` disables repairs. Each action has a five-second default
+budget, and caller cancellation interrupts a run without releasing its tab.
+Runner and OpenAICompatible configurations must not be mutated during use.
 
 ## Model endpoints
 

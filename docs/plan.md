@@ -1,5 +1,14 @@
 # Work plan: ferro post-dogfood hardening
 
+## Implementation update — 2026-09-07
+
+The runtime-completeness branch implements RunOn, partial/ref extraction, typed
+planner shape checks with one retry, bare-step repairs, replay, cache flushing,
+cache metrics, schema structuring and Task.Schema validation. The original task
+rows below remain historical contracts; not every ancillary example/ADR or
+benchmark requirement is claimed complete by this implementation. README and
+ADR 003 describe the actual API and current limitations.
+
 ## Context
 
 ferro is a Go library for token-efficient AI browser automation: the LLM is

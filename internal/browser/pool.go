@@ -45,7 +45,7 @@ func (t *taskContext) Release() {
 
 	t.b.mu.Lock()
 	defer t.b.mu.Unlock()
-	if err != nil {
+	if err != nil || t.b.closed {
 		// Poisoned tab: destroy. Cheap enough; pool refills on demand.
 		delete(t.b.all, t.pc)
 		t.pc.cancel()

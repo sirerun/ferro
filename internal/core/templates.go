@@ -15,17 +15,18 @@ func expandTemplates(a *Action, store extractStore) error {
 		if !strings.Contains(*s, "{{") {
 			return nil
 		}
-		out := *s
+		remaining := *s
+		var out strings.Builder
 		for {
-			start := strings.Index(out, "{{")
+			start := strings.Index(remaining, "{{")
 			if start < 0 {
 				break
 			}
-			end := strings.Index(out[start:], "}}")
+			end := strings.Index(remaining[start:], "}}")
 			if end < 0 {
 				break
 			}
-			key := strings.TrimSpace(out[start+2 : start+end])
+			key := strings.TrimSpace(remaining[start+2 : start+end])
 			if !strings.HasPrefix(key, "extract.") {
 				return fmt.Errorf("unsupported template %q (only extract.* allowed)", key)
 			}
@@ -33,9 +34,12 @@ func expandTemplates(a *Action, store extractStore) error {
 			if err != nil {
 				return err
 			}
-			out = out[:start] + val + out[start+end+2:]
+			out.WriteString(remaining[:start])
+			out.WriteString(val)
+			remaining = remaining[start+end+2:]
 		}
-		*s = out
+		out.WriteString(remaining)
+		*s = out.String()
 		return nil
 	}
 	for _, target := range []*string{&a.Text, &a.Value, &a.URL} {
@@ -47,39 +51,23 @@ func expandTemplates(a *Action, store extractStore) error {
 }
 
 func lookupExtract(store extractStore, path string) (string, error) {
-	parts := strings.SplitN(path, ".", 2)
-	if parts[0] == "last" {
-		last, ok := store["last"]
-		if !ok {
-			return "", fmt.Errorf("template {{extract.last}}: no prior extract")
-		}
-		if len(parts) == 1 {
-			return fmt.Sprint(last), nil
-		}
-		return dig(last, parts[1])
+	v, err := extractValue(store, path)
+	if err != nil {
+		return "", err
 	}
-	v, ok := store[parts[0]]
-	if !ok {
-		return "", fmt.Errorf("template {{extract.%s}}: no such extract", parts[0])
-	}
-	if len(parts) == 1 {
-		return fmt.Sprint(v), nil
-	}
-	return dig(v, parts[1])
+	return fmt.Sprint(v), nil
 }
-
-// dig walks map[string]any values produced by Extract.
-func dig(v any, path string) (string, error) {
-	cur := v
+func extractValue(store extractStore, path string) (any, error) {
+	var cur any = map[string]any(store)
 	for _, key := range strings.Split(path, ".") {
-		m, ok := cur.(map[string]any)
+		obj, ok := cur.(map[string]any)
 		if !ok {
-			return "", fmt.Errorf("template path %q: not an object at %q", path, key)
+			return nil, fmt.Errorf("template %q: not an object at %q", path, key)
 		}
-		cur, ok = m[key]
+		cur, ok = obj[key]
 		if !ok {
-			return "", fmt.Errorf("template path %q: missing key %q", path, key)
+			return nil, fmt.Errorf("template %q: missing key %q", path, key)
 		}
 	}
-	return fmt.Sprint(cur), nil
+	return cur, nil
 }

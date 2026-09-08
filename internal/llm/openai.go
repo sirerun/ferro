@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -26,19 +28,9 @@ type OpenAICompatible struct {
 	// exceed a metered key's available balance for no benefit.
 	MaxTokens int
 
-	client *http.Client
-}
-
-func (o *OpenAICompatible) defaults() {
-	if o.Timeout <= 0 {
-		o.Timeout = 120 * time.Second
-	}
-	if o.MaxTokens <= 0 {
-		o.MaxTokens = 2048
-	}
-	if o.client == nil {
-		o.client = &http.Client{Timeout: o.Timeout}
-	}
+	// UseJSONSchema opts into response_format=json_schema. Keep false for
+	// servers supporting only json_object. Local plan validation always runs.
+	UseJSONSchema bool
 }
 
 type chatRequest struct {
@@ -53,7 +45,8 @@ type chatRequest struct {
 }
 
 type responseFormat struct {
-	Type string `json:"type"` // "json_object"
+	Type       string `json:"type"`
+	JSONSchema any    `json:"json_schema,omitempty"`
 }
 
 type chatMessage struct {
@@ -74,7 +67,27 @@ type chatResponse struct {
 
 // Complete implements Client (and, structurally, core.LLMClient).
 func (o *OpenAICompatible) Complete(ctx context.Context, system, user string) (string, error) {
-	o.defaults()
+	return o.complete(ctx, system, user, nil)
+}
+
+// CompleteSchema requests the plan schema when explicitly enabled. Endpoints
+// without this feature retain the existing JSON-object protocol.
+func (o *OpenAICompatible) CompleteSchema(ctx context.Context, system, user string, schema json.RawMessage) (string, error) {
+	if !o.UseJSONSchema {
+		return o.Complete(ctx, system, user)
+	}
+	return o.complete(ctx, system, user, schema)
+}
+func (o *OpenAICompatible) complete(ctx context.Context, system, user string, schema json.RawMessage) (string, error) {
+	timeout := o.Timeout
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
+	maxTokens := o.MaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 2048
+	}
+	client := &http.Client{Timeout: timeout}
 
 	req := chatRequest{
 		Model: o.Model,
@@ -83,17 +96,20 @@ func (o *OpenAICompatible) Complete(ctx context.Context, system, user string) (s
 			{Role: "user", Content: user},
 		},
 		Temperature:    o.Temperature,
-		MaxTokens:      o.MaxTokens,
+		MaxTokens:      maxTokens,
 		ResponseFormat: &responseFormat{Type: "json_object"},
 	}
 
+	if len(schema) > 0 {
+		req.ResponseFormat = &responseFormat{Type: "json_schema", JSONSchema: map[string]any{"name": "ferro_plan", "strict": false, "schema": schema}}
+	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return "", err
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		o.BaseURL+"/chat/completions", bytes.NewReader(body))
+		strings.TrimRight(o.BaseURL, "/")+"/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
@@ -102,14 +118,14 @@ func (o *OpenAICompatible) Complete(ctx context.Context, system, user string) (s
 		httpReq.Header.Set("Authorization", "Bearer "+o.APIKey)
 	}
 
-	resp, err := o.client.Do(httpReq)
+	resp, err := client.Do(httpReq)
 	if err != nil {
 		return "", fmt.Errorf("llm: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	var cr chatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&cr); err != nil {
 		return "", fmt.Errorf("llm decode (http %d): %w", resp.StatusCode, err)
 	}
 	if cr.Error != nil {

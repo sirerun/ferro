@@ -162,6 +162,11 @@ func (b *Browser) Acquire(ctx context.Context) (core.BrowserContext, error) {
 	}
 	pc.busy = true
 	b.mu.Lock()
+	if b.closed {
+		b.mu.Unlock()
+		pc.cancel()
+		return nil, fmt.Errorf("browser closed during acquisition")
+	}
 	b.all[pc] = struct{}{}
 	b.mu.Unlock()
 	return &taskContext{pc: pc, b: b, maxElements: b.cfg.MaxElements}, nil

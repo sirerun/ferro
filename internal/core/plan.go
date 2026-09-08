@@ -7,6 +7,7 @@ package core
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // ActionKind enumerates the action set v0.1 supports.
@@ -130,8 +131,19 @@ func validateAction(a Action) error {
 		if len(a.Schema) == 0 && len(a.Fields) == 0 {
 			return fmt.Errorf("extract needs a schema or fields")
 		}
-		if len(a.Schema) > 0 && !json.Valid(a.Schema) {
-			return fmt.Errorf("extract schema is not valid JSON")
+		for field, sel := range a.Fields {
+			if strings.TrimSpace(sel) == "" {
+				return fmt.Errorf("extract field %q has empty selector", field)
+			}
+		}
+		if len(a.Schema) > 0 {
+			var schema map[string]any
+			if json.Unmarshal(a.Schema, &schema) != nil || schema == nil {
+				return fmt.Errorf("extract schema must be an object")
+			}
+			if err := checkSchema(schema, "$"); err != nil {
+				return err
+			}
 		}
 	case KindPlanAgain:
 		if a.Reason == "" {

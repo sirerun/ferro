@@ -38,6 +38,9 @@ func (x *Executor) resolveRef(ctx context.Context, ref int, kind string) (select
 	if x.cache != nil {
 		if sel, hit := x.cache.Get(key); hit {
 			if selectorMatches(ctx, sel, el) {
+				if x.metrics != nil {
+					x.metrics.CacheHits++
+				}
 				return sel, key, nil
 			}
 			// Signature matched but selector didn't — site changed under

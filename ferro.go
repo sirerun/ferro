@@ -31,6 +31,12 @@ type RunMetrics = core.RunMetrics
 // else.
 type LLMClient = core.LLMClient
 
+// SchemaCompleter optionally requests structured output from a model.
+type SchemaCompleter = core.SchemaCompleter
+
+// ErrPlanShape reports malformed planner or repair output.
+type ErrPlanShape = core.ErrPlanShape
+
 // OpenAICompatible talks to any /v1/chat/completions endpoint: OpenAI,
 // Ollama, vLLM, LM Studio, OpenRouter, and OpenAI-compatible gateways.
 type OpenAICompatible = llm.OpenAICompatible
@@ -79,7 +85,13 @@ type Option func(*runnerOptions)
 // WithMaxRepairs bounds how many single-step repairs the runner attempts
 // before giving up on a failed action. Default 2.
 func WithMaxRepairs(n int) Option {
-	return func(o *runnerOptions) { o.maxRepairs = n }
+	return func(o *runnerOptions) {
+		if n <= 0 {
+			o.maxRepairs = -1
+		} else {
+			o.maxRepairs = n
+		}
+	}
 }
 
 // WithResolutionCache attaches a persisted selector-resolution cache at
@@ -102,12 +114,12 @@ type Runner struct {
 
 // NewRunner builds a Runner backed by client, applying opts.
 func NewRunner(client LLMClient, opts ...Option) *Runner {
-	ro := &runnerOptions{}
+	ro := &runnerOptions{maxRepairs: 2, cache: core.NewResolutionCache("")}
 	for _, opt := range opts {
 		opt(ro)
 	}
 	r := &core.Runner{LLM: client}
-	if ro.maxRepairs > 0 {
+	if ro.maxRepairs != 0 {
 		r.MaxRepairs = ro.maxRepairs
 	}
 	if ro.cache != nil {
@@ -134,4 +146,16 @@ func Run(ctx context.Context, b *Browser, client LLMClient, t Task, opts ...Opti
 	}
 	defer bctx.Release()
 	return NewRunner(client, opts...).Run(ctx, bctx, t)
+}
+
+// RunOn executes on a caller-owned tab and never releases it. An empty StartURL
+// uses the current page. Runner.Run is an equivalent, backwards-compatible alias.
+func (r *Runner) RunOn(ctx context.Context, bctx BrowserContext, t Task) (any, RunMetrics, error) {
+	return r.Run(ctx, bctx, t)
+}
+
+// RunOn runs one task on a caller-owned tab. Reuse a Runner for in-memory replay
+// across tasks, or provide WithResolutionCache to persist across runners.
+func RunOn(ctx context.Context, bctx BrowserContext, client LLMClient, t Task, opts ...Option) (any, RunMetrics, error) {
+	return NewRunner(client, opts...).RunOn(ctx, bctx, t)
 }

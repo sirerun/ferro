@@ -1,38 +1,17 @@
 package core
 
-// File 9 (M4): the resolution cache.
-//
-// The core idea: when the executor resolves a ref to a selector that works,
-// remember it. Next time the same (site, element signature) appears, skip
-// any LLM involvement entirely and go straight to the cached selector —
-// with cheap re-validation, and invalidation driven by the error taxonomy
-// from repair.go.
-//
-// This is what turns ferro from "one LLM call per run" into "one LLM call
-// ever, per site pattern" — which is where the real token savings live for
-// repeated workflows.
-//
-// Design:
-//   - Key: (host, kind, signature) where signature is the element's
-//     stable-ish identity — tag + accessible name/text + a structural hint.
-//     Not the ref (positional, unstable — flagged as a footgun in the RFC).
-//   - Value: the selector that worked last time, plus metadata for trust.
-//   - Hit path: cache lookup → selector still matches exactly one visible
-//     element → execute. Zero LLM, zero replan.
-//   - Miss/invalid path: fall through to snapshot resolution (as in the
-//     base v0.1 executor); on success, store. On ErrStaleRef, delete the
-//     entry — the repair taxonomy is the invalidation signal.
-//   - Trust decay: a counter of consecutive successes. High-trust entries
-//     could relax re-validation strictness (not implemented in v0.1) —
-//     guards against a selector that "works" by matching the wrong element
-//     after a site redesign.
+// Selector and plan caches are shared across runs within one Runner. Persistence
+// uses a versioned envelope; cache files must have one process owner. No cached
+// plan containing a secret fill is retained.
 
 import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -70,15 +49,17 @@ type CacheEntry struct {
 // ResolutionCache maps (host, kind, signature) → working selector.
 // Safe for concurrent use; persists to a JSON file on change.
 type ResolutionCache struct {
-	mu    sync.RWMutex
-	data  map[CacheKey]*CacheEntry
-	path  string        // empty = memory only
-	ttl   time.Duration // default 30 days
-	dirty bool
+	mu        sync.RWMutex
+	data      map[CacheKey]*CacheEntry
+	path      string        // empty = memory only
+	ttl       time.Duration // default 30 days
+	dirty     bool
+	plans     map[string]replayEntry
+	loadError error
 }
 
 func NewResolutionCache(path string) *ResolutionCache {
-	return &ResolutionCache{data: map[CacheKey]*CacheEntry{}, path: path, ttl: 30 * 24 * time.Hour}
+	return &ResolutionCache{data: map[CacheKey]*CacheEntry{}, path: path, ttl: 30 * 24 * time.Hour, plans: map[string]replayEntry{}}
 }
 
 // Get returns the cached selector if present and unexpired.
@@ -105,7 +86,9 @@ func (c *ResolutionCache) Put(key CacheKey, selector string) {
 		c.data[key] = e
 	}
 	e.Selector = selector
-	e.Created = time.Now()
+	if e.Created.IsZero() {
+		e.Created = time.Now()
+	}
 	e.LastUsed = time.Now()
 	e.Successes++
 	c.dirty = true
@@ -119,106 +102,172 @@ func (c *ResolutionCache) Invalidate(key CacheKey) {
 	c.dirty = true
 }
 
-// Flush persists if dirty. Callers (the Browser pool) invoke this on
-// Release/Close; a crashed run loses at most one session of learning.
+// replayEntry stores a plan only after a successful execution. Plans containing
+// secret fills are never retained. The key includes the goal, schema, URL and
+// initial snapshot, so positional refs cannot silently bind to a changed page.
+type replayEntry struct {
+	Plan     Plan      `json:"plan"`
+	LastUsed time.Time `json:"last_used"`
+}
+type diskResolution struct {
+	Key   CacheKey   `json:"key"`
+	Entry CacheEntry `json:"entry"`
+}
+type diskCache struct {
+	Version     int                    `json:"version"`
+	Resolutions []diskResolution       `json:"resolutions"`
+	Plans       map[string]replayEntry `json:"plans"`
+}
+
+func replayID(t Task, s *Snapshot) string {
+	b, _ := json.Marshal(struct {
+		Key, Goal, URL string
+		Schema         json.RawMessage
+		Snapshot       *Snapshot
+	}{t.ReplayKey, t.Goal, t.StartURL, t.Schema, s})
+	return fmt.Sprintf("%x", sha256.Sum256(b))
+}
+func clonePlan(p Plan) *Plan {
+	b, err := json.Marshal(p)
+	if err != nil {
+		return nil
+	}
+	var copy Plan
+	if json.Unmarshal(b, &copy) != nil {
+		return nil
+	}
+	return &copy
+}
+func (c *ResolutionCache) getPlan(key string) *Plan {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	e, ok := c.plans[key]
+	if !ok || time.Since(e.LastUsed) > c.ttl || e.Plan.Validate() != nil {
+		return nil
+	}
+	return clonePlan(e.Plan)
+}
+func (c *ResolutionCache) putPlan(key string, p *Plan) {
+	if key == "" {
+		return
+	}
+	for _, a := range p.Steps {
+		if a.Secret || a.Kind == KindPlanAgain {
+			return
+		}
+	}
+	cp := clonePlan(*p)
+	if cp == nil {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.plans[key] = replayEntry{Plan: *cp, LastUsed: time.Now()}
+	c.dirty = true
+}
+func (c *ResolutionCache) deletePlan(key string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.plans, key)
+	c.dirty = true
+}
+
+// Flush atomically persists both caches. Runner calls this after every run,
+// including failures. One cache object/file should have one process owner.
 func (c *ResolutionCache) Flush() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !c.dirty || c.path == "" {
 		return nil
 	}
-	b, err := json.MarshalIndent(c.data, "", "  ")
+	disk := diskCache{Version: 1, Plans: map[string]replayEntry{}}
+	for k, v := range c.data {
+		if time.Since(v.LastUsed) <= c.ttl {
+			disk.Resolutions = append(disk.Resolutions, diskResolution{k, *v})
+		}
+	}
+	sort.Slice(disk.Resolutions, func(i, j int) bool { return fmt.Sprint(disk.Resolutions[i].Key) < fmt.Sprint(disk.Resolutions[j].Key) })
+	for k, v := range c.plans {
+		if time.Since(v.LastUsed) <= c.ttl {
+			disk.Plans[k] = v
+		}
+	}
+	b, err := json.MarshalIndent(disk, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode cache: %w", err)
+	}
+	if err = os.MkdirAll(filepath.Dir(c.path), 0700); err != nil {
+		return err
+	}
+	f, err := os.CreateTemp(filepath.Dir(c.path), ".ferro-cache-*")
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(c.path), 0o755); err != nil {
+	defer os.Remove(f.Name())
+	if _, err = f.Write(b); err != nil {
+		f.Close()
 		return err
 	}
-	tmp := c.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	if err = f.Sync(); err != nil {
+		f.Close()
 		return err
 	}
-	if err := os.Rename(tmp, c.path); err != nil {
+	if err = f.Close(); err != nil {
+		return err
+	}
+	if err = os.Rename(f.Name(), c.path); err != nil {
 		return err
 	}
 	c.dirty = false
 	return nil
 }
 
-// Load reads a persisted cache. A corrupt file starts empty — the cache is
-// an optimization; a run must never fail because of it.
+// Load starts empty on malformed or obsolete cache data; the warning is exposed
+// in RunMetrics.CacheErrors. It never partially installs a corrupt cache.
 func (c *ResolutionCache) Load() {
 	if c.path == "" {
 		return
 	}
-	b, err := os.ReadFile(c.path)
-	if err != nil {
-		return
-	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	_ = json.Unmarshal(b, &c.data) // best effort
+	b, err := os.ReadFile(c.path)
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		c.loadError = err
+		return
+	}
+	var disk diskCache
+	if err = json.Unmarshal(b, &disk); err != nil {
+		c.loadError = err
+		return
+	}
+	if disk.Version != 1 {
+		c.loadError = fmt.Errorf("unsupported cache version %d", disk.Version)
+		return
+	}
+	data := map[CacheKey]*CacheEntry{}
+	for _, v := range disk.Resolutions {
+		entry := v.Entry
+		data[v.Key] = &entry
+	}
+	c.data = data
+	c.plans = disk.Plans
+	if c.plans == nil {
+		c.plans = map[string]replayEntry{}
+	}
+	c.loadError = nil
 }
-
-// hostOf extracts the host portion of a page URL for use in a CacheKey.
+func (c *ResolutionCache) warning() error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.loadError
+}
 func hostOf(rawURL string) string {
-	// Minimal parse to avoid importing net/url just for Hostname(); a real
-	// build should just use url.Parse(rawURL).Hostname().
-	s := rawURL
-	if i := strings.Index(s, "://"); i >= 0 {
-		s = s[i+3:]
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
 	}
-	if i := strings.IndexAny(s, "/?#"); i >= 0 {
-		s = s[:i]
-	}
-	if i := strings.LastIndex(s, "@"); i >= 0 {
-		s = s[i+1:]
-	}
-	if i := strings.LastIndex(s, ":"); i >= 0 {
-		s = s[:i]
-	}
-	return s
+	return u.Hostname()
 }
-
-/*
-Open issues, flagged rather than silently resolved (see WORKPLAN.md §5):
-
-  - Signature collisions on generic elements. button "Submit" is identical
-    across many pages of the same host. Mitigation: fold a coarse structural
-    hint into the signature (nearest heading text, or form ancestor's
-    action) — cheap in the snapshot script, meaningful disambiguation. Add
-    an Element.Context field (nearest h1-h3 ancestor-scoped text) before
-    shipping this (kazi E2-T2 / E4-T5).
-
-  - Cache poisoning on false-positive matches. selectorMatches (in
-    locator.go) checks count==1 + visible + text similarity, which is
-    good but not proof the element is the right one. The Successes counter
-    mitigates (a wrong match usually fails at the next step, which
-    invalidates), but every cache-hit action should be logged at debug level
-    so misfires are diagnosable.
-
-  - Multi-user / multi-profile. The cache file is per-process. If the pool
-    ever runs distinct browser profiles (different logins), selectors for
-    personalized pages must be namespaced — CacheKey would gain a Profile
-    field. Not a v0.1 problem, but the JSON layout is a map so adding a
-    top-level dimension later isn't a migration.
-
-Token/latency payoff (informal):
-
-	Scenario                     v0.1 (no cache)        With cache, warm
-	First run of a task          1 plan call (~3k tok)  1 plan call
-	Repeat run, stable site      1 plan call (~3k tok)  0 LLM calls (see ReplayKey, Task.ReplayKey in runner.go)
-	Site redesigned              plan + up to 2 repairs plan + repairs (cache invalidated honestly)
-
-Resolution caching alone doesn't get repeat runs to zero LLM calls — the
-runner still calls the planner every Run. That's what Task.ReplayKey (see
-runner.go) is for: a stable key lets the runner persist the validated plan
-itself and skip the planner entirely on replay, relying on recordOutcome +
-the repairer to absorb drift. Worst case for a replay is the same
-1+MaxRepairs bound as a fresh run; best case is zero model contact:
-
-	Run(ReplayKey)
-	  -> plan cache hit? --yes--> execute with resolution cache --> all hit: 0 tokens
-	  |                              \-- miss: snapshot-resolve, learn selector
-	  \-- no --> plan (1 call) --> execute --> learn both caches for next time
-*/

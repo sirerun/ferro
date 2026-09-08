@@ -77,7 +77,11 @@ Rules:
 // fresh is a just-taken snapshot of the current page — both are needed for
 // the local fuzzy ref remap below.
 func (r *Runner) repairStep(ctx context.Context, rerr *RunError, orig, fresh *Snapshot, m *RunMetrics) (patched Action, ok bool, err error) {
-	failedJSON, err := json.Marshal(rerr.Action)
+	failed := rerr.Action
+	if failed.Secret {
+		failed.Text = "[REDACTED]"
+	}
+	failedJSON, err := json.Marshal(failed)
 	if err != nil {
 		return Action{}, false, err
 	}
@@ -96,20 +100,15 @@ func (r *Runner) repairStep(ctx context.Context, rerr *RunError, orig, fresh *Sn
 		return Action{}, false, err
 	}
 
-	plan, err := parsePlan(raw)
+	patched, err = parseAction(raw, true)
 	if err != nil {
-		// The repairer responds with a bare step, not a plan; parsePlan
-		// expects {"steps":[...]}. Wrap and retry once.
-		plan, err = parsePlan(`{"steps":[` + raw + `]}`)
-		if err != nil {
-			return Action{}, false, err
-		}
-	}
-	if len(plan.Steps) != 1 {
-		return Action{}, false, fmt.Errorf("repair returned %d steps, want 1", len(plan.Steps))
+		return Action{}, false, err
 	}
 
-	patched = plan.Steps[0]
+	if rerr.Action.Secret && patched.Kind == KindFill {
+		patched.Secret = true
+		patched.Text = rerr.Action.Text
+	}
 
 	// Model chose to abort — surface as a definitive no.
 	if patched.Kind == "abort" {

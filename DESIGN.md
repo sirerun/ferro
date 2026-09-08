@@ -98,26 +98,20 @@ was flagged in `WORKPLAN.md` as task E1-T7/E3-T1 ("Run result must expose a
 metrics struct") and now exists as part of the public API rather than a
 future addition.
 
-## Known sharp edges (carried over from WORKPLAN.md, not yet fully resolved)
+## Runtime hardening (2026-09-07)
 
-- `settle.go`: a navigation mid-`domSettle` can destroy the JS execution
-  context and surface as an error; it should instead be treated as
-  "settled" (navigation implies the DOM changed). Not yet fixed — tracked
-  as kazi task **E1-T3**.
-- `locator.go` / `buildSelector`: signature-based CSS selectors
-  (`button[aria-label="..."]`) can match multiple elements or drift on
-  dynamic text. Mitigated by routing failures to the repairer and, on
-  repeat runs, by the resolution cache — but not eliminated. See kazi
-  **E2-T1**-**E2-T3**.
-- The planner prompt has not been validated against a real small model —
-  whether a 7-14B local model reliably emits valid plans at temperature 0
-  is the core, still-untested bet of the design. See `integration/` and
-  kazi **E5**.
+Plan replay and selector persistence now share a versioned, atomically written
+cache. The Runner creates per-run executor state and flushes the shared cache
+on every exit. See README's replay/extraction contract and ADR 003 for boundaries.
 
-## Status
+Schema extraction uses a typed control transfer from executor to runner; the
+executor still makes zero model calls. The runner validates extracted JSON before
+resuming, validates Task.Schema on completion, and reports real cache/repair metrics.
 
-Design sketch turned into a compiling, restructured Go module — not yet a
-verified build against real Chrome/LLM traffic. `go build ./...`,
-`go vet ./...`, and `go test ./...` are green; the browser- and
-model-gated suites (`FERRO_TEST_BROWSER=1`, `-tags=integration`) still need
-a real run to validate, per `WORKPLAN.md`'s Definition of Done.
+Planner shape validation, one correction retry, bare-action repair parsing,
+caller-owned RunOn APIs, and per-field extraction recovery are implemented.
+
+Remaining limitations: semantic selector collisions; no hard tab-count limit;
+no cross-process cache-file locking; real-model validity/latency benchmarks remain
+separate from the deterministic Chrome fixture suite. The old chromedp/CDP versions
+can log unknown modern Chrome event-enum values during fixture tests.

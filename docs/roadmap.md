@@ -1,5 +1,19 @@
 # Roadmap
 
+## Runtime hardening — 2026-09-07
+- Implemented on `fix/runtime-completeness`: successful-plan replay; versioned,
+  atomic selector/plan persistence with automatic flush and error metrics;
+  schema extraction and final-result validation; typed planner shape errors and
+  one correction retry; bare-action repair; partial/ref extraction; RunOn;
+  cancellation and concurrent-run isolation.
+- Verified: default race suite ran 12 top-level tests and skipped 12 browser tests;
+  Chrome-enabled race suite ran all 24 top-level tests, with zero failures/skips.
+  `go vet ./...` and `go build ./...` passed. All browser traffic used localhost
+  fixture pages and deterministic model replies; no live-model benchmark claimed.
+- Original runtime regressions were reproduced before implementation: cache
+  serialization, plan replay, schema structuring, partial extraction, bare repair,
+  and planner envelope rejection.
+
 ## Shipped
 - Compiling module with core, browser pool, OpenAI-compatible client, resolution cache, examples, integration suite skeleton (uncommitted as of 2026 09 04).
 
