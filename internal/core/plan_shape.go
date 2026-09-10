@@ -25,6 +25,10 @@ var actionFields = map[ActionKind][]string{
 	KindPlanAgain: {"reason"}, KindDone: {"result"},
 }
 
+// PlanSchema returns the JSON schema constraining planner and repair output,
+// for callers that want to inspect it or pass it to their own SchemaCompleter.
+func PlanSchema() json.RawMessage { return planSchema() }
+
 // planSchema is generated from the same field vocabulary the local validator uses.
 // Local action validation adds required-field and kind-specific checks.
 func planSchema() json.RawMessage {

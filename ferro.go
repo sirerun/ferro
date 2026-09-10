@@ -11,6 +11,7 @@ package ferro
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/dndungu/ferro/internal/browser"
@@ -36,6 +37,13 @@ type SchemaCompleter = core.SchemaCompleter
 
 // ErrPlanShape reports malformed planner or repair output.
 type ErrPlanShape = core.ErrPlanShape
+
+// PlanSchema returns the JSON schema ferro uses to constrain planner and
+// repair output. Useful for callers that want to inspect it or hand it to
+// their own SchemaCompleter implementation.
+func PlanSchema() json.RawMessage {
+	return core.PlanSchema()
+}
 
 // OpenAICompatible talks to any /v1/chat/completions endpoint: OpenAI,
 // Ollama, vLLM, LM Studio, OpenRouter, and OpenAI-compatible gateways.

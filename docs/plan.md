@@ -288,12 +288,11 @@ fidelity: executable
 ### E9 Schema-validated planner output (ADR 002)
 fidelity: executable
 
-- [ ] **T9.1** Export `PlanSchema()` from the `ferro` package. (2026 09 10:
-  NOT done -- an unexported `planSchema()` exists and is used internally by
-  `runner.go:222`, but there is no exported accessor. A caller (including
-  `cmd/ferro-mcp`, which does not currently need this) cannot introspect
-  the plan schema today. Genuinely open; low priority since nothing
-  consumes it yet.)
+- [x] **T9.1** Export `PlanSchema()` from the `ferro` package. (2026 09 10:
+  shipped -- `internal/core/plan_shape.go` gained an exported
+  `core.PlanSchema()` wrapping the existing unexported `planSchema()`, and
+  `ferro.go` adds `ferro.PlanSchema()` as a thin wrapper over it, same
+  pattern as the other public accessors in that file.)
   verifies: [UC-005]
   acc: [`go doc github.com/dndungu/ferro PlanSchema` prints a func signature returning the plan JSON schema]
 - [x] **T9.2** Hand-rolled shape validator rejecting envelope drift. (2026
