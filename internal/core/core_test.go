@@ -1,6 +1,9 @@
 package core
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // TestPlanValidation is a pure unit test, no browser required.
 func TestPlanValidation(t *testing.T) {
@@ -28,6 +31,28 @@ func TestPlanValidation(t *testing.T) {
 		if err := tc.p.Validate(); err == nil {
 			t.Errorf("%s: expected error", tc.name)
 		}
+	}
+}
+
+// TestExecuteOne_RejectsControlSignals is a pure unit test (no browser):
+// ExecuteOne is the entrypoint MCP primitive tools drive a single step
+// through outside a full Plan, and done/plan_again are meaningless there.
+func TestExecuteOne_RejectsControlSignals(t *testing.T) {
+	x := NewExecutor(WaitStrategy{})
+	for _, kind := range []ActionKind{KindDone, KindPlanAgain} {
+		if _, err := x.ExecuteOne(context.Background(), nil, Action{Kind: kind}, map[string]any{}); err == nil {
+			t.Errorf("ExecuteOne(%s) succeeded, want rejected as a control signal", kind)
+		}
+	}
+}
+
+// TestExecuteOne_ValidatesAction rejects a malformed action (missing
+// required fields) the same way Plan.Validate would, before ever touching
+// the browser.
+func TestExecuteOne_ValidatesAction(t *testing.T) {
+	x := NewExecutor(WaitStrategy{})
+	if _, err := x.ExecuteOne(context.Background(), nil, Action{Kind: KindClick}, map[string]any{}); err == nil {
+		t.Error("ExecuteOne(click with no ref) succeeded, want validation error")
 	}
 }
 

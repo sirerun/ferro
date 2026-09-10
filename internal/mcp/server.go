@@ -17,6 +17,7 @@ import (
 func NewServer(c caller) *sdk.Server {
 	server := sdk.NewServer(&sdk.Implementation{Name: "ferro-mcp", Version: "0.1.0"}, nil)
 	registerRunTaskTool(server, c)
+	registerPrimitiveTools(server, c)
 	return server
 }
 

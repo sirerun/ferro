@@ -76,3 +76,62 @@ func TestDoFill_EmptyTextarea(t *testing.T) {
 		t.Errorf("textarea value = %q, want %q", value, "hello from ferro")
 	}
 }
+
+// TestExecuteOne_ClickAgainstSnapshot exercises ExecuteOne end to end
+// against a real page: navigate, snapshot, then a single click driven
+// through ExecuteOne rather than a full Plan -- this is exactly how
+// internal/mcp's primitive click/fill/select/extract tools call the
+// executor (T11.4).
+func TestExecuteOne_ClickAgainstSnapshot(t *testing.T) {
+	if os.Getenv("FERRO_TEST_BROWSER") == "" {
+		t.Skip("browser tests disabled")
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`<!doctype html><html><body>
+			<button id="go" onclick="document.title='clicked'">Go</button>
+			</body></html>`))
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	allocCtx, cancelAlloc := chromedp.NewExecAllocator(context.Background(),
+		append(chromedp.DefaultExecAllocatorOptions[:], chromedp.Flag("headless", true))...)
+	defer cancelAlloc()
+	ctx, cancelCtx := chromedp.NewContext(allocCtx)
+	defer cancelCtx()
+
+	tctx, cancelTimeout := context.WithTimeout(ctx, 15*time.Second)
+	defer cancelTimeout()
+	if err := chromedp.Run(tctx, chromedp.Navigate(srv.URL)); err != nil {
+		t.Fatal(err)
+	}
+
+	snap, err := TakeSnapshot(ctx, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ref int
+	for _, e := range snap.Elements {
+		if e.Tag == "button" {
+			ref = e.Ref
+		}
+	}
+	if ref == 0 {
+		t.Fatalf("button not found in snapshot: %s", snap.Render())
+	}
+
+	x := NewExecutor(WaitStrategy{})
+	if _, err := x.ExecuteOne(ctx, snap, Action{Kind: KindClick, Ref: ref}, map[string]any{}); err != nil {
+		t.Fatalf("ExecuteOne click failed: %v", err)
+	}
+
+	var title string
+	if err := chromedp.Run(ctx, chromedp.Title(&title)); err != nil {
+		t.Fatal(err)
+	}
+	if title != "clicked" {
+		t.Errorf("title = %q, want %q", title, "clicked")
+	}
+}
