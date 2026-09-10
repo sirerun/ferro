@@ -12,7 +12,26 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	fmcp "github.com/dndungu/ferro/internal/mcp"
 )
+
+// shortTempDir returns a fresh, empty directory suitable for $FERRO_MCP_HOME.
+// t.TempDir() nests under Go's per-test temp path (e.g.
+// /var/folders/.../T/TestName.../NNN on macOS), which routinely exceeds the
+// ~104-byte sun_path limit for Unix domain sockets -- mcp.sock lives
+// directly under $FERRO_MCP_HOME (ADR 004), so a long Home breaks the
+// listen() call outright ("bind: invalid argument"). /tmp is short on every
+// platform this runs on.
+func shortTempDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "fmcp-")
+	if err != nil {
+		t.Fatalf("create short temp dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
 
 // buildFerroMCP compiles the ferro-mcp binary into a temp dir and returns its
 // path. Building the real binary (rather than testing package internals) is
@@ -86,17 +105,25 @@ func TestFerroMCP_ListToolsAndRunTask(t *testing.T) {
 	]}`)
 
 	cmd := exec.Command(bin)
+	cmd.Stderr = os.Stderr
 	cmd.Env = append(os.Environ(),
 		"FERRO_MCP_LLM_BASE_URL="+llm.URL,
 		"FERRO_MCP_LLM_MODEL=fake",
-		"FERRO_MCP_CHROME_USER_DATA_DIR="+filepath.Join(t.TempDir(), "chrome-profile"),
+		// A fresh, empty $FERRO_MCP_HOME per test run: never the operator's
+		// real ~/.ferro-mcp (that holds the actual signed-in profile plus a
+		// possibly-live daemon lock/socket this test must not touch).
+		"FERRO_MCP_HOME="+shortTempDir(t),
 		"FERRO_MCP_HEADLESS=true",
 	)
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "ferro-mcp-test", Version: "0.0.0"}, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	cs, err := client.Connect(ctx, &mcp.CommandTransport{Command: cmd}, nil)
+	// This process always wins leader election (it's the only ferro-mcp
+	// process for this $FERRO_MCP_HOME), so per T11.6 it will not exit on
+	// its own stdio EOF -- it waits for the SDK's SIGTERM fallback on
+	// Close. Shorten that fallback so the test doesn't pay the 5s default.
+	cs, err := client.Connect(ctx, &mcp.CommandTransport{Command: cmd, TerminateDuration: 200 * time.Millisecond}, nil)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -132,7 +159,7 @@ func TestFerroMCP_ListToolsAndRunTask(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("run_task returned an error result: %+v", res.Content)
 	}
-	var out runTaskOutput
+	var out fmcp.RunTaskOutput
 	text, ok := res.Content[0].(*mcp.TextContent)
 	if !ok {
 		t.Fatalf("run_task result content is not text: %+v", res.Content)
