@@ -115,3 +115,36 @@ Remaining limitations: semantic selector collisions; no hard tab-count limit;
 no cross-process cache-file locking; real-model validity/latency benchmarks remain
 separate from the deterministic Chrome fixture suite. The old chromedp/CDP versions
 can log unknown modern Chrome event-enum values during fixture tests.
+
+## Context lifetime
+
+Two separate dogfood defects (bugs #1 and #7, 2026-09-04) shared one root
+cause: a chromedp context was wrapped (`context.WithTimeout`,
+`context.WithCancel`) and the wrapper was passed to the *first*
+`chromedp.Run` call on a tab. chromedp starts the tab's CDP
+event-listener goroutine on that first Run and binds it to whichever
+context it was given — cancelling the wrapper later, even after a
+successful call, tears the whole session down, and every subsequent Run on
+that tab fails with "invalid context" or "context canceled". The failure
+surfaces far from the cause (a later, unrelated action), so this is a
+landmine for the next contributor, not a one-off bug.
+
+The rule: the bare tab context (`pooledContext.cdpCtx` in
+`internal/browser/browser.go`) is the only context ever passed to the
+*first* `chromedp.Run` on a tab; `newTab` enforces its launch deadline with
+a `select` on a goroutine rather than a `WithTimeout` wrapper for exactly
+this reason. After launch, callers may derive short-lived children from
+that context for individual actions. Snapshot and executor code must
+receive `BrowserContext.CDP()` (or a context derived from it) — never a
+caller's unrelated `ctx` — which is why `internal/core/executor.go`
+documents this on the `CDP()` method itself and `internal/core/runner.go`'s
+call sites point back to it instead of re-explaining the landmine each
+time.
+
+This convention is written down in three places so a grep for any one of
+them finds the others: `docs/adr/001-chromedp-context-lifetime.md`, the
+package doc in `internal/browser/browser.go`, and this section. Any new
+call site that wraps a CDP context should cite the ADR in its own comment.
+`cmd/ferro-mcp`'s daemon (ADR 004) holds the tab pool open for the life of
+the process, which is exactly the shape of long-lived-tab surface area
+this landmine bites hardest.
