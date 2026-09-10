@@ -352,13 +352,14 @@ fidelity: executable
   re-explaining the landmine each time.)
   verifies: [UC-006]
   acc: [`grep -c "adr/001" internal/browser/browser.go internal/core/executor.go` reports at least 1 in each]
-- [ ] **T10.2** Add a "Context lifetime" section to `DESIGN.md` under
+- [x] **T10.2** Add a "Context lifetime" section to `DESIGN.md` under
   "Known sharp edges", and move the resolved items there (settle fix,
   RunMetrics) out of "not yet resolved" since they shipped. (2026 09 10:
-  NOT done -- `grep -n "Context lifetime" DESIGN.md` has no match. Note:
-  `DESIGN.md`'s current "Known sharp edges" heading is actually titled
-  "Runtime hardening (2026-09-07)"; this task should either rename that
-  section or add the new one alongside it -- resolve at pickup.)
+  shipped as a new top-level `## Context lifetime` section immediately
+  after "Runtime hardening (2026-09-07)" -- resolved at pickup by adding
+  alongside rather than renaming, per the note above; "Runtime hardening"
+  already lists the settle fix and RunMetrics as shipped in its own body,
+  so there was nothing further to move out of a "not yet resolved" list.)
   verifies: [UC-006]
   acc: [`grep -n "Context lifetime" DESIGN.md` matches]
 - [ ] **T10.3** Regression test: wrap `cdpCtx` in `WithTimeout`, cancel it
