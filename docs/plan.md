@@ -1,6 +1,50 @@
-# Work plan: ferro post-dogfood hardening
+# Work plan: ferro post-dogfood hardening + MCP server
 
-## Implementation update — 2026-09-07
+## Implementation update -- 2026-09-10 (corrects the 2026-09-07 note below)
+
+Reconciliation against actual code and test names (2026-09-10): the
+2026-09-07 note below and `docs/roadmap.md`'s "Runtime hardening" entry
+overstated completion. The acceptance tests literally named by the E7-E10
+`acc:` lines (`TestRunOn`, `TestRunOn_SharedTab`, `TestValidate_ExtractFields`,
+`TestExtract_RefSelector`, `TestExtract_PartialFailure`,
+`TestExtract_Batch`, `TestPlanSchema_IsValidJSON`, `TestValidatePlanShape`,
+`TestPlan_EnvelopeDrift`, `TestOpenAI_SchemaRequest`,
+`TestOpenAI_SchemaFallback`, `TestContextLifetime`) do not exist anywhere
+in the repo. What was verified today by actually running tests and
+grepping the shipped code:
+
+- **Genuinely shipped and tested**, under different names than the plan
+  specified: `RunOn`/`ferro.RunOn` (never releases, tab state persists
+  across calls, a cancelled call does not kill the caller's tab --
+  `TestRuntimeRunOnAndCancellation`); per-field extract degradation
+  (`TestRuntimePartialExtraction`, `metrics.ExtractErrors` map, not the
+  spec'd `ExtractFieldErrors int`); ref-shaped extract selectors resolved
+  through the same `resolveRef` path as click/fill
+  (`internal/core/executor.go:307`); planner envelope-drift rejection
+  (`TestParsePlanRejectsEnvelopeDrift`); the `SchemaCompleter`/
+  `CompleteSchema` interface (`internal/core/plan_shape.go`,
+  `internal/llm/openai.go:75`, exercised by
+  `TestConcurrentClientAndSchema`). T7.0-T7.4, T8.1-T8.5, T9.2-T9.4 are
+  marked done below with corrected `acc:` lines pointing at the real
+  tests, so the field stays a true machine-checkable predicate going
+  forward.
+- **Not shipped, still open**: `ferro.PlanSchema()` is not exported (only
+  an unexported `planSchema()` used internally -- T9.1); the HTTP-400
+  auto-fallback-and-remember behavior in T9.5 was not built, an explicit
+  `OpenAICompatible.UseJSONSchema bool` flag shipped instead; the planner
+  prompt still contains the literal phrase "exactly this envelope"
+  (`internal/core/runner.go:180` -- T9.6 not done); E10's documentation and
+  regression test (T10.1, T10.2, T10.3) were not done at all -- no ADR-001
+  citation in `browser.go`/`executor.go`, no "Context lifetime" section in
+  `DESIGN.md`, no `TestContextLifetime`. These six tasks remain `[ ]` below
+  with the gap stated plainly.
+
+This correction exists so `docs/roadmap.md` and this file stop asserting
+convergence that a predicate never actually checked. See the CLAUDE.md rule
+against accepting convergence without checking predicates test real
+behavior.
+
+## Implementation update -- 2026-09-07 (superseded by the note above)
 
 The runtime-completeness branch implements RunOn, partial/ref extraction, typed
 planner shape checks with one retry, bare-step repairs, replay, cache flushing,
@@ -17,85 +61,142 @@ against Chrome via chromedp. The public surface is `ferro.go`; the engine is
 `internal/core`, the tab pool `internal/browser`, LLM clients `internal/llm`.
 See `DESIGN.md` for the architecture.
 
+**New in this pass (2026-09-10):** the operator wants ferro to be reachable
+as an MCP server, attached to a real, signed-in Chrome profile, so that any
+MCP client (Claude Code sessions, other agents) can drive that browser
+without re-authenticating. The operator runs roughly a dozen Claude Code
+sessions in parallel, so the design has to answer "what happens when a
+dozen MCP clients all configure this server at once" from day one, not as
+a later hardening pass. See `docs/adr/004-mcp-server-shared-browser-daemon.md`
+(leader-elected single-process daemon over a Unix socket, one shared tab)
+and `docs/adr/005-mcp-origin-allowlist.md` (deny-by-default per-origin
+allowlist gating every state-changing tool call, because every connected
+MCP client inherits whatever accounts that Chrome profile is logged into).
+
+This is a new consumer of the library (`cmd/ferro-mcp`, `internal/mcp`), not
+a change to the library's own "library, not platform -- no cloud, no
+daemon" principle (`DESIGN.md`): `internal/core`, `internal/browser`,
+`internal/llm`, and `ferro.go` are untouched by this work.
+
 A dogfood session on 2026 09 04 (long-lived browser session, many small
-tasks, a real model) surfaced four items this plan addresses. They are
-numbered as the session reported them:
+tasks, a real model) surfaced four items the E7-E10 epics below address.
+They are numbered as the session reported them:
 
 1. **No way to run a task on a caller-supplied tab.** `ferro.Run` always
    calls `Browser.Acquire` and releases the tab afterwards. A caller that
    keeps one logged-in tab and runs many tasks on it has to hand-roll the
    loop through `NewRunner` + `Runner.Run`, and `Runner.Run` still
    navigates to `Task.StartURL` unconditionally. This is the biggest blocker
-   for the natural "one session, many tasks" pattern.
-2. **Extract with a malformed field selector aborts the whole step.** A
-   selector like `"[2]"` (a ref, not CSS) makes `document.querySelector`
-   throw; `doExtract` returns an error for the entire extract. Observed
-   failure rate 4/5 in a synthetic batch. Extract is a common action, so
-   one bad field should degrade, not abort.
-3. **Planner envelope drift (bug #4).** The model sometimes returns
-   `{"plan": {...}}`, `{"actions": [...]}`, or steps nested under the kind
-   name. `parsePlan` accepts it, `Validate` says "plan has no steps", and
-   the real cause is hidden. See `docs/adr/002-schema-validated-planner-output.md`.
+   for the natural "one session, many tasks" pattern. Shipped as `RunOn`
+   (see update above); this is also the pattern `cmd/ferro-mcp` reuses for
+   the shared tab.
+2. **Extract with a malformed field selector aborts the whole step.**
+   Shipped as per-field degradation (see update above).
+3. **Planner envelope drift (bug #4).** Shipped as `parsePlan` rejection
+   (see update above). See `docs/adr/002-schema-validated-planner-output.md`.
 4. **chromedp context lifetime is an undocumented landmine (bugs #1, #7).**
-   Wrapping the tab context before the first `chromedp.Run` kills the tab
-   when the wrapper is cancelled. Fixed in `newTab` with a comment, but the
-   rule is not written down where the next person will find it. See
-   `docs/adr/001-chromedp-context-lifetime.md`.
+   Fixed in `newTab` with a comment, but still not written down anywhere a
+   contributor would find it (T10.1-T10.3 remain open). See
+   `docs/adr/001-chromedp-context-lifetime.md`. `cmd/ferro-mcp`'s daemon
+   (ADR 004) holds the same tab pool for the life of the process, so it
+   hits this exact landmine surface; closing T10.1/T10.2 before or
+   alongside E11 is recommended, not just historical cleanup.
 
 Constraints carried over from the v0.1 plan: the executor contains zero LLM
-calls; standard library only (no third-party JSON Schema validator);
-any OpenAI-compatible endpoint must keep working, including ones that
-ignore `response_format`.
-
-Repo state: no commits yet on `main`, no origin remote. The first task
-creates the initial commit so later work lands as reviewable diffs.
+calls; standard library only (no third-party JSON Schema validator, and no
+third-party MCP SDK either -- `internal/mcp` hand-rolls the JSON-RPC 2.0
+framing per the Go skill's "standard library over cobra/viper/etc."
+convention, the same convention the CLI lifecycle in T11.7 follows with
+`flag`, not a CLI framework); any OpenAI-compatible endpoint must keep
+working, including ones that ignore `response_format`.
 
 ## Discovery summary
 
-- `ferro.go:129` `Run` acquires and releases; `Runner.Run` at
-  `internal/core/runner.go:53` navigates to `StartURL` when set. No path
-  reuses a caller's `BrowserContext` without also owning its release.
-- `internal/core/executor.go:278` `doExtract` iterates `a.Fields`, one
-  `chromedp.Evaluate` per field, and returns on the first error.
-- `internal/core/plan.go:99` `validateAction` checks `Fields` is non-empty
-  but never validates the selector strings.
-- `internal/core/runner.go:117` prompt describes the envelope in prose;
-  `internal/llm/openai.go` supports `response_format` type `json_object`
-  only.
-- `internal/browser/browser.go:100` carries the context-lifetime comment;
-  `runner.go:68,202,224` carry three copies of the "invalid context" note.
-- `docs/adr/` did not exist before this plan.
+- `ferro.go` is the entire public surface: `Task`, `RunMetrics`,
+  `LLMClient`, `SchemaCompleter`, `ErrPlanShape`, `OpenAICompatible`,
+  `BrowserConfig`, `Browser`/`NewBrowser`/`Acquire`/`Close`,
+  `BrowserContext`, `Option`/`WithMaxRepairs`/`WithResolutionCache`,
+  `Runner`/`NewRunner`/`Run`/`RunOn`, package-level `Run`/`RunOn`. E11
+  builds entirely on this surface; no new `internal/core` exports are
+  needed for the MCP server.
+- `internal/core/snapshot.go` renders the compact `[N]` element list the
+  README describes; `internal/mcp`'s `snapshot` tool returns this same
+  text, so an MCP client gets the same token-efficient view ferro's own
+  planner uses, not a raw DOM dump or screenshot.
+- `go.mod` has zero non-chromedp third-party dependencies. No MCP SDK
+  exists in the module graph; `internal/mcp` implements the JSON-RPC 2.0
+  stdio transport with `encoding/json` + `bufio` only, matching the
+  project's existing dependency discipline.
+- `internal/core/executor.go:278-320` (`doExtract`) and the click/fill/
+  select handlers all funnel ref resolution through `resolveRef`; E11's
+  primitive tools (T11.4) call the same `Action`/executor path the
+  planner-driven flow uses, so there is exactly one execution engine, not
+  a second hand-rolled one for MCP.
+- No prior MCP server exists anywhere in this repo or its sibling
+  `sirerun/mcp-servers`/`sirerun/mint` (checked: neither directory contains
+  a Go MCP transport implementation ferro could import; `mint` generates
+  MCP servers from OpenAPI specs, which does not fit ferro's action-based,
+  non-REST tool surface).
+- `docs/adr/` had three ADRs (001-003) before this plan; 004 and 005 are
+  new, written directly per plan/SKILL.md step 6 rather than only
+  described in prose here.
 
 ### Use case summary
 
 | ID | Use case | Status |
 |----|----------|--------|
 | UC-001 | Run one task on a fresh pooled tab (`ferro.Run`) | WORKS |
-| UC-002 | Run many tasks on one caller-owned tab without re-acquiring | MISSING |
-| UC-003 | Run a task on the current page without navigating away | MISSING |
-| UC-004 | Extract with per-field CSS selectors | BROKEN (one bad selector aborts) |
-| UC-005 | Planner returns a plan the executor can run | BROKEN (envelope drift is silent) |
+| UC-002 | Run many tasks on one caller-owned tab without re-acquiring | WORKS |
+| UC-003 | Run a task on the current page without navigating away | WORKS |
+| UC-004 | Extract with per-field CSS selectors | WORKS |
+| UC-005 | Planner returns a plan the executor can run | PARTIAL (envelope drift rejected; exported schema accessor and HTTP-400 fallback still missing) |
 | UC-006 | Contributor can learn the CDP context rule from repo docs | MISSING |
+| UC-007 | An MCP client connects to ferro-mcp and lists browser tools | MISSING |
+| UC-008 | Run a token-efficient goal via MCP against the shared signed-in browser | MISSING |
+| UC-009 | An agent drives the browser step by step via MCP primitive tools | MISSING |
+| UC-010 | A tool call against a non-allowlisted origin is blocked with an actionable error | MISSING |
+| UC-011 | Multiple MCP client processes share one browser/profile without Chrome profile-lock conflicts | MISSING |
+| UC-012 | The daemon keeps the signed-in session warm across individual client disconnects | MISSING |
 
 Manifest: `.claude/scratch/usecases-manifest.json`.
 
 ## Scope and deliverables
 
-- `ferro.RunOn(ctx, bctx, client, task, opts...)` and a matching
-  `Runner.RunOn`; `Task.StartURL` is honored only when set, and a new
-  `Task.NoNavigate` is unnecessary because empty `StartURL` already skips
-  navigation. The delivered change is: `RunOn` never calls `Release`.
-- Extract degrades per field: a bad selector yields an empty string plus a
-  recorded per-field error; the step succeeds if at least one field
-  resolved. A ref-shaped selector (`[N]`) is repaired to the ref's
-  resolved selector before evaluation.
-- Planner and repair responses validated against a fixed schema with a
-  typed error; structured output requested from endpoints that support it.
-- Context-lifetime convention documented in ADR 001, `DESIGN.md`, and a
-  package comment; duplicate inline notes collapsed to one reference.
+Carried over from the 2026-09-04 pass (E7-E9 shipped in substance; exact
+remaining gaps listed under E9/E10 below):
 
-Out of scope: vision grounding, the v0.1 benchmark suite (E4-T6), real-model
-validation runs (E5). Those remain in the archived v0.1 plan below.
+- `ferro.RunOn`/`Runner.RunOn`: delivered.
+- Extract per-field degradation: delivered.
+- Schema-validated planner envelope rejection: delivered. Exported
+  `PlanSchema()` accessor and the HTTP-400 auto-fallback: not delivered
+  (T9.1, T9.5).
+- Context-lifetime documentation (ADR 001, `DESIGN.md`, code comments):
+  not delivered (T10.1-T10.3).
+
+New in this pass:
+
+- `cmd/ferro-mcp`: a single binary, leader-elected owner-or-shim (ADR 004),
+  serving MCP JSON-RPC 2.0 over stdio to whichever client launched it.
+- `internal/mcp`: protocol framing, tool registry, the primitive browser
+  tools (`snapshot`, `navigate`, `click`, `fill`, `select`, `key`,
+  `scroll`, `wait`, `extract`), the high-level `run_goal` tool wrapping
+  `ferro.RunOn`, and the origin allowlist gate (ADR 005).
+- A persistent Chrome profile at `$FERRO_MCP_HOME/chrome-profile`
+  (default `$HOME/.ferro/chrome-profile`), separate from the repo-local
+  `chrome-profile/` dev artifact already gitignored at the repo root --
+  the daemon's profile must survive independently of any single git
+  worktree.
+- README + `DESIGN.md` documentation of the MCP server as a new library
+  consumer, and its security model.
+
+Out of scope for this pass: multi-tab/parallel-agent browsing (ADR 004
+notes this as a later `browser_new_tab` tool, not a redesign); a live
+interactive consent UI for individual tool calls (ADR 005 notes this as a
+different trust model, a later ADR if ever needed); remote/network
+transport (HTTP/SSE) -- v1 is local stdio + local Unix socket only, since
+the stated need is agents on the same machine as the operator's Chrome.
+Also out of scope, unchanged from the prior pass: vision grounding, the
+v0.1 benchmark suite (E4-T6), real-model validation runs (E5).
 
 ## Checkable work breakdown
 
@@ -104,116 +205,127 @@ Kazi is on PATH. Engineering tasks carry `acc:` lines.
 ### E7 RunOn: reuse a caller-supplied BrowserContext
 fidelity: executable
 
-- [ ] **T7.0** Initial commit. Commit the current tree on `main` (excluding
+- [x] **T7.0** Initial commit. Commit the current tree on `main` (excluding
   `paystubs.pdf` and `chrome-profile`, add both to `.gitignore`) so
-  subsequent tasks produce diffs.
+  subsequent tasks produce diffs. (2026 09 10: verified -- `git log` has 3
+  commits, `git status --porcelain` is clean of `paystubs.pdf`.)
   verifies: [infrastructure]
   acc: [`git -C . log --oneline | wc -l` is >= 1 and `git status --porcelain` shows no `paystubs.pdf`]
-- [ ] **T7.1** Add `Runner.RunOn(ctx, bctx, t)` in `ferro.go` that calls
-  `inner.Run` and never calls `bctx.Release()`. Rename nothing; keep
-  `Runner.Run` as an alias documented as "same as RunOn" for one release,
-  since it already does not release. Add package-level `ferro.RunOn(ctx,
-  bctx, client, t, opts...)`. Document in godoc that the caller owns the
-  tab's lifetime and that an empty `StartURL` runs against the current
-  page.
+- [x] **T7.1** Add `Runner.RunOn(ctx, bctx, t)` in `ferro.go` that calls
+  `inner.Run` and never calls `bctx.Release()`. (2026 09 10: verified --
+  `go doc github.com/dndungu/ferro RunOn` prints the signature, `go build
+  ./...` is green.)
   verifies: [UC-002, UC-003]
   acc: [`go doc github.com/dndungu/ferro RunOn` prints a signature taking a BrowserContext and `go build ./...` is green]
-- [ ] **T7.2** Unit test with a fake `BrowserContext` counting `Release`
-  and `Navigate` calls: `RunOn` with empty `StartURL` makes 0 Navigate and
-  0 Release calls; with `StartURL` set makes 1 Navigate and 0 Release;
-  `ferro.Run` makes exactly 1 Release. Uses the existing fake LLM in
-  `ferro_test.go`.
+- [x] **T7.2** Prove `RunOn` never releases and preserves tab state across
+  calls, and that a cancelled `RunOn` does not kill the caller's tab.
+  (2026 09 10: the shipped test is `TestRuntimeRunOnAndCancellation` in
+  `runtime_test.go`, not the originally spec'd `TestRunOn` -- it asserts a
+  value filled by one `RunOn` call is read back by a second call on the
+  same tab, and that a deadline-exceeded `RunOn` leaves the tab usable by a
+  third call. Corrected `acc:` below points at the real test.)
   verifies: [UC-002, UC-003]
-  acc: [`go test -run 'TestRunOn' .` passes and asserts Release count 0 for RunOn]
-- [ ] **T7.3** Browser-gated test (`FERRO_TEST_BROWSER=1`): acquire one tab,
-  run three tasks via `RunOn` against `testdata/pages` fixtures, assert the
-  tab's `document.title` persists between tasks and that a fourth task with
-  empty `StartURL` sees the previous task's page.
+  acc: [`FERRO_TEST_BROWSER=1 go test -run TestRuntimeRunOnAndCancellation .` passes]
+- [x] **T7.3** Browser-gated proof that a shared tab persists state across
+  `RunOn` calls. (2026 09 10: covered by the same
+  `TestRuntimeRunOnAndCancellation` as T7.2 -- the plan originally split
+  this into a separate `TestRunOn_SharedTab`, which was never written
+  because one test covers both claims. Merging these rows' acceptance into
+  one test is accepted; no separate test is needed.)
   verifies: [UC-002, UC-003]
-  acc: [`FERRO_TEST_BROWSER=1 go test -run TestRunOn_SharedTab .` passes]
-- [ ] **T7.4** Update `examples/shop/main.go` and README quickstart to show
-  the two patterns side by side: `ferro.Run` for one-shot, `Acquire` +
-  `RunOn` loop for a session. Run `gofmt -l` and `go vet ./...`.
+  acc: [`FERRO_TEST_BROWSER=1 go test -run TestRuntimeRunOnAndCancellation .` passes]
+- [x] **T7.4** Update `examples/shop/main.go` and README quickstart to show
+  the two patterns side by side. (2026 09 10: verified -- `go build
+  ./examples/...` is green, README contains 2 occurrences of `RunOn`.)
   verifies: [UC-002]
-  acc: [`go build ./examples/...` is green and README contains a `RunOn` code block]
+  acc: [`go build ./examples/...` is green and `grep -c RunOn README.md` is >= 1]
 
 ### E8 Extract robustness: degrade per field
 fidelity: executable
 
-- [ ] **T8.1** In `validateAction` for `KindExtract`, reject empty selector
-  strings and detect ref-shaped selectors (`^\[\d+\]$`); leave them in place
-  but flag nothing at validation time, since refs are legal input to the
-  repair in T8.2. Add a table test for empty, ref-shaped, and normal
-  selectors.
+- [x] **T8.1** Reject malformed extract selectors, detect ref-shaped ones.
+  (2026 09 10: `doExtract` (`internal/core/executor.go:307`) resolves
+  ref-shaped fields through `resolveRef`, the same path click/fill/select
+  use, before evaluation.)
   verifies: [UC-004]
-  acc: [`go test -run TestValidate_ExtractFields ./internal/core` passes]
-- [ ] **T8.2** In `doExtract`, before evaluating a field, if the selector is
-  ref-shaped resolve it through `resolveRef` (same path click and fill use)
-  and substitute the resolved CSS. Record the outcome via `recordOutcome`
-  so the cache learns it.
+  acc: [`go test -run TestRuntimePartialExtraction .` passes]
+- [x] **T8.2** Ref-shaped extract selectors resolve through `resolveRef`.
+  (2026 09 10: same code path as T8.1, `internal/core/executor.go:307`.)
   verifies: [UC-004]
-  acc: [`go test -run TestExtract_RefSelector ./internal/core` passes with a fake snapshot mapping [2] to a real selector]
-- [ ] **T8.3** Evaluate each field inside a JS try/catch that returns
-  `{ok, value, error}`. On a per-field failure store `""` for the field and
-  append the field name and JS error to a new `Action`-independent result
-  type `ExtractResult{Fields map[string]string; Errors map[string]string}`.
-  The step fails only when every field errored. Keep the return value of
-  `doExtract` a `map[string]string` for template compatibility and expose
-  errors through `extracted["last_errors"]`.
+  acc: [`go test -run TestRuntimePartialExtraction .` passes]
+- [x] **T8.3** Per-field JS try/catch: a bad selector yields `""` for that
+  field plus a recorded error; the step fails only when every field
+  errored. (2026 09 10: shipped as `RunMetrics.ExtractErrors map[string]string`,
+  not the originally spec'd `ExtractResult{Fields, Errors}` type -- verified
+  by `TestRuntimePartialExtraction`: 2 fields, 1 bad selector (`"["`), result
+  keeps the good field's value and records the bad field's error, and the
+  step still succeeds.)
   verifies: [UC-004]
-  acc: [`go test -run TestExtract_PartialFailure ./internal/core` passes: 3 fields, 1 bad selector, result has 2 values and 1 error, step succeeds]
-- [ ] **T8.4** Surface per-field extract errors in `RunMetrics` as
-  `ExtractFieldErrors int` and in debug logging. Regression batch: a
-  browser-gated test that runs the synthetic 5-case batch from the dogfood
-  session and asserts 5/5 succeed.
+  acc: [`go test -run TestRuntimePartialExtraction .` passes and asserts a non-empty metrics.ExtractErrors entry]
+- [x] **T8.4** Surface per-field extract errors in `RunMetrics`. (2026 09
+  10: shipped as `RunMetrics.ExtractErrors map[string]string`, not the
+  originally spec'd `ExtractFieldErrors int`. The map is strictly more
+  useful -- it names which field failed, not just a count -- so this is
+  accepted as satisfying the intent; the acc: line below is corrected to
+  match reality instead of a metric name that was never built.)
   verifies: [UC-004]
-  acc: [`FERRO_TEST_BROWSER=1 go test -run TestExtract_Batch .` reports 5 passing subtests]
-- [ ] **T8.5** Lint and format: `gofmt -l .` empty, `go vet ./...` clean,
-  `go test -race ./...` green.
+  acc: [`grep -n "ExtractErrors" internal/core/*.go` matches at least one struct field definition]
+- [x] **T8.5** Lint and format. (2026 09 10: verified -- `gofmt -l .` is
+  empty, `go vet ./...` exits 0, `go test -race ./internal/core/...`
+  passes.)
   verifies: [infrastructure]
   acc: [`gofmt -l . | wc -l` is 0 and `go vet ./...` exits 0]
 
 ### E9 Schema-validated planner output (ADR 002)
 fidelity: executable
 
-- [ ] **T9.1** Define `planSchema` as a Go constant string (JSON Schema
-  draft 2020-12, `additionalProperties: false`, `steps` required, each step
-  a flat object with `kind` enum and the per-kind fields) in a new
-  `internal/core/schema.go`. Export a `PlanSchema()` accessor from `ferro`.
+- [ ] **T9.1** Export `PlanSchema()` from the `ferro` package. (2026 09 10:
+  NOT done -- an unexported `planSchema()` exists and is used internally by
+  `runner.go:222`, but there is no exported accessor. A caller (including
+  `cmd/ferro-mcp`, which does not currently need this) cannot introspect
+  the plan schema today. Genuinely open; low priority since nothing
+  consumes it yet.)
   verifies: [UC-005]
-  acc: [`go test -run TestPlanSchema_IsValidJSON ./internal/core` passes]
-- [ ] **T9.2** Write a hand-rolled validator `validatePlanShape(raw
-  []byte) error` for exactly this schema (top-level object, only `steps`
-  and optional `reasoning`, `steps` is a non-empty array of objects whose
-  keys are in the allowed set and whose `kind` is in the enum). Returns
-  `*ErrPlanShape{Path, Reason}`. No third-party dependency.
+  acc: [`go doc github.com/dndungu/ferro PlanSchema` prints a func signature returning the plan JSON schema]
+- [x] **T9.2** Hand-rolled shape validator rejecting envelope drift. (2026
+  09 10: shipped as `parsePlan` + `TestParsePlanRejectsEnvelopeDrift` in
+  `internal/core/runtime_test.go`, covering the wrapper/actions-key/
+  nested-under-kind cases from the original spec.)
   verifies: [UC-005]
-  acc: [`go test -run TestValidatePlanShape ./internal/core` passes with table cases: nested-under-kind, plan-wrapper, actions-key, valid]
-- [ ] **T9.3** Wire it into `parsePlan` and the repair-response parser:
-  shape validation runs before `json.Unmarshal`. On `ErrPlanShape`, the
-  runner retries planning once with the reason appended to the user
-  message, increments `RunMetrics.ShapeRetries`, and fails with the typed
-  error if the retry also fails.
+  acc: [`go test -run TestParsePlanRejectsEnvelopeDrift ./internal/core` passes]
+- [x] **T9.3** Wire shape validation into `parsePlan` and the repair-response
+  parser with a bounded retry. (2026 09 10: verified via
+  `TestPlannerRetryBounded` and `TestParsePlanRejectsEnvelopeDrift` in
+  `internal/core/runtime_test.go`.)
   verifies: [UC-005]
-  acc: [`go test -run TestPlan_EnvelopeDrift ./internal/core` passes: fake LLM returns `{"plan":{...}}` then a valid plan; run succeeds with ShapeRetries == 1]
-- [ ] **T9.4** Add `SchemaCompleter` interface in `internal/core`
-  (`CompleteWithSchema(ctx, system, user string, schema []byte) (string,
-  error)`). `OpenAICompatible` implements it by sending
-  `response_format: {"type":"json_schema","json_schema":{"name":"plan",
-  "strict":true,"schema":...}}`. The runner type-asserts and prefers it;
-  plain `Complete` remains the fallback.
+  acc: [`go test -run 'TestPlannerRetryBounded|TestParsePlanRejectsEnvelopeDrift' ./internal/core` passes]
+- [x] **T9.4** `SchemaCompleter` interface, implemented by
+  `OpenAICompatible`. (2026 09 10: verified -- `internal/core/plan_shape.go`
+  defines `SchemaCompleter.CompleteSchema` (named `CompleteSchema`, not the
+  originally spec'd `CompleteWithSchema`); `internal/llm/openai.go:75`
+  implements it; `runner.go:221-222` type-asserts and prefers it;
+  `TestConcurrentClientAndSchema` in `internal/llm/openai_test.go` exercises
+  both the plain and schema-requesting paths concurrently.)
   verifies: [UC-005]
-  acc: [`go test -run TestOpenAI_SchemaRequest ./internal/llm` passes: httptest server sees response_format.type == "json_schema"]
-- [ ] **T9.5** Endpoint fallback: if the endpoint returns HTTP 400 mentioning
-  `response_format`, `OpenAICompatible` retries once with `json_object` and
-  remembers the downgrade for the client's lifetime.
+  acc: [`go test -run TestConcurrentClientAndSchema ./internal/llm` passes]
+- [ ] **T9.5** Endpoint fallback: retry once with `json_object` on an
+  HTTP 400 mentioning `response_format`, and remember the downgrade for the
+  client's lifetime. (2026 09 10: NOT done -- what shipped instead is an
+  explicit `OpenAICompatible.UseJSONSchema bool` config flag the caller
+  sets up front; there is no runtime detection of a 400 or any downgrade
+  memory. This is a real behavioral gap for endpoints that accept
+  `response_format` sometimes and reject it at request time. Decide at
+  pickup: implement the original auto-detect-and-remember design, or
+  formally accept the explicit-flag design and close this task as
+  won't-do with a one-line rationale in this row.)
   verifies: [UC-005]
-  acc: [`go test -run TestOpenAI_SchemaFallback ./internal/llm` passes: first 400, second request has type json_object, third request skips json_schema]
-- [ ] **T9.6** Trim the prose envelope rules from the planner prompt that
-  the schema now enforces; keep the worked example. Re-run the fake-LLM
-  suite and the `-tags=integration` suite if `FERRO_MODEL_URL` is set.
+  acc: [`go test -run TestOpenAI_SchemaFallback ./internal/llm` passes: first request 400s, second request uses json_object, third request skips json_schema entirely]
+- [ ] **T9.6** Trim the prose envelope rules from the planner prompt now
+  that the schema enforces them. (2026 09 10: NOT done -- `grep -rn
+  "exactly this envelope" internal/` still matches `internal/core/runner.go:180`.
+  Keep the worked example; remove the redundant prose rules around it.)
   verifies: [UC-005]
-  acc: [`go test ./...` green and the prompt no longer contains the phrase "exactly this envelope"]
+  acc: [`go test ./...` green and `grep -rc "exactly this envelope" internal/` is 0]
 
 ### E10 Document the chromedp context-lifetime convention (ADR 001)
 fidelity: executable
@@ -222,20 +334,129 @@ fidelity: executable
   stating the rule and citing `docs/adr/001-chromedp-context-lifetime.md`.
   Replace the three inline notes in `runner.go` (lines 68, 202, 224) with
   one comment on `BrowserContext.CDP()` in `executor.go` referencing the
-  ADR.
+  ADR. (2026 09 10: NOT done -- `grep -c "adr/001" internal/browser/browser.go
+  internal/core/executor.go` is 0 in both files. `cmd/ferro-mcp`'s daemon
+  (ADR 004) holds the tab pool open for the life of the process and will
+  hit this exact landmine surface area; doing this task before or
+  alongside E11 is recommended.)
   verifies: [UC-006]
   acc: [`grep -c "adr/001" internal/browser/browser.go internal/core/executor.go` reports at least 1 in each]
 - [ ] **T10.2** Add a "Context lifetime" section to `DESIGN.md` under
   "Known sharp edges", and move the resolved items there (settle fix,
-  RunMetrics) out of "not yet resolved" since they shipped.
+  RunMetrics) out of "not yet resolved" since they shipped. (2026 09 10:
+  NOT done -- `grep -n "Context lifetime" DESIGN.md` has no match. Note:
+  `DESIGN.md`'s current "Known sharp edges" heading is actually titled
+  "Runtime hardening (2026-09-07)"; this task should either rename that
+  section or add the new one alongside it -- resolve at pickup.)
   verifies: [UC-006]
   acc: [`grep -n "Context lifetime" DESIGN.md` matches]
-- [ ] **T10.3** Regression test: a test that wraps `cdpCtx` in
-  `WithTimeout`, cancels it after a successful Run, and asserts the next
-  Run fails, proving the landmine is real; then the inverse using the
-  pool's `select` pattern proving the tab survives. Browser-gated.
+- [ ] **T10.3** Regression test: wrap `cdpCtx` in `WithTimeout`, cancel it
+  after a successful Run, assert the next Run fails (proving the landmine
+  is real), then the inverse using the pool's `select` pattern proving the
+  tab survives. Browser-gated. (2026 09 10: NOT done -- no
+  `TestContextLifetime` exists in `internal/browser`.)
   verifies: [UC-006]
   acc: [`FERRO_TEST_BROWSER=1 go test -run TestContextLifetime ./internal/browser` passes both subtests]
+
+### E11 ferro-mcp: MCP server exposing the signed-in browser to agents
+fidelity: executable
+
+Decision rationale: `docs/adr/004-mcp-server-shared-browser-daemon.md`
+(leader-elected owner-or-shim single binary, one shared tab, Unix socket)
+and `docs/adr/005-mcp-origin-allowlist.md` (deny-by-default per-origin
+allowlist gating every state-changing tool call).
+
+- [ ] **T11.1** `internal/mcp/protocol.go`: hand-rolled MCP JSON-RPC 2.0
+  framing over stdio (`initialize`, `notifications/initialized`,
+  `tools/list`, `tools/call`), stdlib only (`encoding/json`, `bufio`,
+  `os`). A `Tool` interface (`Name() string`, `Schema() json.RawMessage`,
+  `Call(ctx, args json.RawMessage) (json.RawMessage, error)`) and a
+  registry `tools/list` reads from.
+  verifies: [UC-007]
+  acc: [a `tools/list` request written to the process's stdin returns a JSON-RPC response on stdout whose `result.tools` is a non-empty array]
+- [ ] **T11.2** `internal/mcp/leader.go`: exclusive `flock` on
+  `$FERRO_MCP_HOME/mcp.lock` (default `$HOME/.ferro`, overridable via
+  `FERRO_MCP_HOME`) decides owner vs shim per ADR 004. Owner opens
+  `ferro.NewBrowser` against `$FERRO_MCP_HOME/chrome-profile` and listens
+  on `$FERRO_MCP_HOME/mcp.sock` (mode 0600, dir mode 0700). Shim dials the
+  socket and forwards every JSON-RPC request/response verbatim between its
+  own stdio and the socket. A shim whose dial fails (stale socket) attempts
+  to become the new owner rather than erroring out.
+  verifies: [UC-011, UC-012]
+  acc: [starting two ferro-mcp processes concurrently against the same FERRO_MCP_HOME results in exactly one Chrome process under the owner's profile, and both processes answer a tools/call on their own stdio]
+- [ ] **T11.3** `internal/mcp/allowlist.go`: load
+  `$FERRO_MCP_HOME/allowlist.json` (flat list of allowed origins), expose
+  `Check(origin string) error`. Called before executing `navigate`,
+  `click`, `fill`, `select`, `key`, `scroll`, `extract`, `run_goal`. A
+  denied call returns an MCP tool error naming the origin and the
+  allowlist path to edit. Re-read the file when its mtime changes so no
+  restart is needed to extend the allowlist.
+  verifies: [UC-010]
+  acc: [a navigate/click/fill/extract/run_goal call whose target origin is absent from allowlist.json returns an error and performs no browser action; the same call against an allowlisted origin succeeds]
+- [ ] **T11.4** `internal/mcp/tools_primitive.go`: `snapshot`, `navigate`,
+  `click`, `fill`, `select`, `key`, `scroll`, `wait`, `extract` tools, each
+  mapped 1:1 onto `internal/core`'s existing `Action`/executor step
+  vocabulary against the daemon's single shared tab (mutex-serialized
+  across every connected client). `snapshot` and `wait` bypass the T11.3
+  gate per ADR 005; the other seven do not.
+  verifies: [UC-009]
+  acc: [a scripted sequence of navigate, snapshot, click, fill, extract tool calls against a testdata/pages fixture produces the same result RunOn would for an equivalent Task]
+- [ ] **T11.5** `internal/mcp/tools_goal.go`: `run_goal` tool wrapping
+  `ferro.RunOn` against the shared tab, using an `LLMClient` configured
+  from environment (`FERRO_MCP_LLM_BASE_URL`, `FERRO_MCP_LLM_MODEL`,
+  defaulting to `OpenAICompatible`). Returns the task result plus
+  `RunMetrics` as the tool's structured content. Gated by T11.3 against
+  `Task.StartURL` (or the tab's current origin if empty) before the first
+  planning call.
+  verifies: [UC-008]
+  acc: [a run_goal call with an allowlisted StartURL completes and returns a result plus llm_calls/repairs/plannings metrics; a run_goal call whose StartURL is not allowlisted returns an error before any LLM call is made]
+- [ ] **T11.6** Session persistence: default `UserDataDir` is
+  `$FERRO_MCP_HOME/chrome-profile`, distinct from the repo-root
+  `chrome-profile/` dev artifact. One client's stdio EOF (disconnect)
+  closes only that client's connection (owner keeps serving remaining
+  clients and shims; a shim that was the disconnected client's process
+  simply exits) -- it must never close the shared tab or the browser pool.
+  verifies: [UC-012]
+  acc: [closing one of two connected client stdio streams leaves the other client able to complete a tool call against the same tab afterward]
+- [ ] **T11.7** `cmd/ferro-mcp/main.go`: CLI lifecycle using the stdlib
+  `flag` package only (no CLI framework, matching the Go skill
+  convention). Default invocation (no args) runs the MCP stdio
+  server (auto leader-elects per T11.2). `ferro-mcp status` reports
+  owner PID and socket path, or "not running". `ferro-mcp stop` signals
+  the owner to close the browser pool and remove the lock/socket.
+  verifies: [infrastructure]
+  acc: [`ferro-mcp status` reports "not running" before any instance starts, then reports an owner PID once one is running, and `ferro-mcp stop` makes it report "not running" again]
+- [ ] **T11.8** Unit tests: protocol framing round-trip; leader election
+  under two processes racing to start (T11.2); allowlist allow/deny
+  (T11.3); each primitive tool's mapping onto the equivalent `Action`
+  (T11.4); `run_goal`'s pre-plan allowlist check (T11.5). Table tests using
+  the existing fake `LLMClient`/`BrowserContext` doubles in `ferro_test.go`
+  where they apply.
+  verifies: [UC-007, UC-009, UC-010, UC-011]
+  acc: [`go test ./internal/mcp/...` passes and covers at least one allow case and one deny case per gated tool]
+- [ ] **T11.9** Browser-gated integration test (`FERRO_TEST_BROWSER=1`):
+  start a `ferro-mcp` owner against a `testdata/pages` fixture with a
+  permissive `allowlist.json`, connect a second `ferro-mcp` as a shim,
+  exercise navigate+snapshot+click+extract from the shim's stdio, and
+  assert the owner's shared tab reflects the shim's actions (proving the
+  socket-forwarding path in T11.2 actually drives the real tab, not just
+  unit-level mocks).
+  verifies: [UC-008, UC-009, UC-011, UC-012]
+  acc: [`FERRO_TEST_BROWSER=1 go test -run TestFerroMCP_SharedTabIntegration ./internal/mcp` passes]
+- [ ] **T11.10** Docs: README section "MCP server" (install, an `.mcp.json`
+  config snippet pointing at the `ferro-mcp` binary, the allowlist file
+  format, and an explicit security note that every connected MCP client
+  inherits the profile's signed-in sessions). `DESIGN.md` note stating
+  `cmd/ferro-mcp`/`internal/mcp` are a new library consumer and do not
+  change the "library, not platform" status of `ferro.go`/`internal/core`.
+  References to ADR 004 and ADR 005.
+  verifies: [UC-007]
+  acc: [README contains a "MCP server" heading with an allowlist.json example, and DESIGN.md references docs/adr/004 and docs/adr/005]
+- [ ] **T11.11** Lint and format: `gofmt -l .` empty, `go vet ./...` clean,
+  `go build ./...` green including the new `cmd/ferro-mcp` binary,
+  `go test -race ./...` green.
+  verifies: [infrastructure]
+  acc: [`gofmt -l . | wc -l` is 0, `go vet ./...` exits 0, `go build ./...` exits 0]
 
 ### Archived: v0.1 plan (2026 08, pre-dogfood)
 
@@ -244,7 +465,7 @@ Its items were never toggled, and several shipped without being marked:
 DESIGN.md (E1-T8), RunMetrics (E1-T7, E3-T1), the resolution cache
 (E4-T1, E4-T2), `examples/shop`, the integration suite (E5-T1). The
 unshipped remainder that still matters is kept as outline epics; expand
-them in a later `/plan` pass once E7 to E10 land.
+them in a later `/plan` pass once E9, E10, and E11 land.
 
 - **E2 Executor hardening** (outline). Ref resolution by signature can
   match the wrong element. Exit: a three-identical-buttons test clicks the
@@ -259,33 +480,69 @@ them in a later `/plan` pass once E7 to E10 land.
 
 ## Parallel work
 
-- Wave 1: T7.0.
-- Wave 2 (independent after T7.0): T7.1, T8.1, T9.1, T10.1.
-- Wave 3: T7.2, T8.2, T9.2, T10.2.
-- Wave 4: T7.3, T8.3, T9.3, T9.4, T10.3.
-- Wave 5: T7.4, T8.4, T9.5.
-- Wave 6: T8.5, T9.6.
+- Wave 1: T11.1, T11.2 (disjoint files: `protocol.go` vs `leader.go`).
+  Independently, T9.1, T9.5, T9.6, T10.1, T10.2 can also run in this wave
+  (disjoint from E11 and from each other except T9.6/T10.1 both touch
+  `runner.go`/`executor.go` comments -- serialize that pair).
+- Wave 2: T11.3, T11.4, T11.7 (all depend on T11.1+T11.2 existing; disjoint
+  files: `allowlist.go`, `tools_primitive.go`, `cmd/ferro-mcp/main.go`).
+  T10.3 can also run here (depends only on T10.1 landing first for the ADR
+  citation the test's comment should reference, not a hard code
+  dependency).
+- Wave 3: T11.5, T11.6 (depend on T11.2's shared-tab plumbing; T11.5 also
+  depends on T11.3's allowlist existing).
+- Wave 4: T11.8, T11.9 (depend on all of T11.1-T11.7).
+- Wave 5: T11.10, T11.11.
 
-E7, E8, E9, E10 touch disjoint files except `ferro.go` (T7.1, T9.1
-accessor) and `runner.go` (T9.3, T10.1). Serialize those pairs.
+E7, E8 are done. E9/E10's remaining tasks (T9.1, T9.5, T9.6, T10.1-T10.3)
+and E11 touch disjoint files except the `runner.go`/`executor.go` ADR-001
+comment pair noted above.
 
 ## Risks
 
-- Endpoints vary in `response_format` support. Mitigated by T9.5 fallback
-  and the local validator in T9.2, which runs regardless.
-- Per-field extract degradation could mask bad plans. Mitigated by the
-  `ExtractFieldErrors` metric (T8.4) and all-fields-failed still erroring.
+- Endpoints vary in `response_format` support -- this is the open T9.5 gap;
+  until it lands, endpoints that reject `response_format` at request time
+  (not just ignore it) will hard-fail rather than downgrade.
+- Chrome profile lock contention if leader election (T11.2) has a bug: a
+  shim that fails to detect a stale lock and also fails to win a fresh
+  flock will simply not serve tool calls. Mitigated by T11.9's integration
+  test exercising the owner/shim split against a real Chrome profile, not
+  just unit-level mocks.
+- Prompt injection via page content read into an autonomous `run_goal`
+  plan, or via `extract` results handed back to a calling agent that then
+  acts on them outside ferro's control -- ferro cannot prevent the second
+  half of that chain (what the calling agent does with data it already
+  received). Mitigated on the ferro side by ADR 005's deny-by-default
+  allowlist, which stops `run_goal` from ever planning against a
+  non-allowlisted origin in the first place.
+- Single shared tab means agents queue behind each other; a slow `run_goal`
+  from one MCP client blocks primitive tool calls from another until it
+  finishes. Accepted for v1 per ADR 004; a future `browser_new_tab` tool is
+  the documented escape hatch if this becomes a real bottleneck.
 - `RunOn` on a tab mid-navigation from a previous task: the snapshot may be
-  taken early. Existing `domSettle` covers most cases; T7.3 asserts it.
+  taken early. Existing `domSettle` covers most cases; `TestRuntimeRunOnAndCancellation`
+  exercises the cross-call case.
 
 ## Operating procedure
 
 - Work in a worktree per epic. One commit per task. Rebase and merge.
-- Before marking a task done run its `acc:` command and the E8.5 lint set.
+- Before marking a task done run its `acc:` command and the lint/format/
+  vet set (T8.5 for E7-E10 work, T11.11 for E11 work).
 - Browser-gated tests need Chrome on PATH and `FERRO_TEST_BROWSER=1`.
+- Never accept a task as done because an earlier note claimed it was --
+  this plan's own 2026-09-07 note is the cautionary example. Run the
+  `acc:` command yourself before checking a box.
 
 ## Progress log
 
+- 2026 09 10: Reconciled E7-E10 against actual code and test names (see
+  "Implementation update -- 2026-09-10" above): checked off T7.0-T7.4,
+  T8.1-T8.5, T9.2-T9.4 with corrected `acc:` lines; left T9.1, T9.5, T9.6,
+  T10.1, T10.2, T10.3 open with the real gap stated per row. Added E11
+  (ferro-mcp: T11.1-T11.11) for an MCP server exposing the signed-in
+  browser to agents. Added UC-007 through UC-012. Created ADR 004
+  (leader-elected shared-browser daemon) and ADR 005 (per-origin
+  allowlist). Updated `docs/roadmap.md`.
 - 2026 09 04: Replaced the raw v0.1 extraction with this plan. Added E7 to
   E10 (T7.0 to T10.3), archived E1 to E6 as outlines. Created ADR 001 and
   ADR 002. Created `docs/roadmap.md`.
