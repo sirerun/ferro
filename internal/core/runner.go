@@ -204,6 +204,21 @@ Go button [3]:
     {"kind": "done", "result": "searched"}
   ]}
 
+Worked example — goal "report the cheapest price", page has a price element
+[5]: use {{extract.last.<field>}} in done's "result" to relay a value an
+extract step just pulled out; done.result is NOT free text you write from
+memory, it is the plan's only output, so any data the goal asks you to
+report MUST reach it this way, verbatim, not paraphrased:
+  {"steps": [
+    {"kind": "extract", "fields": {"price": "#price"}},
+    {"kind": "done", "result": "{{extract.last.price}}"}
+  ]}
+{{extract.last}} (no field) relays the whole prior extract result instead of
+one field. Only extract.last is addressable — there is no way to reach an
+extract earlier than the most recent one, so if the goal needs several
+extracted values in the final result, do them in one extract step's fields
+map, not several extract steps.
+
 Rules:
 - refs are the [N] ids in the snapshot. Never invent a ref you cannot see.
 - If the snapshot is truncated and the goal needs more of the page, scroll first.
