@@ -45,10 +45,29 @@ func (c Config) SocketPath() string { return filepath.Join(c.Home, "mcp.sock") }
 // AllowlistPath is the per-origin allowlist (ADR 005).
 func (c Config) AllowlistPath() string { return filepath.Join(c.Home, "allowlist.json") }
 
+// HomeFromEnv resolves just $FERRO_MCP_HOME (defaulting to
+// $HOME/.ferro-mcp), with none of ConfigFromEnv's LLM requirements. Status
+// and Stop only ever dial cfg.SocketPath() -- they have no reason to demand
+// LLM configuration a caller checking "is it running?" may not have set.
+func HomeFromEnv() (string, error) {
+	if home := os.Getenv("FERRO_MCP_HOME"); home != "" {
+		return home, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home dir: %w", err)
+	}
+	return filepath.Join(home, ".ferro-mcp"), nil
+}
+
 // ConfigFromEnv reads FERRO_MCP_* environment variables into a Config.
 func ConfigFromEnv() (Config, error) {
+	home, err := HomeFromEnv()
+	if err != nil {
+		return Config{}, err
+	}
 	cfg := Config{
-		Home:             os.Getenv("FERRO_MCP_HOME"),
+		Home:             home,
 		LLMBaseURL:       os.Getenv("FERRO_MCP_LLM_BASE_URL"),
 		LLMModel:         os.Getenv("FERRO_MCP_LLM_MODEL"),
 		LLMAPIKey:        os.Getenv("FERRO_MCP_LLM_API_KEY"),
@@ -62,13 +81,6 @@ func ConfigFromEnv() (Config, error) {
 	}
 	if cfg.LLMModel == "" {
 		return cfg, fmt.Errorf("FERRO_MCP_LLM_MODEL is required")
-	}
-	if cfg.Home == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return cfg, fmt.Errorf("resolve home dir: %w", err)
-		}
-		cfg.Home = filepath.Join(home, ".ferro-mcp")
 	}
 	if cfg.UserDataDir == "" {
 		// A dedicated, non-default directory this server owns outright —
