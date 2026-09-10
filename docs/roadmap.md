@@ -45,7 +45,9 @@
   2026 09 10. Ports the local `mcp-server` prototype (official
   `modelcontextprotocol/go-sdk`, `run_task` tool) rather than building from
   scratch -- see `docs/plan.md` E11 and ADR 004/005 (revised 2026-09-10
-  after the prototype was found). No PR yet.
+  after the prototype was found). PR #3 open against `main`, rebased onto
+  `main` after PR #2 (E9/E10 closeout) merged; not self-merged, awaiting
+  review.
 
 ## Planned
 - E2, E4, E5, E6 from the v0.1 plan: outline only, expand after E11 lands.
