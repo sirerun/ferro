@@ -29,23 +29,29 @@
 - Compiling module with core, browser pool, OpenAI-compatible client, resolution cache, examples, integration suite skeleton.
 - E7 RunOn: run tasks on a caller-owned BrowserContext (T7.0-T7.4), reconciled 2026 09 10.
 - E8 Extract degrades per field instead of aborting (T8.1-T8.5), reconciled 2026 09 10.
+- E9/E10 closeout (T9.1 exported PlanSchema, T9.5 HTTP-400 auto-fallback,
+  T10.1-T10.3 context-lifetime docs + regression test): PR #2, merged
+  2026 09 10 (rebase). T9.6 excluded from this PR by design -- folded into
+  E11's T11.0. All 5 tasks independently re-verified against origin/main
+  after merge (build/vet/fmt/race + the two new named tests), not just
+  taken on the agent's word.
 
 ## In progress
 - (none)
 
 ## In flight
-- (none)
+- E11 ferro-mcp (T11.0-T11.10): agent `ferra_mcp-build`, worktree
+  `.claude/worktrees/ferro-mcp-e11` (branch `ferro-mcp-e11`), dispatched
+  2026 09 10. Ports the local `mcp-server` prototype (official
+  `modelcontextprotocol/go-sdk`, `run_task` tool) rather than building from
+  scratch -- see `docs/plan.md` E11 and ADR 004/005 (revised 2026-09-10
+  after the prototype was found). No PR yet.
 
 ## Planned
-- E9 Schema-validated planner output, ADR 002 -- remaining gaps only
-  (T9.1 exported PlanSchema, T9.5 HTTP-400 auto-fallback, T9.6 prompt
-  trim), planned 2026 09 04, reconciled 2026 09 10.
-- E10 Document chromedp context-lifetime rule, ADR 001 (T10.1 to T10.3),
-  planned 2026 09 04, still entirely open as of 2026 09 10.
-- E11 ferro-mcp: MCP server exposing the signed-in browser to agents
-  (T11.1 to T11.11), planned 2026 09 10. See ADR 004 (leader-elected
-  shared-browser daemon) and ADR 005 (per-origin allowlist).
-- E2, E4, E5, E6 from the v0.1 plan: outline only, expand after E9-E11.
+- E2, E4, E5, E6 from the v0.1 plan: outline only, expand after E11 lands.
+- Once E11 merges: delete the `ferro-wt-mcp` worktree and local
+  `mcp-server` branch (David's 2026-09-10 decision), after confirming
+  every ported commit's content is reachable from `main`.
 
 ## Blocked
 - (none)
