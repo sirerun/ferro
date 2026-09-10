@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -31,6 +32,15 @@ type OpenAICompatible struct {
 	// UseJSONSchema opts into response_format=json_schema. Keep false for
 	// servers supporting only json_object. Local plan validation always runs.
 	UseJSONSchema bool
+
+	// schemaFallback latches once an endpoint 400s on a response_format:
+	// json_schema request and the error body mentions response_format —
+	// some OpenAI-compatible gateways advertise the field but reject it at
+	// request time. CompleteSchema retries that single request with
+	// json_object and then remembers the downgrade for the rest of this
+	// client's lifetime, so later calls skip json_schema entirely instead
+	// of paying the 400 round trip again. Safe for concurrent use.
+	schemaFallback atomic.Bool
 }
 
 type chatRequest struct {
@@ -71,14 +81,54 @@ func (o *OpenAICompatible) Complete(ctx context.Context, system, user string) (s
 }
 
 // CompleteSchema requests the plan schema when explicitly enabled. Endpoints
-// without this feature retain the existing JSON-object protocol.
+// without this feature retain the existing JSON-object protocol. If this
+// client already fell back off json_schema (see schemaFallback), the
+// request skips straight to the json_object protocol.
 func (o *OpenAICompatible) CompleteSchema(ctx context.Context, system, user string, schema json.RawMessage) (string, error) {
-	if !o.UseJSONSchema {
+	if !o.UseJSONSchema || o.schemaFallback.Load() {
 		return o.Complete(ctx, system, user)
 	}
 	return o.complete(ctx, system, user, schema)
 }
+
+// complete sends one chat-completions request. When schema is set and the
+// endpoint responds 400 with a body mentioning response_format — a gateway
+// advertising json_schema support it then rejects at request time — it
+// retries once with json_object and latches schemaFallback so later
+// CompleteSchema calls on this client skip json_schema entirely.
 func (o *OpenAICompatible) complete(ctx context.Context, system, user string, schema json.RawMessage) (string, error) {
+	body, status, err := o.doRequest(ctx, system, user, schema)
+	if err != nil {
+		return "", err
+	}
+	if len(schema) > 0 && status == http.StatusBadRequest && bytes.Contains(body, []byte("response_format")) {
+		o.schemaFallback.Store(true)
+		body, status, err = o.doRequest(ctx, system, user, nil)
+		if err != nil {
+			return "", err
+		}
+	}
+
+	var cr chatResponse
+	if err := json.Unmarshal(body, &cr); err != nil {
+		return "", fmt.Errorf("llm decode (http %d): %w", status, err)
+	}
+	if cr.Error != nil {
+		return "", fmt.Errorf("llm error: %s", cr.Error.Message)
+	}
+	if status != http.StatusOK {
+		return "", fmt.Errorf("llm http %d", status)
+	}
+	if len(cr.Choices) == 0 {
+		return "", fmt.Errorf("llm: empty choices")
+	}
+	return cr.Choices[0].Message.Content, nil
+}
+
+// doRequest performs one HTTP round trip and returns the raw response body
+// and status code, leaving interpretation to the caller so complete can
+// inspect a 400 body before deciding whether to retry.
+func (o *OpenAICompatible) doRequest(ctx context.Context, system, user string, schema json.RawMessage) ([]byte, int, error) {
 	timeout := o.Timeout
 	if timeout <= 0 {
 		timeout = 120 * time.Second
@@ -103,15 +153,15 @@ func (o *OpenAICompatible) complete(ctx context.Context, system, user string, sc
 	if len(schema) > 0 {
 		req.ResponseFormat = &responseFormat{Type: "json_schema", JSONSchema: map[string]any{"name": "ferro_plan", "strict": false, "schema": schema}}
 	}
-	body, err := json.Marshal(req)
+	reqBody, err := json.Marshal(req)
 	if err != nil {
-		return "", err
+		return nil, 0, err
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		strings.TrimRight(o.BaseURL, "/")+"/chat/completions", bytes.NewReader(body))
+		strings.TrimRight(o.BaseURL, "/")+"/chat/completions", bytes.NewReader(reqBody))
 	if err != nil {
-		return "", err
+		return nil, 0, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if o.APIKey != "" {
@@ -120,24 +170,15 @@ func (o *OpenAICompatible) complete(ctx context.Context, system, user string, sc
 
 	resp, err := client.Do(httpReq)
 	if err != nil {
-		return "", fmt.Errorf("llm: %w", err)
+		return nil, 0, fmt.Errorf("llm: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	var cr chatResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&cr); err != nil {
-		return "", fmt.Errorf("llm decode (http %d): %w", resp.StatusCode, err)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("llm read body (http %d): %w", resp.StatusCode, err)
 	}
-	if cr.Error != nil {
-		return "", fmt.Errorf("llm error: %s", cr.Error.Message)
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("llm http %d", resp.StatusCode)
-	}
-	if len(cr.Choices) == 0 {
-		return "", fmt.Errorf("llm: empty choices")
-	}
-	return cr.Choices[0].Message.Content, nil
+	return respBody, resp.StatusCode, nil
 }
 
 // Notes: response_format: json_object is sent unconditionally — servers

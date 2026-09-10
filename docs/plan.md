@@ -316,16 +316,16 @@ fidelity: executable
   both the plain and schema-requesting paths concurrently.)
   verifies: [UC-005]
   acc: [`go test -run TestConcurrentClientAndSchema ./internal/llm` passes]
-- [ ] **T9.5** Endpoint fallback: retry once with `json_object` on an
+- [x] **T9.5** Endpoint fallback: retry once with `json_object` on an
   HTTP 400 mentioning `response_format`, and remember the downgrade for the
-  client's lifetime. (2026 09 10: NOT done -- what shipped instead is an
-  explicit `OpenAICompatible.UseJSONSchema bool` config flag the caller
-  sets up front; there is no runtime detection of a 400 or any downgrade
-  memory. This is a real behavioral gap for endpoints that accept
-  `response_format` sometimes and reject it at request time. Decide at
-  pickup: implement the original auto-detect-and-remember design, or
-  formally accept the explicit-flag design and close this task as
-  won't-do with a one-line rationale in this row.)
+  client's lifetime. (2026 09 10: shipped, additive to the existing
+  `UseJSONSchema` flag -- `OpenAICompatible.complete` now inspects a 400
+  response body for `response_format` and, when present, retries the same
+  request once with `json_object` and latches a new unexported
+  `schemaFallback atomic.Bool` instance field; `CompleteSchema` checks that
+  latch first and skips straight to `json_object` once set, so the
+  behavioral gap the 2026-09-10 reconciliation flagged is closed without
+  removing the explicit config flag.)
   verifies: [UC-005]
   acc: [`go test -run TestOpenAI_SchemaFallback ./internal/llm` passes: first request 400s, second request uses json_object, third request skips json_schema entirely]
 - [ ] **T9.6** Trim the prose envelope rules from the planner prompt now
