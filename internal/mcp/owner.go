@@ -21,6 +21,7 @@ type Owner struct {
 	browser *ferro.Browser
 	tab     ferro.BrowserContext
 	runner  *ferro.Runner
+	allow   *Allowlist
 
 	mu sync.Mutex // serializes every tool call against the shared tab
 
@@ -64,6 +65,13 @@ func NewOwner(ctx context.Context, cfg Config) (*Owner, error) {
 		}
 	}
 
+	allow, err := NewAllowlist(cfg.AllowlistPath())
+	if err != nil {
+		tab.Release()
+		_ = b.Close()
+		return nil, fmt.Errorf("load allowlist: %w", err)
+	}
+
 	client := &ferro.OpenAICompatible{BaseURL: cfg.LLMBaseURL, Model: cfg.LLMModel, APIKey: cfg.LLMAPIKey}
 	opts := []ferro.Option{ferro.WithMaxRepairs(cfg.MaxRepairs)}
 	if cfg.CachePath != "" {
@@ -75,6 +83,7 @@ func NewOwner(ctx context.Context, cfg Config) (*Owner, error) {
 		browser: b,
 		tab:     tab,
 		runner:  ferro.NewRunner(client, opts...),
+		allow:   allow,
 		stopCh:  make(chan struct{}),
 	}, nil
 }
