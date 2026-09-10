@@ -49,6 +49,11 @@ type Config struct {
 	// runs, so a human can sign in once (headful, outside automation) and
 	// subsequent runs stay logged in. Never automate the sign-in itself.
 	UserDataDir string
+	// ProfileDirectory selects which profile within UserDataDir to launch
+	// (Chrome's --profile-directory flag, e.g. "Default" or "Profile 1").
+	// Only meaningful alongside UserDataDir; most callers should just point
+	// UserDataDir at a dedicated directory per profile instead.
+	ProfileDirectory string
 }
 
 type pooledContext struct {
@@ -100,9 +105,11 @@ func (b *Browser) newTab(ctx context.Context) (*pooledContext, error) {
 		opts = append(opts, chromedp.UserDataDir(b.cfg.UserDataDir))
 		// A persistent profile means a real login session; disable the
 		// "Chrome is being controlled by automated test software" signal
-		// some sites gate on, matching the pattern used for the
-		// human-in-the-loop Gemini driver (see ~/Code/dndungu/ignitionphase).
+		// some sites gate on.
 		opts = append(opts, chromedp.Flag("disable-blink-features", "AutomationControlled"))
+	}
+	if b.cfg.ProfileDirectory != "" {
+		opts = append(opts, chromedp.Flag("profile-directory", b.cfg.ProfileDirectory))
 	}
 
 	parent, cancelParent := chromedp.NewExecAllocator(ctx, opts...)
