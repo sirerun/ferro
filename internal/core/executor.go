@@ -195,11 +195,23 @@ func (x *Executor) doFill(ctx context.Context, a Action) error {
 	if err != nil {
 		return err
 	}
-	err = chromedp.Run(ctx,
-		chromedp.WaitVisible(sel, chromedp.ByQuery),
-		chromedp.Clear(sel, chromedp.ByQuery),
-		chromedp.SendKeys(sel, a.Text, chromedp.ByQuery),
-	)
+	err = chromedp.Run(ctx, chromedp.WaitVisible(sel, chromedp.ByQuery))
+	if err == nil {
+		// chromedp.Clear reads a textarea's current value from its DOM child
+		// #text node, but a framework-controlled textarea (React, Vue, ...)
+		// never has one — its value lives in JS state, not static markup —
+		// so Clear fails on every such field, empty or not, with "does not
+		// have child #text node", not just an edge case. Treat that specific
+		// failure as "nothing to clear" and proceed to type; any other Clear
+		// failure (bad selector, wrong element kind) still aborts the fill.
+		if cerr := chromedp.Run(ctx, chromedp.Clear(sel, chromedp.ByQuery)); cerr != nil &&
+			!strings.Contains(cerr.Error(), "does not have child #text node") {
+			err = cerr
+		}
+	}
+	if err == nil {
+		err = chromedp.Run(ctx, chromedp.SendKeys(sel, a.Text, chromedp.ByQuery))
+	}
 	x.recordOutcome(key, sel, err)
 	return err
 }

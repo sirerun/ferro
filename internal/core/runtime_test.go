@@ -126,6 +126,48 @@ func TestTemplatesPreserveData(t *testing.T) {
 	}
 }
 
+// TestShapeResult_ExpandsExtractLastField is a regression test for the
+// planner prompt fix in runner.go's plan(): the prompt's only worked example
+// used to show a hardcoded done.result literal and never demonstrated
+// {{extract.last.<field>}}, so the model never learned to relay extracted
+// data through done — it wrote descriptive prose instead. This proves the
+// underlying mechanism the corrected prompt now teaches actually works.
+func TestShapeResult_ExpandsExtractLastField(t *testing.T) {
+	ex := extractStore{"last": map[string]any{"price": "$9.00"}}
+	got, err := shapeResult("{{extract.last.price}}", ex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "$9.00" {
+		t.Errorf("shapeResult = %v, want %q", got, "$9.00")
+	}
+}
+
+// TestShapeResult_ExpandsExtractLastWhole covers the no-field form
+// {{extract.last}}, which relays the entire prior extract result.
+func TestShapeResult_ExpandsExtractLastWhole(t *testing.T) {
+	ex := extractStore{"last": "reply text pulled from the page"}
+	got, err := shapeResult("{{extract.last}}", ex)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "reply text pulled from the page" {
+		t.Errorf("shapeResult = %v, want the raw extract value", got)
+	}
+}
+
+// TestShapeResult_NoTemplateLeavesResultUntouched guards the common case: a
+// literal done.result with no template syntax passes through unchanged.
+func TestShapeResult_NoTemplateLeavesResultUntouched(t *testing.T) {
+	got, err := shapeResult("searched", extractStore{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != "searched" {
+		t.Errorf("shapeResult = %v, want %q", got, "searched")
+	}
+}
+
 func TestStructureArray(t *testing.T) {
 	r := Runner{LLM: replyLLM("```json\n{\"result\":[{\"n\":1}]}\n```")}
 	m := RunMetrics{}
