@@ -148,3 +148,28 @@ call site that wraps a CDP context should cite the ADR in its own comment.
 `cmd/ferro-mcp`'s daemon (ADR 004) holds the tab pool open for the life of
 the process, which is exactly the shape of long-lived-tab surface area
 this landmine bites hardest.
+
+## cmd/ferro-mcp and internal/mcp (2026-09-10)
+
+`cmd/ferro-mcp` (a Model Context Protocol server) and `internal/mcp` (its
+leader election, origin allowlist, and tool relay) are a new consumer of
+the library, added alongside `examples/shop/main.go` — not a change to it.
+`ferro.go` and `internal/core` remain exactly the LLM-plans-once,
+deterministic-executor engine described above, with zero knowledge of MCP,
+sockets, or process lifecycle. "Library, not platform" (the last bullet
+under Design principles) still describes `ferro.go`/`internal/core`
+precisely; the daemon and its Unix-socket relay live entirely in
+`cmd/ferro-mcp`/`internal/mcp`, which drive the library through the same
+`ferro.NewBrowser`, `ferro.NewRunner`, and `Runner.RunOn` entry points any
+other caller would use.
+
+The one addition to the engine itself is `browser.Config.ProfileDirectory`
+(`internal/browser/browser.go`), backing `FERRO_MCP_CHROME_PROFILE_DIRECTORY`:
+passed through to `chromedp.Flag("profile-directory", ...)` for a caller
+whose Chrome user-data directory holds more than one profile. It's a small,
+generally useful engine option, not MCP-specific plumbing — `cmd/ferro-mcp`
+just happens to be its first caller.
+
+See `docs/adr/004-mcp-server-shared-browser-daemon.md` (leader election, one
+shared tab serialized through a mutex, Unix-socket relay) and
+`docs/adr/005-mcp-origin-allowlist.md` (the deny-by-default per-origin gate).

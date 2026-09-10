@@ -25,7 +25,7 @@ current work plan and `DESIGN.md` for known sharp edges.
 go get github.com/dndungu/ferro
 ```
 
-Requires Go 1.22 or later and a Chrome or Chromium binary on the machine.
+Requires Go 1.25 or later and a Chrome or Chromium binary on the machine.
 
 ## Quickstart
 
@@ -229,6 +229,94 @@ Any type with `Complete(ctx, system, user string) (string, error)`
 satisfies `ferro.LLMClient`, so other backends need no changes to the
 engine.
 
+## MCP server
+
+`cmd/ferro-mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)
+server that lets an MCP client (Claude Code, or any other MCP-speaking
+agent) drive ferro's browser engine against one persistent, already
+signed-in Chrome profile. It's a new consumer of the library
+(`ferro.go`/`internal/core`), not a change to it — see DESIGN.md.
+
+Install the binary:
+
+```sh
+go install github.com/dndungu/ferro/cmd/ferro-mcp@latest
+```
+
+Point an MCP client at it. For Claude Code, add to `.mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "ferro": {
+      "command": "ferro-mcp",
+      "env": {
+        "FERRO_MCP_LLM_BASE_URL": "http://localhost:11434/v1",
+        "FERRO_MCP_LLM_MODEL": "qwen2.5:14b"
+      }
+    }
+  }
+}
+```
+
+Any number of MCP clients (one per Claude Code session, for example) can
+point at the same `$FERRO_MCP_HOME` at once: the first to start becomes the
+owner and is the only one that opens Chrome; the rest become shims that
+relay tool calls to it over a Unix socket, so every connected client drives
+the same shared tab. See
+`docs/adr/004-mcp-server-shared-browser-daemon.md`.
+
+Environment variables:
+
+| Variable | Meaning |
+|---|---|
+| `FERRO_MCP_HOME` | Where the lock file, relay socket, allowlist, and (by default) the Chrome profile live. Default `~/.ferro-mcp` |
+| `FERRO_MCP_LLM_BASE_URL` | Required. An OpenAI-compatible `/v1` endpoint |
+| `FERRO_MCP_LLM_MODEL` | Required. Model name |
+| `FERRO_MCP_LLM_API_KEY` | API key, if the endpoint needs one |
+| `FERRO_MCP_CHROME_USER_DATA_DIR` | Chrome profile directory. Default `$FERRO_MCP_HOME/chrome-profile` |
+| `FERRO_MCP_CHROME_PROFILE_DIRECTORY` | Chrome's `--profile-directory` value, for a user data dir holding more than one profile |
+| `FERRO_MCP_START_URL` | Optional initial navigation when the owner starts |
+| `FERRO_MCP_HEADLESS` | `true` to run headless (default `false`) |
+| `FERRO_MCP_CACHE_PATH` | Resolution/replay cache path (see Replay and extraction, above) |
+| `FERRO_MCP_MAX_REPAIRS` | Per-task repair budget (default 2) |
+| `FERRO_MCP_MAX_ELEMENTS` | Snapshot element cap |
+
+Tools: `run_task` runs an autonomous goal end to end (the MCP equivalent of
+`Runner.RunOn`). The rest map 1:1 onto the engine's action vocabulary:
+`snapshot`, `navigate`, `click`, `fill`, `select`, `key`, `scroll`, `wait`,
+`extract`.
+
+`snapshot` and `wait` are always available. Every other tool, including
+`run_task`, is gated by a deny-by-default per-origin allowlist at
+`$FERRO_MCP_HOME/allowlist.json` — a flat JSON array of allowed origins
+(scheme + host + port):
+
+```json
+[
+  "https://example-shop.test",
+  "https://mail.example.com"
+]
+```
+
+A call against a page whose origin isn't listed fails with an error naming
+the blocked origin and the file to edit. No restart needed — the file is
+re-read whenever its modification time changes. See
+`docs/adr/005-mcp-origin-allowlist.md`.
+
+```sh
+ferro-mcp status   # "not running", or the owner's PID and socket path
+ferro-mcp stop     # ask the owner to close the browser pool and exit
+```
+
+**Security note:** every MCP client connected to the same `$FERRO_MCP_HOME`
+shares one Chrome profile and whatever it's signed into. A client that can
+call `extract` or `run_task` against an allowlisted origin can read and act
+on that origin using the profile's live sessions — only allowlist origins
+you're willing to expose to every client you connect, and treat
+`$FERRO_MCP_HOME` as sensitive: it holds a live, authenticated browser
+profile, not just configuration.
+
 ## Package layout
 
 | Path | Contents |
@@ -237,6 +325,8 @@ engine.
 | `internal/core/` | Engine: plan types, page compiler, executor, ref resolution, repair, resolution cache |
 | `internal/browser/` | chromedp tab pool |
 | `internal/llm/` | LLM client implementations |
+| `cmd/ferro-mcp/` | MCP server binary (see MCP server, above) |
+| `internal/mcp/` | Leader election, origin allowlist, and tool relay behind `cmd/ferro-mcp` |
 | `examples/shop/` | Runnable demonstration |
 | `testdata/pages/` | Fixture HTML |
 | `integration/` | Build-tag-gated real-model suite |
