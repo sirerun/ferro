@@ -35,30 +35,31 @@
   E11's T11.0. All 5 tasks independently re-verified against origin/main
   after merge (build/vet/fmt/race + the two new named tests), not just
   taken on the agent's word.
+- E11 ferro-mcp (T11.0-T11.11): PR #3, merged 2026 09 10 (rebase) --
+  `cmd/ferro-mcp` (leader-elected owner/shim daemon over one shared
+  browser tab, ADR 004; deny-by-default per-origin allowlist, ADR 005;
+  `run_task` plus the primitive tool set over the official
+  `modelcontextprotocol/go-sdk`). Code-reviewed in full (every new
+  `internal/mcp` file and `cmd/ferro-mcp/main.go` read directly) and
+  independently re-verified against merged `main`: build/gofmt/vet clean,
+  default and `FERRO_TEST_BROWSER=1` race suites both green, all 16 named
+  tests confirmed individually running and passing. `docs/plan.md`'s
+  T11.0-T11.10 checkboxes were stale at merge time (commits landed but
+  boxes unchecked) and were corrected, along with one stale test-name
+  citation in T11.0's note. The `ferro-wt-mcp` worktree and local
+  `mcp-server` branch are deleted (David's 2026-09-10 decision), after
+  confirming every commit's unique content (run_task, leader election,
+  allowlist, the doFill and planner-prompt fixes, `MaxPlannings`,
+  `FERRO_MCP_MAX_ELEMENTS`) is reachable from `main`.
 
 ## In progress
 - (none)
 
 ## In flight
-- E11 ferro-mcp (T11.0-T11.10): agent `ferra_mcp-build`, worktree
-  `.claude/worktrees/ferro-mcp-e11` (branch `ferro-mcp-e11`), dispatched
-  2026 09 10. Ports the local `mcp-server` prototype (official
-  `modelcontextprotocol/go-sdk`, `run_task` tool) rather than building from
-  scratch -- see `docs/plan.md` E11 and ADR 004/005 (revised 2026-09-10
-  after the prototype was found). PR #3 code-reviewed in full (every new
-  `internal/mcp` file plus `cmd/ferro-mcp/main.go` read directly, not taken
-  on the agent's word) and independently re-verified 2026-09-10: build,
-  gofmt, vet, and both the default and `FERRO_TEST_BROWSER=1` race suites
-  all pass on the PR's rebased head, including all 16 named tests
-  individually confirmed running (not skipped). `docs/plan.md`'s T11.0-T11.10
-  checkboxes were stale (unchecked despite the commits landing) and have
-  been corrected. About to merge.
+- (none)
 
 ## Planned
-- E2, E4, E5, E6 from the v0.1 plan: outline only, expand after E11 lands.
-- Once E11 merges: delete the `ferro-wt-mcp` worktree and local
-  `mcp-server` branch (David's 2026-09-10 decision), after confirming
-  every ported commit's content is reachable from `main`.
+- E2, E4, E5, E6 from the v0.1 plan: outline only, expand when picked up.
 
 ## Blocked
 - (none)
