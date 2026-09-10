@@ -45,9 +45,14 @@
   2026 09 10. Ports the local `mcp-server` prototype (official
   `modelcontextprotocol/go-sdk`, `run_task` tool) rather than building from
   scratch -- see `docs/plan.md` E11 and ADR 004/005 (revised 2026-09-10
-  after the prototype was found). PR #3 open against `main`, rebased onto
-  `main` after PR #2 (E9/E10 closeout) merged; not self-merged, awaiting
-  review.
+  after the prototype was found). PR #3 code-reviewed in full (every new
+  `internal/mcp` file plus `cmd/ferro-mcp/main.go` read directly, not taken
+  on the agent's word) and independently re-verified 2026-09-10: build,
+  gofmt, vet, and both the default and `FERRO_TEST_BROWSER=1` race suites
+  all pass on the PR's rebased head, including all 16 named tests
+  individually confirmed running (not skipped). `docs/plan.md`'s T11.0-T11.10
+  checkboxes were stale (unchecked despite the commits landing) and have
+  been corrected. About to merge.
 
 ## Planned
 - E2, E4, E5, E6 from the v0.1 plan: outline only, expand after E11 lands.

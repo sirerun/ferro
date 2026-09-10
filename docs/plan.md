@@ -408,7 +408,7 @@ before deleting that every commit's content (`run_task`, the doFill fix,
 the prompt fix) is actually reachable from `main`, not just superficially
 similar.
 
-- [ ] **T11.0** Port the two still-relevant core-engine fixes the
+- [x] **T11.0** Port the two still-relevant core-engine fixes the
   `mcp-server` branch discovered live against `oxalpha.com/chat`, verified
   2026-09-10 against current `main` (not a `git cherry-pick` -- `internal/core`
   was substantially rewritten on 2026-09-07 after this branch forked, so
@@ -434,7 +434,13 @@ similar.
      do not port that fix, it would be redundant.)
   verifies: [infrastructure]
   acc: [a browser-gated test fills a textarea with no #text child (a fixture page using a controlled-input pattern) and the fill succeeds; the prompt sent to the planner contains a second worked example using extract.last.field]
-- [ ] **T11.1** `cmd/ferro-mcp/main.go` (renamed from the prototype's
+  (2026 09 10: shipped -- `doFill` in `internal/core/executor.go` now runs
+  `Clear` and `SendKeys` as two separate `chromedp.Run` calls, treating a
+  "does not have child #text node" `Clear` failure as non-fatal and
+  proceeding to type; any other `Clear` failure still aborts. The prompt in
+  `internal/core/runner.go` gained a second worked example using
+  `{{extract.last.price}}`.)
+- [x] **T11.1** `cmd/ferro-mcp/main.go` (renamed from the prototype's
   `cmd/mcp` for a distinct binary name on `PATH`): port the prototype's
   `run_task` tool and `configFromEnv` (same env vars: `FERRO_MCP_LLM_BASE_URL`,
   `FERRO_MCP_LLM_MODEL`, `FERRO_MCP_LLM_API_KEY`, `FERRO_MCP_CHROME_USER_DATA_DIR`
@@ -448,7 +454,9 @@ similar.
   main," not new design.
   verifies: [UC-007, UC-008]
   acc: [a `tools/list` request against the built ferro-mcp binary returns a non-empty tools array including run_task, and a run_task call against a testdata/pages fixture completes and returns a result plus RunMetrics]
-- [ ] **T11.2** `internal/mcp/leader.go`: exclusive `flock` on
+  (2026 09 10: shipped and independently re-verified -- `TestFerroMCP_ListToolsAndRunTask`
+  passes with `FERRO_TEST_BROWSER=1`.)
+- [x] **T11.2** `internal/mcp/leader.go`: exclusive `flock` on
   `$FERRO_MCP_HOME/mcp.lock` (default `$HOME/.ferro-mcp`) decides owner vs
   shim per ADR 004 (revised). Owner's `run_task`/tool handlers call
   `ferro.RunOn` directly against the real `ferro.Browser` pool from T11.1,
@@ -461,7 +469,9 @@ similar.
   attempts to become the new owner rather than erroring out.
   verifies: [UC-011, UC-012]
   acc: [starting two ferro-mcp processes concurrently against the same FERRO_MCP_HOME results in exactly one Chrome process under the owner's profile, and both processes answer a run_task tools/call on their own stdio with the same result]
-- [ ] **T11.3** `internal/mcp/allowlist.go`: load
+  (2026 09 10: shipped and independently re-verified -- `TestLeaderElection_TwoProcessesRaceToOwn`
+  and `TestFerroMCP_SharedTabIntegration` pass with `FERRO_TEST_BROWSER=1`.)
+- [x] **T11.3** `internal/mcp/allowlist.go`: load
   `$FERRO_MCP_HOME/allowlist.json` (flat list of allowed origins), expose
   `Check(origin string) error`. Called before executing `navigate`,
   `click`, `fill`, `select`, `key`, `scroll`, `extract`, `run_task`. A
@@ -470,7 +480,9 @@ similar.
   restart is needed to extend the allowlist.
   verifies: [UC-010]
   acc: [a navigate/click/fill/extract/run_task call whose target origin is absent from allowlist.json returns an error and performs no browser action; the same call against an allowlisted origin succeeds]
-- [ ] **T11.4** `internal/mcp/tools_primitive.go`: `snapshot`, `navigate`,
+  (2026 09 10: shipped and independently re-verified -- `TestAllowlist_MissingFileDeniesEverything`,
+  `TestAllowlist_AllowAndDeny`, and `TestAllowlist_ReloadsOnMtimeChange` all pass.)
+- [x] **T11.4** `internal/mcp/tools_primitive.go`: `snapshot`, `navigate`,
   `click`, `fill`, `select`, `key`, `scroll`, `wait`, `extract` tools, each
   mapped 1:1 onto `internal/core`'s existing `Action`/executor step
   vocabulary against the daemon's single shared tab (mutex-serialized
@@ -479,13 +491,23 @@ similar.
   do not.
   verifies: [UC-009]
   acc: [a scripted sequence of navigate, snapshot, click, fill, extract tool calls against a testdata/pages fixture produces the same result run_task would for an equivalent goal]
-- [ ] **T11.5** Gate `run_task` (T11.1) through T11.3's allowlist: check
+  (2026 09 10: shipped and independently re-verified -- `TestPrimitiveTools_MatchRunTaskResult`
+  and `TestPrimitiveTools_AllowAndDenyPerGatedTool` (one allow/deny subtest
+  per gated tool: navigate, click, fill, select, key, scroll, extract) pass;
+  `snapshot`/`wait` confirmed ungated by reading `tools_primitive.go`
+  directly. `actionCtx` derives from the owner's tab `CDP()` context, not a
+  per-call context, per ADR 001.)
+- [x] **T11.5** Gate `run_task` (T11.1) through T11.3's allowlist: check
   `Task.StartURL` (or the tab's current origin if empty) before the first
   planning call, returning the same structured denial the primitive tools
   return, without ever taking a snapshot of a non-allowlisted origin.
   verifies: [UC-008, UC-010]
   acc: [a run_task call with an allowlisted StartURL completes and returns a result plus llm_calls/repairs/plannings metrics; a run_task call whose StartURL is not allowlisted returns an error before any LLM call is made]
-- [ ] **T11.6** Session persistence: confirm the default `UserDataDir`
+  (2026 09 10: shipped and independently re-verified -- `TestRunTask_GatedByAllowlist`
+  passes; `tools_run_task.go`'s `runTask` calls `o.checkOrigin` before
+  `o.runner.RunOn`, matching ADR 005's "never even gets a snapshot of a
+  non-allowlisted origin" requirement.)
+- [x] **T11.6** Session persistence: confirm the default `UserDataDir`
   stays `~/.ferro-mcp/chrome-profile` end to end (T11.1 already sets this;
   this task is the cross-client verification). One client's stdio EOF
   (disconnect) closes only that client's connection (owner keeps serving
@@ -494,7 +516,13 @@ similar.
   browser pool.
   verifies: [UC-012]
   acc: [closing one of two connected client stdio streams leaves the other client able to complete a tool call against the same tab afterward]
-- [ ] **T11.7** `cmd/ferro-mcp/main.go`: extend the T11.1 binary with CLI
+  (2026 09 10: shipped and independently re-verified -- `TestOwnerSurvivesOwnStdioDisconnect`
+  passes: it drives the owner's stdio directly via os/exec pipes [not
+  mcp.Client, whose Close() escalates to SIGTERM/SIGKILL and would mask
+  the behavior under test], closes the owner's stdin, confirms the owner
+  process stays alive, and confirms a connected shim can still complete a
+  tool call against the same tab afterward.)
+- [x] **T11.7** `cmd/ferro-mcp/main.go`: extend the T11.1 binary with CLI
   lifecycle using the stdlib `flag` package only (no CLI framework,
   matching the Go skill convention). Default invocation (no args, as
   today) runs the MCP stdio server (auto leader-elects per T11.2).
@@ -503,7 +531,12 @@ similar.
   the lock/socket.
   verifies: [infrastructure]
   acc: [`ferro-mcp status` reports "not running" before any instance starts, then reports an owner PID once one is running, and `ferro-mcp stop` makes it report "not running" again]
-- [ ] **T11.8** Unit tests: `run_task` against current main's API (T11.1);
+  (2026 09 10: shipped and independently re-verified -- `TestFerroMCP_StatusAndStop`
+  passes. `HomeFromEnv()` was split out of `ConfigFromEnv()` [a deviation
+  from the original one-function design] so status/stop resolve
+  `$FERRO_MCP_HOME` without also requiring the LLM env vars a caller just
+  checking "is it running?" may not have set.)
+- [x] **T11.8** Unit tests: `run_task` against current main's API (T11.1);
   leader election under two processes racing to start (T11.2); allowlist
   allow/deny (T11.3); each primitive tool's mapping onto the equivalent
   `Action` (T11.4); `run_task`'s pre-plan allowlist check (T11.5). Table
@@ -511,7 +544,10 @@ similar.
   `ferro_test.go` where they apply.
   verifies: [UC-007, UC-008, UC-009, UC-010, UC-011]
   acc: [`go test ./internal/mcp/...` passes and covers at least one allow case and one deny case per gated tool]
-- [ ] **T11.9** Browser-gated integration test (`FERRO_TEST_BROWSER=1`):
+  (2026 09 10: shipped and independently re-verified -- `go test -race
+  ./internal/mcp/...` passes (9 top-level tests, plus 7 gated-tool subtests
+  under `TestPrimitiveTools_AllowAndDenyPerGatedTool`).)
+- [x] **T11.9** Browser-gated integration test (`FERRO_TEST_BROWSER=1`):
   start a `ferro-mcp` owner against a `testdata/pages` fixture with a
   permissive `allowlist.json`, connect a second `ferro-mcp` as a shim,
   exercise navigate+snapshot+click+extract and one `run_task` call from
@@ -520,7 +556,10 @@ similar.
   tab, not just unit-level mocks).
   verifies: [UC-008, UC-009, UC-011, UC-012]
   acc: [`FERRO_TEST_BROWSER=1 go test -run TestFerroMCP_SharedTabIntegration ./internal/mcp` passes]
-- [ ] **T11.10** Docs: README section "MCP server" (install, an `.mcp.json`
+  (2026 09 10: shipped and independently re-verified -- `FERRO_TEST_BROWSER=1
+  go test -race -run TestFerroMCP_SharedTabIntegration ./internal/mcp -v`
+  passes.)
+- [x] **T11.10** Docs: README section "MCP server" (install, an `.mcp.json`
   config snippet pointing at the `ferro-mcp` binary, the env vars from
   T11.1, the allowlist file format, and an explicit security note that
   every connected MCP client inherits the profile's signed-in sessions).
@@ -529,11 +568,21 @@ similar.
   `ferro.go`/`internal/core`. References to ADR 004 and ADR 005.
   verifies: [UC-007]
   acc: [README contains a "MCP server" heading with an allowlist.json example, and DESIGN.md references docs/adr/004 and docs/adr/005]
+  (2026 09 10: shipped and independently re-verified -- README's "## MCP
+  server" section includes the `.mcp.json` snippet, the env var table, the
+  allowlist.json example, and an explicit "Security note" paragraph on
+  inherited sessions; DESIGN.md references both ADRs and states the new
+  package is "a new consumer of" the library.)
 - [ ] **T11.11** Lint and format: `gofmt -l .` empty, `go vet ./...` clean,
   `go build ./...` green including the new `cmd/ferro-mcp` binary,
   `go test -race ./...` green. Then delete the `ferro-wt-mcp` worktree and
   local `mcp-server` branch per David's 2026-09-10 decision, after
   confirming every ported commit's content is reachable from `main`.
+  (2026 09 10: build/fmt/vet/race criteria independently re-verified green
+  against this PR's rebased head -- `go build ./...`, `gofmt -l .` (empty),
+  `go vet ./...`, `go test -race ./...`, and `FERRO_TEST_BROWSER=1 go test
+  -race ./...` all pass. Still open: deleting `ferro-wt-mcp`/`mcp-server`,
+  which happens after this PR merges to `main`.)
   verifies: [infrastructure]
   acc: [`gofmt -l . | wc -l` is 0, `go vet ./...` exits 0, `go build ./...` exits 0, and `git worktree list`/`git branch` no longer show ferro-wt-mcp/mcp-server]
 
