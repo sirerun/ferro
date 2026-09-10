@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	"github.com/dndungu/ferro"
+	"github.com/dndungu/ferro/internal/core"
 )
 
 // Owner holds the real ferro.Browser pool and the single shared tab (ADR
@@ -24,6 +25,16 @@ type Owner struct {
 	allow   *Allowlist
 
 	mu sync.Mutex // serializes every tool call against the shared tab
+
+	// exec, snap, and extracted back the primitive tools (T11.4): exec runs
+	// one Action at a time via ExecuteOne; snap is the last snapshot taken
+	// (nil until the client calls snapshot, or after navigate, since refs
+	// are page-specific), and resolves refs for click/fill/select/extract;
+	// extracted persists {{extract.last...}} state across primitive calls,
+	// the same templating vocabulary run_task's plans use.
+	exec      *core.Executor
+	snap      *core.Snapshot
+	extracted map[string]any
 
 	listener net.Listener
 
@@ -79,12 +90,14 @@ func NewOwner(ctx context.Context, cfg Config) (*Owner, error) {
 	}
 
 	return &Owner{
-		cfg:     cfg,
-		browser: b,
-		tab:     tab,
-		runner:  ferro.NewRunner(client, opts...),
-		allow:   allow,
-		stopCh:  make(chan struct{}),
+		cfg:       cfg,
+		browser:   b,
+		tab:       tab,
+		runner:    ferro.NewRunner(client, opts...),
+		allow:     allow,
+		exec:      core.NewExecutor(core.WaitStrategy{}),
+		extracted: map[string]any{},
+		stopCh:    make(chan struct{}),
 	}, nil
 }
 
@@ -209,6 +222,24 @@ func (o *Owner) dispatch(ctx context.Context, tool string, args json.RawMessage)
 	switch tool {
 	case "run_task":
 		return o.runTask(ctx, args)
+	case "snapshot":
+		return o.snapshot(ctx, args)
+	case "navigate":
+		return o.navigate(ctx, args)
+	case "click":
+		return o.click(ctx, args)
+	case "fill":
+		return o.fill(ctx, args)
+	case "select":
+		return o.selectOption(ctx, args)
+	case "key":
+		return o.key(ctx, args)
+	case "scroll":
+		return o.scroll(ctx, args)
+	case "wait":
+		return o.wait(ctx, args)
+	case "extract":
+		return o.extract(ctx, args)
 	default:
 		return nil, fmt.Errorf("unknown tool %q", tool)
 	}

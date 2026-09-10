@@ -131,6 +131,33 @@ func (x *Executor) ExecuteFrom(ctx context.Context, p *Plan, from int, extracted
 		Action: Action{Kind: "eof"}, Err: fmt.Errorf("plan ended without done")}
 }
 
+// ExecuteOne runs a single action against snap, the entrypoint for callers
+// outside a full Plan/Runner cycle (internal/mcp's primitive MCP tools:
+// navigate, click, fill, select, key, scroll, wait, extract map 1:1 onto
+// this). snap may be nil for actions that never resolve a ref (goto, key,
+// scroll, wait); store persists {{extract.last...}} state across calls
+// sharing it — pass a fresh map to start clean. done/plan_again are control
+// signals with no meaning outside a Plan and are rejected here.
+func (x *Executor) ExecuteOne(ctx context.Context, snap *Snapshot, a Action, store map[string]any) (any, error) {
+	if a.Kind == KindDone || a.Kind == KindPlanAgain {
+		return nil, fmt.Errorf("%s is a plan control signal, not a step ExecuteOne can run", a.Kind)
+	}
+	if err := validateAction(a); err != nil {
+		return nil, err
+	}
+	if err := expandTemplates(&a, store); err != nil {
+		return nil, err
+	}
+	res, err := x.executeAction(withSnapshot(ctx, snap), a, store)
+	if err != nil {
+		return nil, err
+	}
+	if res != nil {
+		store["last"] = res
+	}
+	return res, nil
+}
+
 // executeAction bounds the entire action, including WaitVisible and navigation.
 func (x *Executor) executeAction(ctx context.Context, a Action, extracted extractStore) (any, error) {
 	stepCtx, cancel := context.WithTimeout(ctx, x.wait.Budget)
