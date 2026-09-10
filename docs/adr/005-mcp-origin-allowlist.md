@@ -13,7 +13,7 @@ whatever origins the operator has logged into: email, banking, internal
 tools, anything. Every MCP client that connects to it inherits those
 authenticated sessions. Two threats follow directly from that:
 
-1. A malicious or compromised page visited during an autonomous `run_goal`
+1. A malicious or compromised page visited during an autonomous `run_task`
    plan can attempt prompt injection: text on the page that the planning
    LLM reads and treats as instructions, potentially steering the plan
    toward an action ferro then executes with the operator's live session
@@ -30,10 +30,15 @@ consent flow.
 
 ## Decision
 
+Revised 2026-09-10 to note: `$FERRO_MCP_HOME` defaults to
+`$HOME/.ferro-mcp` (the existing, already-signed-in profile directory from
+the prototype ADR 004 now builds on), not a new path, and the gated tool
+set now includes the prototype's `run_task` alongside the primitive tools.
+
 - `$FERRO_MCP_HOME/allowlist.json` holds a flat list of allowed origins
   (scheme+host+port, e.g. `https://mail.google.com`). No wildcards in v1.
 - Before executing any state-changing tool call --
-  `navigate`, `click`, `fill`, `select`, `key`, `scroll`, `run_goal` -- the
+  `navigate`, `click`, `fill`, `select`, `key`, `scroll`, `run_task` -- the
   server resolves the current tab's origin (or, for `navigate`, the target
   URL's origin) and checks it against the allowlist. `extract` is also
   gated, because reading authenticated page content is itself a
@@ -49,7 +54,7 @@ consent flow.
   implement first is fine; the requirement is "no restart needed to add an
   origin"), so the operator can extend it without killing the shared
   session.
-- `run_goal` additionally requires that `Task.StartURL` (or the tab's
+- `run_task` additionally requires that `Task.StartURL` (or the tab's
   current origin, if `StartURL` is empty) be allowlisted before the first
   LLM planning call is made at all -- an autonomous plan never even gets a
   snapshot of a non-allowlisted origin, closing off the prompt-injection
