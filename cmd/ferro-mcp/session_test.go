@@ -34,6 +34,30 @@ func processAlive(pid int) bool {
 	return proc.Signal(syscall.Signal(0)) == nil
 }
 
+// terminateGracefully asks cmd's process to shut down the way a real caller
+// would (SIGTERM, which main.go's signal.NotifyContext turns into a
+// cancelled ctx and its own deferred leader.Close()), so the owner's Chrome
+// subprocess exits along with it. A bare Process.Kill() (SIGKILL) cannot be
+// caught, so it would leave Chrome (a grandchild the owner launched, never a
+// child of the test) orphaned instead of cleaning up with it -- Kill() is
+// used here only as a fallback once graceful shutdown has had its chance.
+// Always reaps the process (via Wait) so cleanup never leaves a zombie.
+func terminateGracefully(t *testing.T, cmd *exec.Cmd) {
+	t.Helper()
+	if cmd.Process == nil {
+		return
+	}
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+	}
+}
+
 // waitForFile polls for path to exist, up to timeout.
 func waitForFile(t *testing.T, path string, timeout time.Duration) {
 	t.Helper()
@@ -99,11 +123,7 @@ func TestOwnerSurvivesOwnStdioDisconnect(t *testing.T) {
 	if err := cmdOwner.Start(); err != nil {
 		t.Fatalf("start owner: %v", err)
 	}
-	t.Cleanup(func() {
-		if cmdOwner.Process != nil {
-			_ = cmdOwner.Process.Kill()
-		}
-	})
+	t.Cleanup(func() { terminateGracefully(t, cmdOwner) })
 	ownerPID := cmdOwner.Process.Pid
 
 	// The owner's socket appears only once it has won the flock and called
