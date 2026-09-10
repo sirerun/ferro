@@ -1,6 +1,17 @@
 // Package browser is the chromedp tab pool: warm, reusable browser contexts
 // that satisfy core.BrowserContext. Cold Chrome launch is 300-1500ms;
 // pooling removes it from every task after the first wave.
+//
+// Context lifetime: whichever context is passed to the *first*
+// chromedp.Run call on a tab owns that tab's CDP event-listener goroutine
+// for the tab's entire lifetime. Wrapping that context (context.WithTimeout,
+// context.WithCancel) and later cancelling the wrapper — even after a
+// successful call — tears the whole session down, and every subsequent Run
+// on the tab then fails with "invalid context" or "context canceled".
+// newTab below enforces its launch deadline with a select on a goroutine
+// instead of a WithTimeout wrapper for exactly this reason, and only ever
+// passes the bare pooledContext.cdpCtx to that first Run. See
+// docs/adr/001-chromedp-context-lifetime.md.
 package browser
 
 import (
