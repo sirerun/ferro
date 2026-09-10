@@ -1,7 +1,7 @@
 # ADR 004: MCP server as a leader-elected daemon over a single shared browser
 
 ## Status
-Accepted
+Accepted (revised 2026-09-10 -- see "Revision" below)
 
 ## Date
 2026-09-10
@@ -27,25 +27,54 @@ proxy to would solve this, but doubles the binaries to build, package, and
 document, and adds a "did you remember to start the daemon" step that
 defeats the point of an MCP client auto-launching its server.
 
+### Revision (2026-09-10): builds on an existing local prototype
+
+Before writing any code against this ADR, a local-only worktree
+(`ferro-wt-mcp`, branch `mcp-server`, 7 commits from 2026-09-05, never
+pushed) was found already containing a working, live-tested MCP server:
+`cmd/mcp/main.go`, built on the **official**
+`github.com/modelcontextprotocol/go-sdk/mcp` (v1.7.0), exposing one
+`run_task` tool over one tab acquired once at startup. It was driven
+live against a real external chat site (`oxalpha.com/chat`) and its
+Chrome profile at `~/.ferro-mcp/chrome-profile` is already signed in by
+hand. This ADR's original text specified hand-rolling MCP's JSON-RPC 2.0
+framing from the standard library; that is now rejected in favor of the
+already-adopted official SDK -- there is no benefit to re-implementing a
+wire protocol an official, maintained SDK already covers, and the operator
+had already made this call. The rest of this ADR (leader election, one
+shared tab, deny-by-default allowlist in ADR 005) remains necessary: the
+prototype has no answer for a dozen MCP clients sharing one Chrome profile,
+which is exactly the gap this ADR closes.
+
 ## Decision
 
-`cmd/ferro-mcp` is a single binary with two roles, chosen at startup by
-leader election, not by a flag:
+`cmd/ferro-mcp` (renamed from the prototype's `cmd/mcp` for a distinct
+binary name on `PATH`) is a single binary with two roles, chosen at
+startup by leader election, not by a flag. Both roles run an identical
+`mcp.NewServer` from `github.com/modelcontextprotocol/go-sdk/mcp` with the
+same registered tools on their own stdio -- an MCP client cannot tell which
+role it talked to. The roles differ only in how a tool handler gets its
+answer:
 
 1. On start, it attempts an exclusive `flock` on `$FERRO_MCP_HOME/mcp.lock`
-   (default `$FERRO_MCP_HOME` is `$HOME/.ferro`).
-2. If it wins the lock, it is the **owner**: it opens the real
-   `ferro.Browser` pool against `$FERRO_MCP_HOME/chrome-profile`, listens on
-   a Unix domain socket at `$FERRO_MCP_HOME/mcp.sock`, and serves MCP
-   JSON-RPC directly over its own stdio to whichever client launched it.
-3. If the lock is held, it is a **shim**: it does not touch Chrome. It
-   dials the existing owner's Unix socket, and for every JSON-RPC request
-   it receives on its own stdio, forwards the request over the socket,
-   waits for the owner's response, and writes that response back to its
-   stdio. From the MCP client's point of view a shim is indistinguishable
-   from an owner; only one process per machine ever holds the browser.
+   (default `$FERRO_MCP_HOME` is `$HOME/.ferro-mcp`, the prototype's
+   existing, already-signed-in directory -- not a new path).
+2. If it wins the lock, it is the **owner**: its tool handlers call
+   `ferro.RunOn`/the executor directly against the real `ferro.Browser`
+   pool opened on `$FERRO_MCP_HOME/chrome-profile`, and it also listens on
+   a Unix domain socket at `$FERRO_MCP_HOME/mcp.sock` to serve the same
+   calls for shims.
+3. If the lock is held, it is a **shim**: it does not touch Chrome. Each of
+   its tool handlers encodes its own arguments, sends them to the owner
+   over the Unix socket using a small internal request/response encoding
+   (JSON lines; this is ferro's own wire format between owner and shim, not
+   MCP JSON-RPC -- the MCP protocol is only ever spoken by each process to
+   its own client on stdio), and returns the owner's answer as its own
+   tool result. From the MCP client's point of view a shim is
+   indistinguishable from an owner; only one process per machine ever
+   holds the browser.
 4. The owner keeps a **single shared tab** (not a tab per client). Tool
-   calls from every connected client (owner's own stdio, or forwarded from
+   calls from every connected client (owner's own stdio, or relayed from
    any shim) are serialized through one mutex before touching the tab. This
    matches the mental model this feature is for: one signed-in browser
    window, agents take turns driving it, the same way a human would hand
@@ -73,7 +102,15 @@ can reach it. No TCP port is opened.
   ever wanted, it is a new tool (`browser_new_tab`) added later, not a
   redesign of the leader-election model.
 - `internal/core`, `internal/browser`, `internal/llm`, and `ferro.go` are
-  untouched. `cmd/ferro-mcp` and `internal/mcp` are a new consumer of the
+  untouched by this ADR itself (T11.0's doFill fix, ported from the
+  prototype, does touch `internal/core`, but that is an independent bug
+  fix discovered via dogfooding, not a consequence of the MCP server
+  design). `cmd/ferro-mcp` and `internal/mcp` are a new consumer of the
   library, the same as `examples/shop` is, so DESIGN.md's "library, not
   platform -- no cloud, no daemon" principle continues to describe the
   library itself; the daemon lives one layer above it.
+- `go.mod` gains `github.com/modelcontextprotocol/go-sdk` and its
+  transitive dependencies (`google/jsonschema-go`, `segmentio/encoding`,
+  etc.) -- the first non-chromedp dependencies in this module. This is
+  accepted because it is the same official SDK the prototype already
+  proved out, not a new dependency decision made independently here.

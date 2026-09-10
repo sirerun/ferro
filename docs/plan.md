@@ -103,12 +103,12 @@ They are numbered as the session reported them:
    alongside E11 is recommended, not just historical cleanup.
 
 Constraints carried over from the v0.1 plan: the executor contains zero LLM
-calls; standard library only (no third-party JSON Schema validator, and no
-third-party MCP SDK either -- `internal/mcp` hand-rolls the JSON-RPC 2.0
-framing per the Go skill's "standard library over cobra/viper/etc."
-convention, the same convention the CLI lifecycle in T11.7 follows with
-`flag`, not a CLI framework); any OpenAI-compatible endpoint must keep
-working, including ones that ignore `response_format`.
+calls; standard library only for everything except MCP itself (no
+third-party JSON Schema validator; the CLI lifecycle in T11.7 uses the
+stdlib `flag` package, not a CLI framework) -- `github.com/modelcontextprotocol/go-sdk`
+is the one accepted exception (T11.1), because it is the official MCP SDK
+and a local prototype (see E11) already proved it out; any OpenAI-compatible
+endpoint must keep working, including ones that ignore `response_format`.
 
 ## Discovery summary
 
@@ -123,23 +123,25 @@ working, including ones that ignore `response_format`.
   README describes; `internal/mcp`'s `snapshot` tool returns this same
   text, so an MCP client gets the same token-efficient view ferro's own
   planner uses, not a raw DOM dump or screenshot.
-- `go.mod` has zero non-chromedp third-party dependencies. No MCP SDK
-  exists in the module graph; `internal/mcp` implements the JSON-RPC 2.0
-  stdio transport with `encoding/json` + `bufio` only, matching the
-  project's existing dependency discipline.
+- `go.mod` had zero non-chromedp third-party dependencies before this
+  pass. `github.com/modelcontextprotocol/go-sdk` (v1.7.0) is the only
+  addition, because a local prototype (see E11) already proved it is the
+  right choice -- resolvable via `go list -m`, verified 2026-09-10.
 - `internal/core/executor.go:278-320` (`doExtract`) and the click/fill/
   select handlers all funnel ref resolution through `resolveRef`; E11's
   primitive tools (T11.4) call the same `Action`/executor path the
   planner-driven flow uses, so there is exactly one execution engine, not
-  a second hand-rolled one for MCP.
-- No prior MCP server exists anywhere in this repo or its sibling
-  `sirerun/mcp-servers`/`sirerun/mint` (checked: neither directory contains
-  a Go MCP transport implementation ferro could import; `mint` generates
-  MCP servers from OpenAPI specs, which does not fit ferro's action-based,
-  non-REST tool surface).
+  a second implementation for MCP.
+- A local-only worktree `ferro-wt-mcp` (branch `mcp-server`) already had a
+  working single-tool MCP server (`cmd/mcp`, `run_task`, no multi-session
+  sharing) -- see E11's "Builds on a local prototype" note. Neither
+  `sirerun/mcp-servers` nor `sirerun/mint` contains anything ferro could
+  reuse instead (`mint` generates MCP servers from OpenAPI specs, which
+  does not fit ferro's action-based, non-REST tool surface).
 - `docs/adr/` had three ADRs (001-003) before this plan; 004 and 005 are
   new, written directly per plan/SKILL.md step 6 rather than only
-  described in prose here.
+  described in prose here, and both were revised on 2026-09-10 after the
+  prototype was found (see each ADR's "Revision" note).
 
 ### Use case summary
 
@@ -173,19 +175,26 @@ remaining gaps listed under E9/E10 below):
 - Context-lifetime documentation (ADR 001, `DESIGN.md`, code comments):
   not delivered (T10.1-T10.3).
 
-New in this pass:
+New in this pass (ported from and extending the `mcp-server` prototype --
+see E11):
 
-- `cmd/ferro-mcp`: a single binary, leader-elected owner-or-shim (ADR 004),
-  serving MCP JSON-RPC 2.0 over stdio to whichever client launched it.
-- `internal/mcp`: protocol framing, tool registry, the primitive browser
-  tools (`snapshot`, `navigate`, `click`, `fill`, `select`, `key`,
-  `scroll`, `wait`, `extract`), the high-level `run_goal` tool wrapping
-  `ferro.RunOn`, and the origin allowlist gate (ADR 005).
-- A persistent Chrome profile at `$FERRO_MCP_HOME/chrome-profile`
-  (default `$HOME/.ferro/chrome-profile`), separate from the repo-local
-  `chrome-profile/` dev artifact already gitignored at the repo root --
-  the daemon's profile must survive independently of any single git
-  worktree.
+- `cmd/ferro-mcp`: a single binary (renamed from the prototype's
+  `cmd/mcp`), leader-elected owner-or-shim (ADR 004), using the official
+  `github.com/modelcontextprotocol/go-sdk/mcp` on stdio to whichever
+  client launched it.
+- The prototype's `run_task` tool, ported onto current `main`'s
+  `ferro.RunOn` API and gated by the new allowlist.
+- `internal/mcp`: leader election (`leader.go`), the origin allowlist gate
+  (`allowlist.go`, ADR 005), and new primitive browser tools (`snapshot`,
+  `navigate`, `click`, `fill`, `select`, `key`, `scroll`, `wait`,
+  `extract`) alongside `run_task`.
+- Two core-engine bug fixes ported from the prototype's live dogfooding
+  (T11.0): the `doFill` textarea-`Clear` fix, and the planner prompt's
+  second `{{extract.last.field}}` worked example.
+- The prototype's already-signed-in Chrome profile at
+  `~/.ferro-mcp/chrome-profile` (`$FERRO_MCP_HOME` default), kept as-is --
+  separate from the repo-local `chrome-profile/` dev artifact already
+  gitignored at the repo root.
 - README + `DESIGN.md` documentation of the MCP server as a new library
   consumer, and its security model.
 
@@ -361,102 +370,160 @@ fidelity: executable
 ### E11 ferro-mcp: MCP server exposing the signed-in browser to agents
 fidelity: executable
 
+**Builds on a local prototype, does not start from scratch.** A worktree
+`ferro-wt-mcp` (branch `mcp-server`, local-only, 7 commits from
+2026-09-05) already has a working `cmd/mcp/main.go` using the official
+`github.com/modelcontextprotocol/go-sdk/mcp` (v1.7.0): one `run_task` tool
+over one tab acquired once at startup, live-tested against
+`oxalpha.com/chat`, with a Chrome profile at `~/.ferro-mcp/chrome-profile`
+already signed in by hand. David reviewed this discovery on 2026-09-10 and
+chose to rebuild E11 on top of it (over: shipping the prototype almost
+as-is with no multi-session story; ignoring it and hand-rolling MCP's wire
+protocol as this epic originally specified; or pausing for manual review).
 Decision rationale: `docs/adr/004-mcp-server-shared-browser-daemon.md`
-(leader-elected owner-or-shim single binary, one shared tab, Unix socket)
-and `docs/adr/005-mcp-origin-allowlist.md` (deny-by-default per-origin
-allowlist gating every state-changing tool call).
+(revised 2026-09-10 -- official SDK, leader-elected owner-or-shim single
+binary, one shared tab, Unix socket) and
+`docs/adr/005-mcp-origin-allowlist.md` (revised 2026-09-10 -- deny-by-default
+per-origin allowlist gating every state-changing tool call, including the
+ported `run_task`). `$FERRO_MCP_HOME` defaults to `~/.ferro-mcp` throughout
+this epic -- the prototype's existing, already-signed-in directory, not a
+new path.
 
-- [ ] **T11.1** `internal/mcp/protocol.go`: hand-rolled MCP JSON-RPC 2.0
-  framing over stdio (`initialize`, `notifications/initialized`,
-  `tools/list`, `tools/call`), stdlib only (`encoding/json`, `bufio`,
-  `os`). A `Tool` interface (`Name() string`, `Schema() json.RawMessage`,
-  `Call(ctx, args json.RawMessage) (json.RawMessage, error)`) and a
-  registry `tools/list` reads from.
-  verifies: [UC-007]
-  acc: [a `tools/list` request written to the process's stdin returns a JSON-RPC response on stdout whose `result.tools` is a non-empty array]
+Once T11.1-T11.11 land on `main` (ported, extended, and merged), delete the
+`ferro-wt-mcp` worktree and the local `mcp-server` branch (David's decision,
+2026-09-10): nothing in it has remaining unique value once ported. Confirm
+before deleting that every commit's content (`run_task`, the doFill fix,
+the prompt fix) is actually reachable from `main`, not just superficially
+similar.
+
+- [ ] **T11.0** Port the two still-relevant core-engine fixes the
+  `mcp-server` branch discovered live against `oxalpha.com/chat`, verified
+  2026-09-10 against current `main` (not a `git cherry-pick` -- `internal/core`
+  was substantially rewritten on 2026-09-07 after this branch forked, so
+  reimplement against the current code):
+  1. **Confirmed still live**: `doFill` (`internal/core/executor.go:193`)
+     calls `chromedp.Clear` directly; on a React/Vue-controlled textarea
+     with no `#text` DOM child, `Clear` fails with "does not have child
+     #text node" and aborts the fill even though there is nothing to
+     clear. Port the branch's fix (commit `6727b17`): treat that specific
+     `Clear` failure as "nothing to clear" and proceed to type; any other
+     `Clear` failure still aborts. Port its regression test
+     (`executor_browser_test.go`, browser-gated) adapted to current
+     `main`'s executor structure.
+  2. **Likely still relevant**: the planner prompt's only worked example
+     (`internal/core/runner.go`, the `"result": "searched"` example) never
+     demonstrates `{{extract.last.field}}` templating, so the planner model
+     tends to write descriptive prose into `done.result` instead of using
+     the template. Port the branch's second worked example (commit
+     `29279cd`) into the current prompt. (Bug 3 from that branch, a
+     `map[string]string` template-lookup failure, is NOT still present --
+     verified 2026-09-10 that `TestRuntimePartialExtraction` already
+     exercises `{{extract.last.price}}` successfully on current `main`;
+     do not port that fix, it would be redundant.)
+  verifies: [infrastructure]
+  acc: [a browser-gated test fills a textarea with no #text child (a fixture page using a controlled-input pattern) and the fill succeeds; the prompt sent to the planner contains a second worked example using extract.last.field]
+- [ ] **T11.1** `cmd/ferro-mcp/main.go` (renamed from the prototype's
+  `cmd/mcp` for a distinct binary name on `PATH`): port the prototype's
+  `run_task` tool and `configFromEnv` (same env vars: `FERRO_MCP_LLM_BASE_URL`,
+  `FERRO_MCP_LLM_MODEL`, `FERRO_MCP_LLM_API_KEY`, `FERRO_MCP_CHROME_USER_DATA_DIR`
+  defaulting to `~/.ferro-mcp/chrome-profile`, `FERRO_MCP_CHROME_PROFILE_DIRECTORY`,
+  `FERRO_MCP_START_URL`, `FERRO_MCP_HEADLESS`, `FERRO_MCP_CACHE_PATH`,
+  `FERRO_MCP_MAX_REPAIRS`, `FERRO_MCP_MAX_ELEMENTS`) onto current `main`'s
+  API (`ferro.RunOn`/`Runner.RunOn`, not the deprecated `Runner.Run` alias
+  the prototype used since it predates `RunOn`). Add
+  `github.com/modelcontextprotocol/go-sdk` to `go.mod` (`go mod tidy`).
+  This task's acceptance is "the prototype's behavior reproduced on current
+  main," not new design.
+  verifies: [UC-007, UC-008]
+  acc: [a `tools/list` request against the built ferro-mcp binary returns a non-empty tools array including run_task, and a run_task call against a testdata/pages fixture completes and returns a result plus RunMetrics]
 - [ ] **T11.2** `internal/mcp/leader.go`: exclusive `flock` on
-  `$FERRO_MCP_HOME/mcp.lock` (default `$HOME/.ferro`, overridable via
-  `FERRO_MCP_HOME`) decides owner vs shim per ADR 004. Owner opens
-  `ferro.NewBrowser` against `$FERRO_MCP_HOME/chrome-profile` and listens
-  on `$FERRO_MCP_HOME/mcp.sock` (mode 0600, dir mode 0700). Shim dials the
-  socket and forwards every JSON-RPC request/response verbatim between its
-  own stdio and the socket. A shim whose dial fails (stale socket) attempts
-  to become the new owner rather than erroring out.
+  `$FERRO_MCP_HOME/mcp.lock` (default `$HOME/.ferro-mcp`) decides owner vs
+  shim per ADR 004 (revised). Owner's `run_task`/tool handlers call
+  `ferro.RunOn` directly against the real `ferro.Browser` pool from T11.1,
+  and it listens on `$FERRO_MCP_HOME/mcp.sock` (mode 0600, dir mode 0700).
+  Shim registers the identical tool set via the SDK on its own stdio, but
+  each handler encodes its arguments as a JSON line, sends it to the
+  owner's socket, and returns the owner's JSON response as its own tool
+  result -- MCP JSON-RPC is spoken only between each process and its own
+  client, never on the socket. A shim whose dial fails (stale socket)
+  attempts to become the new owner rather than erroring out.
   verifies: [UC-011, UC-012]
-  acc: [starting two ferro-mcp processes concurrently against the same FERRO_MCP_HOME results in exactly one Chrome process under the owner's profile, and both processes answer a tools/call on their own stdio]
+  acc: [starting two ferro-mcp processes concurrently against the same FERRO_MCP_HOME results in exactly one Chrome process under the owner's profile, and both processes answer a run_task tools/call on their own stdio with the same result]
 - [ ] **T11.3** `internal/mcp/allowlist.go`: load
   `$FERRO_MCP_HOME/allowlist.json` (flat list of allowed origins), expose
   `Check(origin string) error`. Called before executing `navigate`,
-  `click`, `fill`, `select`, `key`, `scroll`, `extract`, `run_goal`. A
+  `click`, `fill`, `select`, `key`, `scroll`, `extract`, `run_task`. A
   denied call returns an MCP tool error naming the origin and the
   allowlist path to edit. Re-read the file when its mtime changes so no
   restart is needed to extend the allowlist.
   verifies: [UC-010]
-  acc: [a navigate/click/fill/extract/run_goal call whose target origin is absent from allowlist.json returns an error and performs no browser action; the same call against an allowlisted origin succeeds]
+  acc: [a navigate/click/fill/extract/run_task call whose target origin is absent from allowlist.json returns an error and performs no browser action; the same call against an allowlisted origin succeeds]
 - [ ] **T11.4** `internal/mcp/tools_primitive.go`: `snapshot`, `navigate`,
   `click`, `fill`, `select`, `key`, `scroll`, `wait`, `extract` tools, each
   mapped 1:1 onto `internal/core`'s existing `Action`/executor step
   vocabulary against the daemon's single shared tab (mutex-serialized
-  across every connected client). `snapshot` and `wait` bypass the T11.3
-  gate per ADR 005; the other seven do not.
+  across every connected client, same tab `run_task` already uses).
+  `snapshot` and `wait` bypass the T11.3 gate per ADR 005; the other seven
+  do not.
   verifies: [UC-009]
-  acc: [a scripted sequence of navigate, snapshot, click, fill, extract tool calls against a testdata/pages fixture produces the same result RunOn would for an equivalent Task]
-- [ ] **T11.5** `internal/mcp/tools_goal.go`: `run_goal` tool wrapping
-  `ferro.RunOn` against the shared tab, using an `LLMClient` configured
-  from environment (`FERRO_MCP_LLM_BASE_URL`, `FERRO_MCP_LLM_MODEL`,
-  defaulting to `OpenAICompatible`). Returns the task result plus
-  `RunMetrics` as the tool's structured content. Gated by T11.3 against
+  acc: [a scripted sequence of navigate, snapshot, click, fill, extract tool calls against a testdata/pages fixture produces the same result run_task would for an equivalent goal]
+- [ ] **T11.5** Gate `run_task` (T11.1) through T11.3's allowlist: check
   `Task.StartURL` (or the tab's current origin if empty) before the first
-  planning call.
-  verifies: [UC-008]
-  acc: [a run_goal call with an allowlisted StartURL completes and returns a result plus llm_calls/repairs/plannings metrics; a run_goal call whose StartURL is not allowlisted returns an error before any LLM call is made]
-- [ ] **T11.6** Session persistence: default `UserDataDir` is
-  `$FERRO_MCP_HOME/chrome-profile`, distinct from the repo-root
-  `chrome-profile/` dev artifact. One client's stdio EOF (disconnect)
-  closes only that client's connection (owner keeps serving remaining
-  clients and shims; a shim that was the disconnected client's process
-  simply exits) -- it must never close the shared tab or the browser pool.
+  planning call, returning the same structured denial the primitive tools
+  return, without ever taking a snapshot of a non-allowlisted origin.
+  verifies: [UC-008, UC-010]
+  acc: [a run_task call with an allowlisted StartURL completes and returns a result plus llm_calls/repairs/plannings metrics; a run_task call whose StartURL is not allowlisted returns an error before any LLM call is made]
+- [ ] **T11.6** Session persistence: confirm the default `UserDataDir`
+  stays `~/.ferro-mcp/chrome-profile` end to end (T11.1 already sets this;
+  this task is the cross-client verification). One client's stdio EOF
+  (disconnect) closes only that client's connection (owner keeps serving
+  remaining clients and shims; a shim that was the disconnected client's
+  process simply exits) -- it must never close the shared tab or the
+  browser pool.
   verifies: [UC-012]
   acc: [closing one of two connected client stdio streams leaves the other client able to complete a tool call against the same tab afterward]
-- [ ] **T11.7** `cmd/ferro-mcp/main.go`: CLI lifecycle using the stdlib
-  `flag` package only (no CLI framework, matching the Go skill
-  convention). Default invocation (no args) runs the MCP stdio
-  server (auto leader-elects per T11.2). `ferro-mcp status` reports
-  owner PID and socket path, or "not running". `ferro-mcp stop` signals
-  the owner to close the browser pool and remove the lock/socket.
+- [ ] **T11.7** `cmd/ferro-mcp/main.go`: extend the T11.1 binary with CLI
+  lifecycle using the stdlib `flag` package only (no CLI framework,
+  matching the Go skill convention). Default invocation (no args, as
+  today) runs the MCP stdio server (auto leader-elects per T11.2).
+  `ferro-mcp status` reports owner PID and socket path, or "not running".
+  `ferro-mcp stop` signals the owner to close the browser pool and remove
+  the lock/socket.
   verifies: [infrastructure]
   acc: [`ferro-mcp status` reports "not running" before any instance starts, then reports an owner PID once one is running, and `ferro-mcp stop` makes it report "not running" again]
-- [ ] **T11.8** Unit tests: protocol framing round-trip; leader election
-  under two processes racing to start (T11.2); allowlist allow/deny
-  (T11.3); each primitive tool's mapping onto the equivalent `Action`
-  (T11.4); `run_goal`'s pre-plan allowlist check (T11.5). Table tests using
-  the existing fake `LLMClient`/`BrowserContext` doubles in `ferro_test.go`
-  where they apply.
-  verifies: [UC-007, UC-009, UC-010, UC-011]
+- [ ] **T11.8** Unit tests: `run_task` against current main's API (T11.1);
+  leader election under two processes racing to start (T11.2); allowlist
+  allow/deny (T11.3); each primitive tool's mapping onto the equivalent
+  `Action` (T11.4); `run_task`'s pre-plan allowlist check (T11.5). Table
+  tests using the existing fake `LLMClient`/`BrowserContext` doubles in
+  `ferro_test.go` where they apply.
+  verifies: [UC-007, UC-008, UC-009, UC-010, UC-011]
   acc: [`go test ./internal/mcp/...` passes and covers at least one allow case and one deny case per gated tool]
 - [ ] **T11.9** Browser-gated integration test (`FERRO_TEST_BROWSER=1`):
   start a `ferro-mcp` owner against a `testdata/pages` fixture with a
   permissive `allowlist.json`, connect a second `ferro-mcp` as a shim,
-  exercise navigate+snapshot+click+extract from the shim's stdio, and
-  assert the owner's shared tab reflects the shim's actions (proving the
-  socket-forwarding path in T11.2 actually drives the real tab, not just
-  unit-level mocks).
+  exercise navigate+snapshot+click+extract and one `run_task` call from
+  the shim's stdio, and assert the owner's shared tab reflects the shim's
+  actions (proving the socket-relay path in T11.2 actually drives the real
+  tab, not just unit-level mocks).
   verifies: [UC-008, UC-009, UC-011, UC-012]
   acc: [`FERRO_TEST_BROWSER=1 go test -run TestFerroMCP_SharedTabIntegration ./internal/mcp` passes]
 - [ ] **T11.10** Docs: README section "MCP server" (install, an `.mcp.json`
-  config snippet pointing at the `ferro-mcp` binary, the allowlist file
-  format, and an explicit security note that every connected MCP client
-  inherits the profile's signed-in sessions). `DESIGN.md` note stating
-  `cmd/ferro-mcp`/`internal/mcp` are a new library consumer and do not
-  change the "library, not platform" status of `ferro.go`/`internal/core`.
-  References to ADR 004 and ADR 005.
+  config snippet pointing at the `ferro-mcp` binary, the env vars from
+  T11.1, the allowlist file format, and an explicit security note that
+  every connected MCP client inherits the profile's signed-in sessions).
+  `DESIGN.md` note stating `cmd/ferro-mcp`/`internal/mcp` are a new library
+  consumer and do not change the "library, not platform" status of
+  `ferro.go`/`internal/core`. References to ADR 004 and ADR 005.
   verifies: [UC-007]
   acc: [README contains a "MCP server" heading with an allowlist.json example, and DESIGN.md references docs/adr/004 and docs/adr/005]
 - [ ] **T11.11** Lint and format: `gofmt -l .` empty, `go vet ./...` clean,
   `go build ./...` green including the new `cmd/ferro-mcp` binary,
-  `go test -race ./...` green.
+  `go test -race ./...` green. Then delete the `ferro-wt-mcp` worktree and
+  local `mcp-server` branch per David's 2026-09-10 decision, after
+  confirming every ported commit's content is reachable from `main`.
   verifies: [infrastructure]
-  acc: [`gofmt -l . | wc -l` is 0, `go vet ./...` exits 0, `go build ./...` exits 0]
+  acc: [`gofmt -l . | wc -l` is 0, `go vet ./...` exits 0, `go build ./...` exits 0, and `git worktree list`/`git branch` no longer show ferro-wt-mcp/mcp-server]
 
 ### Archived: v0.1 plan (2026 08, pre-dogfood)
 
@@ -480,23 +547,29 @@ them in a later `/plan` pass once E9, E10, and E11 land.
 
 ## Parallel work
 
-- Wave 1: T11.1, T11.2 (disjoint files: `protocol.go` vs `leader.go`).
-  Independently, T9.1, T9.5, T9.6, T10.1, T10.2 can also run in this wave
-  (disjoint from E11 and from each other except T9.6/T10.1 both touch
-  `runner.go`/`executor.go` comments -- serialize that pair).
-- Wave 2: T11.3, T11.4, T11.7 (all depend on T11.1+T11.2 existing; disjoint
-  files: `allowlist.go`, `tools_primitive.go`, `cmd/ferro-mcp/main.go`).
+- Wave 1: T11.0 (independent core-engine fix, touches `executor.go`/
+  `runner.go`, no MCP dependency). Independently, T9.1, T9.5, T9.6, T10.1,
+  T10.2 can also run in this wave (disjoint from E11 and from each other
+  except T9.6/T10.1/T11.0 all touch `runner.go`/`executor.go` comments or
+  prompt text -- serialize that group).
+- Wave 2: T11.1 (depends on T11.0 landing first only if both touch
+  `runner.go`'s prompt in the same region -- otherwise independent; treat
+  as sequential after T11.0 to avoid a merge conflict on the prompt
+  string).
+- Wave 3: T11.2, T11.3, T11.7 (all depend on T11.1's binary existing;
+  disjoint files: `leader.go`, `allowlist.go`, CLI flags in `main.go`).
   T10.3 can also run here (depends only on T10.1 landing first for the ADR
   citation the test's comment should reference, not a hard code
   dependency).
-- Wave 3: T11.5, T11.6 (depend on T11.2's shared-tab plumbing; T11.5 also
-  depends on T11.3's allowlist existing).
-- Wave 4: T11.8, T11.9 (depend on all of T11.1-T11.7).
-- Wave 5: T11.10, T11.11.
+- Wave 4: T11.4, T11.5, T11.6 (T11.4 depends on T11.2's shared-tab
+  plumbing; T11.5 depends on T11.3's allowlist; T11.6 depends on T11.2).
+- Wave 5: T11.8, T11.9 (depend on all of T11.0-T11.7).
+- Wave 6: T11.10, T11.11 (T11.11 includes the worktree/branch cleanup and
+  must run last).
 
 E7, E8 are done. E9/E10's remaining tasks (T9.1, T9.5, T9.6, T10.1-T10.3)
-and E11 touch disjoint files except the `runner.go`/`executor.go` ADR-001
-comment pair noted above.
+and E11 touch disjoint files except the `runner.go`/`executor.go` shared
+region noted above.
 
 ## Risks
 
@@ -508,17 +581,21 @@ comment pair noted above.
   flock will simply not serve tool calls. Mitigated by T11.9's integration
   test exercising the owner/shim split against a real Chrome profile, not
   just unit-level mocks.
-- Prompt injection via page content read into an autonomous `run_goal`
+- Prompt injection via page content read into an autonomous `run_task`
   plan, or via `extract` results handed back to a calling agent that then
   acts on them outside ferro's control -- ferro cannot prevent the second
   half of that chain (what the calling agent does with data it already
   received). Mitigated on the ferro side by ADR 005's deny-by-default
-  allowlist, which stops `run_goal` from ever planning against a
+  allowlist, which stops `run_task` from ever planning against a
   non-allowlisted origin in the first place.
-- Single shared tab means agents queue behind each other; a slow `run_goal`
+- Single shared tab means agents queue behind each other; a slow `run_task`
   from one MCP client blocks primitive tool calls from another until it
   finishes. Accepted for v1 per ADR 004; a future `browser_new_tab` tool is
   the documented escape hatch if this becomes a real bottleneck.
+- T11.0's fixes are reimplemented against current `main`, not
+  cherry-picked, so they could diverge slightly from the prototype's
+  proven behavior -- mitigated by porting the prototype's own regression
+  tests alongside the fix, not just the fix.
 - `RunOn` on a tab mid-navigation from a previous task: the snapshot may be
   taken early. Existing `domSettle` covers most cases; `TestRuntimeRunOnAndCancellation`
   exercises the cross-call case.
@@ -535,7 +612,19 @@ comment pair noted above.
 
 ## Progress log
 
-- 2026 09 10: Reconciled E7-E10 against actual code and test names (see
+- 2026 09 10 (b): During `/apply` preflight, found a local-only worktree
+  `ferro-wt-mcp` (branch `mcp-server`, 7 commits, 2026-09-05, never
+  pushed) already containing a working MCP server built on the official
+  `github.com/modelcontextprotocol/go-sdk/mcp`, live-tested against
+  `oxalpha.com/chat`, with an already-signed-in Chrome profile at
+  `~/.ferro-mcp/chrome-profile`. Presented findings to David; he chose to
+  rebuild E11 on top of it and delete the old branch/worktree once ported.
+  Rewrote E11 (added T11.0 for two ported core-engine fixes; T11.1-T11.11
+  now port and extend the prototype instead of hand-rolling MCP's wire
+  protocol) and revised ADR 004/ADR 005 accordingly (official SDK,
+  `~/.ferro-mcp` as `$FERRO_MCP_HOME` default, `run_task` as the tool
+  name). Renumbered waves.
+- 2026 09 10 (a): Reconciled E7-E10 against actual code and test names (see
   "Implementation update -- 2026-09-10" above): checked off T7.0-T7.4,
   T8.1-T8.5, T9.2-T9.4 with corrected `acc:` lines; left T9.1, T9.5, T9.6,
   T10.1, T10.2, T10.3 open with the real gap stated per row. Added E11
