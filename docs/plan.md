@@ -429,9 +429,17 @@ similar.
      the template. Port the branch's second worked example (commit
      `29279cd`) into the current prompt. (Bug 3 from that branch, a
      `map[string]string` template-lookup failure, is NOT still present --
-     verified 2026-09-10 that `TestRuntimePartialExtraction` already
-     exercises `{{extract.last.price}}` successfully on current `main`;
-     do not port that fix, it would be redundant.)
+     verified 2026-09-10 by reading `doExtract`'s Fields path
+     (`internal/core/executor.go`) and `extractValue`
+     (`internal/core/templates.go`) directly: on current `main`, the
+     Fields path builds `out := map[string]any{}`, not `map[string]string`
+     as it did when the prototype branch forked, so `extractValue`'s
+     single `map[string]any` type assertion already covers it --
+     `TestShapeResult_ExpandsExtractLastField` exercises exactly this
+     shape. [The `TestRuntimePartialExtraction` name originally cited here
+     does not exist in the repo -- corrected 2026-09-10, another instance
+     of the citation-drift this plan's own reconciliation note warns
+     about.] Do not port the prototype's fix, it would be redundant.)
   verifies: [infrastructure]
   acc: [a browser-gated test fills a textarea with no #text child (a fixture page using a controlled-input pattern) and the fill succeeds; the prompt sent to the planner contains a second worked example using extract.last.field]
   (2026 09 10: shipped -- `doFill` in `internal/core/executor.go` now runs
@@ -573,16 +581,23 @@ similar.
   allowlist.json example, and an explicit "Security note" paragraph on
   inherited sessions; DESIGN.md references both ADRs and states the new
   package is "a new consumer of" the library.)
-- [ ] **T11.11** Lint and format: `gofmt -l .` empty, `go vet ./...` clean,
+- [x] **T11.11** Lint and format: `gofmt -l .` empty, `go vet ./...` clean,
   `go build ./...` green including the new `cmd/ferro-mcp` binary,
   `go test -race ./...` green. Then delete the `ferro-wt-mcp` worktree and
   local `mcp-server` branch per David's 2026-09-10 decision, after
   confirming every ported commit's content is reachable from `main`.
-  (2026 09 10: build/fmt/vet/race criteria independently re-verified green
-  against this PR's rebased head -- `go build ./...`, `gofmt -l .` (empty),
-  `go vet ./...`, `go test -race ./...`, and `FERRO_TEST_BROWSER=1 go test
-  -race ./...` all pass. Still open: deleting `ferro-wt-mcp`/`mcp-server`,
-  which happens after this PR merges to `main`.)
+  (2026 09 10: shipped -- PR #3 merged to `main` (rebase); build/fmt/vet
+  and both the default and `FERRO_TEST_BROWSER=1` race suites re-verified
+  green directly against merged `main` (not just the PR branch). Confirmed
+  every commit unique to `mcp-server` has its content reachable from
+  `main` (run_task, leader election, allowlist, doFill fix, planner
+  prompt fix, `MaxPlannings`, `FERRO_MCP_MAX_ELEMENTS`, the
+  `ProfileDirectory` CDP-guardrail documentation -- relocated to
+  `cmd/ferro-mcp/main.go`'s package doc) before deleting; the only
+  unported item was a `.gitignore` line for the prototype's own scratch
+  directory, with no bearing on the shipped feature. `ferro-wt-mcp`
+  worktree removed, `mcp-server` local branch deleted; `git worktree
+  list`/`git branch` no longer show either.)
   verifies: [infrastructure]
   acc: [`gofmt -l . | wc -l` is 0, `go vet ./...` exits 0, `go build ./...` exits 0, and `git worktree list`/`git branch` no longer show ferro-wt-mcp/mcp-server]
 
