@@ -362,11 +362,20 @@ fidelity: executable
   so there was nothing further to move out of a "not yet resolved" list.)
   verifies: [UC-006]
   acc: [`grep -n "Context lifetime" DESIGN.md` matches]
-- [ ] **T10.3** Regression test: wrap `cdpCtx` in `WithTimeout`, cancel it
+- [x] **T10.3** Regression test: wrap `cdpCtx` in `WithTimeout`, cancel it
   after a successful Run, assert the next Run fails (proving the landmine
   is real), then the inverse using the pool's `select` pattern proving the
-  tab survives. Browser-gated. (2026 09 10: NOT done -- no
-  `TestContextLifetime` exists in `internal/browser`.)
+  tab survives. Browser-gated. (2026 09 10: shipped as `TestContextLifetime`
+  in `internal/browser/browser_test.go`, two subtests: the first builds a
+  bare chromedp context outside `newTab`'s safeguards, passes a
+  `context.WithTimeout` wrapper of it to the first `chromedp.Run`, and
+  asserts the next `Run` fails after the wrapper is cancelled; the second
+  goes through the real pool (`New`/`Acquire`, which launches via
+  `newTab`'s select-on-a-goroutine pattern) and asserts two sequential
+  `Run` calls on the same tab both succeed. Verified locally: both
+  subtests pass under `FERRO_TEST_BROWSER=1 go test -run TestContextLifetime
+  ./internal/browser` (also under `-race`), and the test skips cleanly
+  without the env var.)
   verifies: [UC-006]
   acc: [`FERRO_TEST_BROWSER=1 go test -run TestContextLifetime ./internal/browser` passes both subtests]
 
