@@ -104,15 +104,23 @@ func TestFerroMCP_ListToolsAndRunTask(t *testing.T) {
 		{"kind":"done","result":"searched"}
 	]}`)
 
+	// A fresh, empty $FERRO_MCP_HOME per test run: never the operator's real
+	// ~/.ferro-mcp (that holds the actual signed-in profile plus a
+	// possibly-live daemon lock/socket this test must not touch).
+	home := shortTempDir(t)
+	// T11.5: run_task is gated on Task.StartURL (ADR 005) -- allowlist the
+	// fixture's origin so this test exercises run_task, not the allowlist
+	// deny path.
+	if err := os.WriteFile(filepath.Join(home, "allowlist.json"), []byte(`["`+fixture.URL+`"]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
 	cmd := exec.Command(bin)
 	cmd.Stderr = os.Stderr
 	cmd.Env = append(os.Environ(),
 		"FERRO_MCP_LLM_BASE_URL="+llm.URL,
 		"FERRO_MCP_LLM_MODEL=fake",
-		// A fresh, empty $FERRO_MCP_HOME per test run: never the operator's
-		// real ~/.ferro-mcp (that holds the actual signed-in profile plus a
-		// possibly-live daemon lock/socket this test must not touch).
-		"FERRO_MCP_HOME="+shortTempDir(t),
+		"FERRO_MCP_HOME="+home,
 		"FERRO_MCP_HEADLESS=true",
 	)
 
