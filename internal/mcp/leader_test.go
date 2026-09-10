@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -24,6 +25,14 @@ func TestLeaderElection_TwoProcessesRaceToOwn(t *testing.T) {
 	home := shortTempDir(t)
 	fixture := fixtureServer(t)
 	llm := fakeLLMServer(t, searchPlan)
+
+	// T11.5: run_task is gated on Task.StartURL (ADR 005) -- allowlist the
+	// fixture's origin so this test exercises leader election, not the
+	// allowlist deny path.
+	if err := os.WriteFile(filepath.Join(home, "allowlist.json"),
+		[]byte(`["`+fixture.URL+`"]`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	cfg := Config{
 		Home:       home,

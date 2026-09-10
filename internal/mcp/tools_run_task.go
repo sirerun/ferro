@@ -48,6 +48,15 @@ func (o *Owner) runTask(ctx context.Context, args json.RawMessage) (any, error) 
 		return nil, fmt.Errorf("goal is required")
 	}
 
+	// ADR 005: gate on Task.StartURL (or the tab's current origin, if
+	// empty) before the first LLM planning call is made at all -- an
+	// autonomous plan must never even get a snapshot of a non-allowlisted
+	// origin, closing off the prompt-injection vector at the source rather
+	// than only at the point of action.
+	if err := o.checkOrigin(ctx, in.StartURL); err != nil {
+		return nil, err
+	}
+
 	result, metrics, err := o.runner.RunOn(ctx, o.tab, ferro.Task{
 		Goal:         in.Goal,
 		StartURL:     in.StartURL,
