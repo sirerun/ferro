@@ -96,8 +96,8 @@ func (r *Runner) Run(ctx context.Context, execCtx BrowserContext, t Task) (resul
 	if err = ctx.Err(); err != nil {
 		return nil, m, err
 	}
-	// Bridge caller cancellation into the CDP context after Acquire has launched
-	// the tab. First-run ownership remains with Browser (ADR 001).
+	// Bridge caller cancellation into the CDP context after Acquire has
+	// already launched the tab (see BrowserContext.CDP).
 	runCtx, cancel := context.WithCancel(execCtx.CDP())
 	defer cancel()
 	stop := context.AfterFunc(ctx, cancel)
@@ -256,9 +256,8 @@ func (r *Runner) executeWithRepairs(ctx context.Context, cdpCtx context.Context,
 	from := 0
 
 	for {
-		// Must attach the snapshot to cdpCtx — the chromedp-wrapped tab
-		// context — not the plain caller ctx, or every chromedp.Run inside
-		// ExecuteFrom fails with "invalid context".
+		// Attach the snapshot to cdpCtx, not the plain caller ctx (see
+		// BrowserContext.CDP).
 		ectx := withSnapshot(cdpCtx, snap)
 		result, rerr := r.Executor.ExecuteFrom(ectx, plan, from, extracted)
 		if rerr != nil {
@@ -290,8 +289,8 @@ func (r *Runner) executeWithRepairs(ctx context.Context, cdpCtx context.Context,
 			m.Repairs++
 		}
 
-		// Fresh snapshot for the repair decision. Must use cdpCtx, not the
-		// plain caller ctx — same "invalid context" landmine as above.
+		// Fresh snapshot for the repair decision: cdpCtx again, not the
+		// plain caller ctx (see BrowserContext.CDP).
 		fresh, err := TakeSnapshot(cdpCtx, maxElements)
 		if err != nil {
 			return nil, extracted, &RunError{StepIndex: rerr.StepIndex, Action: rerr.Action,

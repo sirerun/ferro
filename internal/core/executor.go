@@ -17,7 +17,14 @@ import (
 // wrapper; defined here because the Runner (below) is the consumer.
 type BrowserContext interface {
 	Navigate(url string) error
-	CDP() context.Context // chromedp execution context for the current page
+	// CDP returns the chromedp execution context for the tab. Every
+	// chromedp.Run this package makes — snapshots, action execution,
+	// repairs — must run against this context (or a context derived from
+	// it), never a caller's unrelated ctx: whichever context first ran on
+	// the tab owns its CDP event-listener goroutine for the tab's whole
+	// lifetime, and passing a different context makes chromedp.Run fail
+	// with "invalid context". See docs/adr/001-chromedp-context-lifetime.md.
+	CDP() context.Context
 	SnapshotMaxElements() int
 	Release()
 }

@@ -338,15 +338,18 @@ fidelity: executable
 ### E10 Document the chromedp context-lifetime convention (ADR 001)
 fidelity: executable
 
-- [ ] **T10.1** Add a package doc paragraph to `internal/browser/browser.go`
+- [x] **T10.1** Add a package doc paragraph to `internal/browser/browser.go`
   stating the rule and citing `docs/adr/001-chromedp-context-lifetime.md`.
   Replace the three inline notes in `runner.go` (lines 68, 202, 224) with
   one comment on `BrowserContext.CDP()` in `executor.go` referencing the
-  ADR. (2026 09 10: NOT done -- `grep -c "adr/001" internal/browser/browser.go
-  internal/core/executor.go` is 0 in both files. `cmd/ferro-mcp`'s daemon
-  (ADR 004) holds the tab pool open for the life of the process and will
-  hit this exact landmine surface area; doing this task before or
-  alongside E11 is recommended.)
+  ADR. (2026 09 10: shipped -- `browser.go`'s package doc gained a
+  "Context lifetime" paragraph citing the ADR; `executor.go`'s
+  `BrowserContext.CDP()` gained the single authoritative comment explaining
+  the "invalid context" failure mode; the three inline notes in
+  `runner.go` (bridging caller cancellation into the CDP context, the
+  executeWithRepairs snapshot attach, and the repair-decision snapshot)
+  were trimmed to short pointers back to `BrowserContext.CDP` instead of
+  re-explaining the landmine each time.)
   verifies: [UC-006]
   acc: [`grep -c "adr/001" internal/browser/browser.go internal/core/executor.go` reports at least 1 in each]
 - [ ] **T10.2** Add a "Context lifetime" section to `DESIGN.md` under
