@@ -23,6 +23,25 @@ the Shipped entries below, which reflect independently re-verified reality.
   (`Runner.Run` dropped a `WithDriver` override). Two disclosed scope
   edges left for T12.3/T12.4 (locator.go's residual chromedp call,
   TakeSnapshot not yet driver-routed) -- see `docs/plan.md` T12.0.
+- E12 T12.2 generic MV3 extension + ref-numbering parity port: PR #10,
+  merged 2026-09-10 (rebase). Independently re-verified: `adapter.js`'s
+  `takeSnapshot()` is a line-by-line port of `snapshot.go`'s DOM-walk
+  (including its pre-existing dead `tag === 'INPUT' && el.type !== 'hidden'`
+  clause, ported as-is -- not this task's job to fix); the Go-side
+  (`snapshot_parity_test.go`, chromedp) and Node-side
+  (`extension/snapshot.test.cjs`, a zero-dependency CDP client) parity
+  tests both re-run independently against the checked-in golden, both
+  green; `background.js`'s trusted-click retry logic diffed directly
+  against `ox`'s original and confirmed verbatim. **Caught before
+  merging:** this branch was built from a base that predated T12.0/T12.1's
+  own doc-update merges, so its `docs/plan.md` diff would have silently
+  reverted their checkboxes and shipped-notes despite GitHub reporting
+  `mergeStateStatus: CLEAN` -- the same stale-base failure class as PR #3
+  earlier this session (`docs/devlog.md`). Fixed in the same PR by
+  resetting `plan.md` to `main`'s version and reapplying only T12.2's own
+  edit before merge. **Wave 1 (T12.0, T12.1, T12.2) is now complete** --
+  full `go test -race ./...` and `FERRO_TEST_BROWSER=1 go test -race ./...`
+  (including the Node parity test) all green together on merged `main`.
 
 ## Shipped
 - Compiling module with core, browser pool, OpenAI-compatible client, resolution cache, examples, integration suite skeleton.
@@ -52,23 +71,18 @@ the Shipped entries below, which reflect independently re-verified reality.
   `FERRO_MCP_MAX_ELEMENTS`) is reachable from `main`.
 
 ## In progress
-- E12 Wave 1, dispatched 2026-09-10 via `/apply` (pool mode, claims held):
-  T12.2 (generic MV3 extension + ref-numbering parity port, agent
-  `ferra_t12-2`) still running in its own isolated worktree (plan-
-  designated `lane: agent`, like T12.0). T12.0 and T12.1 shipped -- see
-  Shipped above. T12.1 was routed to subagent dispatch instead of kazi's
-  autonomous-harness lane for this run (a deliberate, disclosed deviation:
-  solo-project proportionality plus the laptop's disk pressure at dispatch
-  time, ~4-7GB free throughout).
+- (none -- E12 Wave 1 complete, see Shipped above)
 
 ## In flight
-- (none -- no PRs opened yet for E12 Wave 1)
+- (none)
 
 ## Planned
-- E12 remaining waves (T12.3-T12.12): integration, backend selection,
-  blocked-state handling, the Tailscale remote listener, tests, docs, and
-  the final lint/build/test gate -- blocked on Wave 1 landing. See
-  `docs/plan.md` E12 and ADR 006/007.
+- E12 Wave 2 (T12.3, `ExtensionDriver` implementing `core.PageDriver`):
+  the integration bottleneck -- depends on all of Wave 1, now unblocked.
+  Not yet claimed/dispatched.
+- E12 Waves 3-7 (T12.4-T12.12): backend selection, blocked-state handling,
+  the Tailscale remote listener, tests, docs, and the final lint/build/test
+  gate -- blocked on Wave 2. See `docs/plan.md` E12 and ADR 006/007.
 - E9's T9.6 (trim redundant planner-prompt prose) still open, small and
   unclaimed -- see `docs/plan.md`.
 - E2, E4, E5, E6 from the v0.1 plan: outline only, expand when picked up.
