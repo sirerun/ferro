@@ -157,13 +157,32 @@ just background.
 **Wave 1** (all three build against the two ADRs' already-fixed spec;
 no task in this wave depends on another):
 
-- [ ] **T12.0** Extract `core.PageDriver` from `internal/core/executor.go`:
+- [x] **T12.0** Extract `core.PageDriver` from `internal/core/executor.go`:
   an interface covering navigate, click(selector), fill(selector, text),
   select, key, scroll, extract(fields), run-the-snapshot-compiler-script,
   and wait-visible -- exactly the calls `doFill`/`doClick`/`doExtract`/the
   snapshot path make to chromedp today. Implement `ChromedpDriver` wrapping
   the existing chromedp calls with zero behavior change. `Executor` takes a
   `PageDriver` instead of calling chromedp directly.
+  Shipped 2026-09-10, PR #8 (rebase-merged). Independently re-verified:
+  `internal/core/driver.go`'s `ChromedpDriver` is a verbatim relocation of
+  every JS/chromedp bundle that used to live inline in executor.go (line-
+  by-line diffed, not just trusted); `grep -c "chromedp\." internal/core/executor.go`
+  confirmed 0; both `go test -race ./...` and `FERRO_TEST_BROWSER=1 go test
+  -race ./...` re-run on the merged tip, all packages green, no orphaned
+  Chrome processes. One coordinator-independent deviation the task itself
+  caught and fixed: `Runner.Run`'s per-run `Executor` copy silently dropped
+  a `WithDriver` override (dormant today, would have bitten T12.3);
+  patched by chaining `.WithDriver(r.Executor.driver)`. Two known,
+  disclosed scope edges for T12.3/T12.4 to pick up (not blocking, not
+  hidden): (1) `internal/core/locator.go`'s cached-selector validation
+  still calls `chromedp.Run` directly (ADR 006's 9-primitive list has no
+  "verify cached selector" operation; degrades to a cache miss under a
+  non-chromedp backend, not a hard failure); (2) `Runner` and
+  `internal/mcp/tools_primitive.go` still call the package-level
+  `TakeSnapshot` directly rather than through a driver -- `Executor` never
+  routed snapshot calls through itself either way, so this is unchanged
+  behavior, not a regression.
   verifies: [infrastructure]
   lane: agent
   acc: [`go test -race ./...` and `FERRO_TEST_BROWSER=1 go test -race ./...` both pass with the exact same pass/fail set as before this task, and `grep -c "chromedp\." internal/core/executor.go` drops to 0 (all chromedp calls now live only in the ChromedpDriver implementation)]
