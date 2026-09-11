@@ -157,20 +157,52 @@ just background.
 **Wave 1** (all three build against the two ADRs' already-fixed spec;
 no task in this wave depends on another):
 
-- [ ] **T12.0** Extract `core.PageDriver` from `internal/core/executor.go`:
+- [x] **T12.0** Extract `core.PageDriver` from `internal/core/executor.go`:
   an interface covering navigate, click(selector), fill(selector, text),
   select, key, scroll, extract(fields), run-the-snapshot-compiler-script,
   and wait-visible -- exactly the calls `doFill`/`doClick`/`doExtract`/the
   snapshot path make to chromedp today. Implement `ChromedpDriver` wrapping
   the existing chromedp calls with zero behavior change. `Executor` takes a
   `PageDriver` instead of calling chromedp directly.
+  Shipped 2026-09-10, PR #8 (rebase-merged). Independently re-verified:
+  `internal/core/driver.go`'s `ChromedpDriver` is a verbatim relocation of
+  every JS/chromedp bundle that used to live inline in executor.go (line-
+  by-line diffed, not just trusted); `grep -c "chromedp\." internal/core/executor.go`
+  confirmed 0; both `go test -race ./...` and `FERRO_TEST_BROWSER=1 go test
+  -race ./...` re-run on the merged tip, all packages green, no orphaned
+  Chrome processes. One coordinator-independent deviation the task itself
+  caught and fixed: `Runner.Run`'s per-run `Executor` copy silently dropped
+  a `WithDriver` override (dormant today, would have bitten T12.3);
+  patched by chaining `.WithDriver(r.Executor.driver)`. Two known,
+  disclosed scope edges for T12.3/T12.4 to pick up (not blocking, not
+  hidden): (1) `internal/core/locator.go`'s cached-selector validation
+  still calls `chromedp.Run` directly (ADR 006's 9-primitive list has no
+  "verify cached selector" operation; degrades to a cache miss under a
+  non-chromedp backend, not a hard failure); (2) `Runner` and
+  `internal/mcp/tools_primitive.go` still call the package-level
+  `TakeSnapshot` directly rather than through a driver -- `Executor` never
+  routed snapshot calls through itself either way, so this is unchanged
+  behavior, not a regression.
   verifies: [infrastructure]
   lane: agent
   acc: [`go test -race ./...` and `FERRO_TEST_BROWSER=1 go test -race ./...` both pass with the exact same pass/fail set as before this task, and `grep -c "chromedp\." internal/core/executor.go` drops to 0 (all chromedp calls now live only in the ChromedpDriver implementation)]
-- [ ] **T12.1** `internal/extbridge`: the Go-side poll/reply HTTP server per
+- [x] **T12.1** `internal/extbridge`: the Go-side poll/reply HTTP server per
   ADR 006 (`GET /next`, `POST /reply`, bearer-token authed, one active
   pairing at a time), bound to loopback only for now (ADR 007's Tailscale
-  binding is T12.6, layered on top, not built here).
+  binding is T12.6, layered on top, not built here). Shipped 2026-09-10,
+  PR #6 (rebase-merged). Two ADR-006 wire details it had to decide and
+  document since the ADR didn't fully specify them: the extension's tab id
+  travels as an `X-Ferro-Tab-Id` header on `/next` (no third pairing
+  endpoint exists), and `/next` long-polls up to 30s (`WithPollTimeout`
+  overridable) before returning 204, rather than returning 204 instantly.
+  Independently re-verified: build/vet/gofmt clean, 13 named tests
+  (`internal/extbridge`) plus the full `go test ./...` suite green on
+  merged `main`. One coordinator fix during review: the package doc
+  overclaimed that `POST /reply` is tab-id-checked, matching `/next` --
+  it isn't (only bearer-token + the unforgeable per-action id gate it),
+  corrected in the same PR. Whether `/reply` should also assert the tab id
+  once the real extension (T12.2) is wired in is left as a T12.3 call, not
+  decided here.
   verifies: [infrastructure]
   acc: [a test HTTP client can long-poll `/next`, receive a queued action, and post a `/reply` that the server-side caller (a Go test double) receives with matching id]
 - [x] **T12.2** `extension/`: a new Manifest V3 Chrome extension in this
@@ -182,6 +214,26 @@ no task in this wave depends on another):
   generalized `blocked()` heuristic (CAPTCHA/verification/login gates, not
   site-specific text), and a JavaScript port of
   `internal/core/snapshot.go`'s element-selection and numbering algorithm.
+  Shipped 2026-09-10, PR #10 (rebase-merged). Independently re-verified:
+  `adapter.js`'s `takeSnapshot()` DOM-walk is a line-by-line port of
+  `snapshot.go`'s `snapshotJS` (including its pre-existing dead/redundant
+  `tag === 'INPUT' && el.type !== 'hidden'` clause, ported faithfully as-is
+  since this is a port task, not a snapshot.go fix); the parity test
+  (`internal/core/snapshot_parity_test.go`, chromedp, and
+  `extension/snapshot.test.cjs`, Node's built-in test runner via a
+  zero-dependency CDP client) both re-run independently with
+  `FERRO_TEST_BROWSER=1`, both pass against the checked-in golden
+  (`internal/core/testdata/fixture.golden.json`); `background.js`'s
+  trusted-click retry logic (3 attempts, already-attached/another-debugger
+  classification, the `inputStarted` uncertain-outcome guard, 400ms*attempt
+  backoff) diffed directly against ox's original and confirmed verbatim;
+  `gofmt`/`go vet`/`go build` clean, manifest.json valid JSON, all
+  extension JS passes `node --check`, full `go test -race ./...` and
+  `FERRO_TEST_BROWSER=1 go test -race ./...` green, zero-stub grep clean,
+  no orphaned Chrome processes. One documented structural deviation from
+  ox (not a technique change): navigation is handled in `background.js`
+  rather than the content script's poll loop, because a real page
+  navigation destroys and reinjects the content script.
   verifies: [UC-014]
   lane: agent
   acc: [loading the extension unpacked and pointing it at a local test HTML fixture, its content-script snapshot function returns a numbered element list; a second test asserts this list's ordering and element selection matches `internal/core/snapshot.go`'s output for the same fixture file, checked by a shared, versioned fixture page both the Go test and a Node-based extension test load]
@@ -350,32 +402,18 @@ unchanged from the prior plan revision.
 
 ## Progress log
 
-- 2026 09 10 (d): T12.2 done (PR pending): `extension/` -- a generic
-  Manifest V3 Chrome extension (`manifest.json`, `background.js`,
-  `content.js`, `adapter.js`, `popup.html`/`popup.js`), adapted from
-  `~/Code/dndungu/ox/extension/`'s techniques (chrome.debugger trusted
-  click/key with ox's dropped-debugger retry logic verbatim, native-setter
-  fill, single-tab pairing) but generic across sites, not oxalpha.com-
-  specific. `adapter.js`'s `takeSnapshot()` is a faithful JS port of
-  `internal/core/snapshot.go`'s element-selection/numbering algorithm
-  (its DOM-walk half is copied from `snapshotJS` verbatim). Parity proven
-  by a shared fixture (`extension/testdata/fixture.html`) loaded by both
-  `internal/core/snapshot_parity_test.go` (chromedp, real headless
-  Chrome) and `extension/snapshot.test.cjs` (Node's built-in test runner,
-  real headless Chrome via a ~150-line zero-dependency CDP client in
-  `extension/testsupport/cdp.cjs` -- jsdom/hand-mocked DOM were rejected
-  because the algorithm depends on real getComputedStyle/
-  getBoundingClientRect layout, which neither reproduces faithfully); both
-  compare against a checked-in golden (`internal/core/testdata/
-  fixture.golden.json`) and both pass. `blocked()` was generalized from
-  ox's oxalpha-specific text matching to generic structural/vocabulary
-  heuristics (password/email inputs, known challenge-provider iframes,
-  generic verification/rate-limit phrasing). Navigation ("goto") is
-  handled in `background.js` rather than mirroring ox's content-script
-  poll loop, because a real page navigation destroys and reinjects the
-  content script -- a deliberate, documented deviation from ox's
-  structure, not from its techniques.
-
+- 2026 09 10 (e): Wave 1 complete -- T12.0, T12.1, T12.2 all shipped
+  (PRs #8, #6, #10, all rebase-merged and independently re-verified by
+  the coordinator, not just taken on the dispatching agents' word). T12.2's
+  branch was built from a base that predated T12.0/T12.1's own doc-update
+  merges, so its `docs/plan.md` diff would have silently reverted their
+  checkboxes and shipped-notes if merged as-is -- caught before merging by
+  diffing the PR branch against current `main`, not by trusting GitHub's
+  `mergeStateStatus: CLEAN` (a line-based clean merge is not evidence the
+  result is semantically correct; this is the same stale-base failure
+  class as PR #3 earlier this session, see `docs/devlog.md`). Fixed by
+  resetting `docs/plan.md` to `main`'s version in the review worktree and
+  reapplying only T12.2's own checkbox/notes on top, before merging.
 - 2026 09 10 (c): Added E12 (extension execution backend + Tailscale remote
   transport) after David asked for DGX/Rakazo agents to drive his real
   Chrome session overnight. Surveyed `~/Code/dndungu/ox/extension/` as
