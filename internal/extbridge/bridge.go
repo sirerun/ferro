@@ -25,11 +25,16 @@
 // id) per ADR 006 decision #2 — mirroring ferro-mcp's single-shared-tab
 // model (ADR 004, internal/mcp/owner.go). The first successful, authorized
 // GET /next request establishes the pairing by recording its X-Ferro-Tab-Id
-// value; every subsequent request (from either endpoint's tab-id checks)
-// must present that same tab id. A GET /next from a different, non-empty
-// tab id while a pairing is active is rejected with 409 Conflict — the
-// Bridge does not silently repair to a new tab out from under an in-flight
-// pairing.
+// value; every subsequent GET /next must present that same tab id, and a
+// request from a different, non-empty tab id while a pairing is active is
+// rejected with 409 Conflict — the Bridge does not silently repair to a new
+// tab out from under an in-flight pairing. POST /reply carries no tab id and
+// is not itself pairing-checked: it is gated by the bearer token plus the
+// unforgeable per-action id minted by Enqueue, which together are
+// sufficient to prevent an unpaired caller from injecting a reply. Whether
+// /reply should ALSO assert the caller's tab id, once the real extension
+// (T12.2) and this bridge are wired together, is a T12.3 integration
+// decision, not fixed here.
 //
 // # Deviations from ADR 006 (flagged for review, not blocking)
 //
