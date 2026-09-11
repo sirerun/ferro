@@ -205,7 +205,7 @@ no task in this wave depends on another):
   decided here.
   verifies: [infrastructure]
   acc: [a test HTTP client can long-poll `/next`, receive a queued action, and post a `/reply` that the server-side caller (a Go test double) receives with matching id]
-- [ ] **T12.2** `extension/`: a new Manifest V3 Chrome extension in this
+- [x] **T12.2** `extension/`: a new Manifest V3 Chrome extension in this
   repo (`manifest.json`, `background.js`, `content.js`, `adapter.js`,
   `popup.html`/`popup.js`), adapted from `~/Code/dndungu/ox/extension/`'s
   structure per ADR 006: generic action execution (not one hardcoded site),
@@ -381,6 +381,32 @@ unchanged from the prior plan revision.
   loadable unpacked (no packaging/store step exists or is planned).
 
 ## Progress log
+
+- 2026 09 10 (d): T12.2 done (PR pending): `extension/` -- a generic
+  Manifest V3 Chrome extension (`manifest.json`, `background.js`,
+  `content.js`, `adapter.js`, `popup.html`/`popup.js`), adapted from
+  `~/Code/dndungu/ox/extension/`'s techniques (chrome.debugger trusted
+  click/key with ox's dropped-debugger retry logic verbatim, native-setter
+  fill, single-tab pairing) but generic across sites, not oxalpha.com-
+  specific. `adapter.js`'s `takeSnapshot()` is a faithful JS port of
+  `internal/core/snapshot.go`'s element-selection/numbering algorithm
+  (its DOM-walk half is copied from `snapshotJS` verbatim). Parity proven
+  by a shared fixture (`extension/testdata/fixture.html`) loaded by both
+  `internal/core/snapshot_parity_test.go` (chromedp, real headless
+  Chrome) and `extension/snapshot.test.cjs` (Node's built-in test runner,
+  real headless Chrome via a ~150-line zero-dependency CDP client in
+  `extension/testsupport/cdp.cjs` -- jsdom/hand-mocked DOM were rejected
+  because the algorithm depends on real getComputedStyle/
+  getBoundingClientRect layout, which neither reproduces faithfully); both
+  compare against a checked-in golden (`internal/core/testdata/
+  fixture.golden.json`) and both pass. `blocked()` was generalized from
+  ox's oxalpha-specific text matching to generic structural/vocabulary
+  heuristics (password/email inputs, known challenge-provider iframes,
+  generic verification/rate-limit phrasing). Navigation ("goto") is
+  handled in `background.js` rather than mirroring ox's content-script
+  poll loop, because a real page navigation destroys and reinjects the
+  content script -- a deliberate, documented deviation from ox's
+  structure, not from its techniques.
 
 - 2026 09 10 (c): Added E12 (extension execution backend + Tailscale remote
   transport) after David asked for DGX/Rakazo agents to drive his real
