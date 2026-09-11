@@ -167,10 +167,23 @@ no task in this wave depends on another):
   verifies: [infrastructure]
   lane: agent
   acc: [`go test -race ./...` and `FERRO_TEST_BROWSER=1 go test -race ./...` both pass with the exact same pass/fail set as before this task, and `grep -c "chromedp\." internal/core/executor.go` drops to 0 (all chromedp calls now live only in the ChromedpDriver implementation)]
-- [ ] **T12.1** `internal/extbridge`: the Go-side poll/reply HTTP server per
+- [x] **T12.1** `internal/extbridge`: the Go-side poll/reply HTTP server per
   ADR 006 (`GET /next`, `POST /reply`, bearer-token authed, one active
   pairing at a time), bound to loopback only for now (ADR 007's Tailscale
-  binding is T12.6, layered on top, not built here).
+  binding is T12.6, layered on top, not built here). Shipped 2026-09-10,
+  PR #6 (rebase-merged). Two ADR-006 wire details it had to decide and
+  document since the ADR didn't fully specify them: the extension's tab id
+  travels as an `X-Ferro-Tab-Id` header on `/next` (no third pairing
+  endpoint exists), and `/next` long-polls up to 30s (`WithPollTimeout`
+  overridable) before returning 204, rather than returning 204 instantly.
+  Independently re-verified: build/vet/gofmt clean, 13 named tests
+  (`internal/extbridge`) plus the full `go test ./...` suite green on
+  merged `main`. One coordinator fix during review: the package doc
+  overclaimed that `POST /reply` is tab-id-checked, matching `/next` --
+  it isn't (only bearer-token + the unforgeable per-action id gate it),
+  corrected in the same PR. Whether `/reply` should also assert the tab id
+  once the real extension (T12.2) is wired in is left as a T12.3 call, not
+  decided here.
   verifies: [infrastructure]
   acc: [a test HTTP client can long-poll `/next`, receive a queued action, and post a `/reply` that the server-side caller (a Go test double) receives with matching id]
 - [ ] **T12.2** `extension/`: a new Manifest V3 Chrome extension in this
