@@ -13,6 +13,16 @@ the Shipped entries below, which reflect independently re-verified reality.
   action id gate it instead). Two ADR-006 wire details resolved and
   documented in the package: tab id travels via `X-Ferro-Tab-Id` header,
   `/next` long-polls 30s before 204. See `docs/plan.md` T12.1.
+- E12 T12.0 `core.PageDriver` extraction from `internal/core/executor.go`:
+  PR #8, merged 2026-09-10 (rebase). Pure refactor, zero behavior change --
+  independently re-verified: `ChromedpDriver` is a verbatim relocation
+  (line-by-line diffed), both `go test -race ./...` and
+  `FERRO_TEST_BROWSER=1 go test -race ./...` green on merged `main` with no
+  orphaned Chrome processes, `grep -c "chromedp\." internal/core/executor.go`
+  confirmed 0. One self-caught deviation fixed in the same PR
+  (`Runner.Run` dropped a `WithDriver` override). Two disclosed scope
+  edges left for T12.3/T12.4 (locator.go's residual chromedp call,
+  TakeSnapshot not yet driver-routed) -- see `docs/plan.md` T12.0.
 
 ## Shipped
 - Compiling module with core, browser pool, OpenAI-compatible client, resolution cache, examples, integration suite skeleton.
@@ -43,13 +53,13 @@ the Shipped entries below, which reflect independently re-verified reality.
 
 ## In progress
 - E12 Wave 1, dispatched 2026-09-10 via `/apply` (pool mode, claims held):
-  T12.0 (extract `core.PageDriver` from executor.go, agent `ferra_t12-0`,
-  still running) and T12.2 (generic MV3 extension + ref-numbering parity
-  port, agent `ferra_t12-2`, still running), each in its own isolated
-  worktree. T12.1 shipped -- see Shipped above. T12.1 was routed to
-  subagent dispatch instead of kazi's autonomous-harness lane for this run
-  (a deliberate, disclosed deviation: solo-project proportionality plus the
-  laptop's disk pressure at dispatch time, ~7GB free).
+  T12.2 (generic MV3 extension + ref-numbering parity port, agent
+  `ferra_t12-2`) still running in its own isolated worktree (plan-
+  designated `lane: agent`, like T12.0). T12.0 and T12.1 shipped -- see
+  Shipped above. T12.1 was routed to subagent dispatch instead of kazi's
+  autonomous-harness lane for this run (a deliberate, disclosed deviation:
+  solo-project proportionality plus the laptop's disk pressure at dispatch
+  time, ~4-7GB free throughout).
 
 ## In flight
 - (none -- no PRs opened yet for E12 Wave 1)
