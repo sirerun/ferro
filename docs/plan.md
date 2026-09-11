@@ -214,6 +214,26 @@ no task in this wave depends on another):
   generalized `blocked()` heuristic (CAPTCHA/verification/login gates, not
   site-specific text), and a JavaScript port of
   `internal/core/snapshot.go`'s element-selection and numbering algorithm.
+  Shipped 2026-09-10, PR #10 (rebase-merged). Independently re-verified:
+  `adapter.js`'s `takeSnapshot()` DOM-walk is a line-by-line port of
+  `snapshot.go`'s `snapshotJS` (including its pre-existing dead/redundant
+  `tag === 'INPUT' && el.type !== 'hidden'` clause, ported faithfully as-is
+  since this is a port task, not a snapshot.go fix); the parity test
+  (`internal/core/snapshot_parity_test.go`, chromedp, and
+  `extension/snapshot.test.cjs`, Node's built-in test runner via a
+  zero-dependency CDP client) both re-run independently with
+  `FERRO_TEST_BROWSER=1`, both pass against the checked-in golden
+  (`internal/core/testdata/fixture.golden.json`); `background.js`'s
+  trusted-click retry logic (3 attempts, already-attached/another-debugger
+  classification, the `inputStarted` uncertain-outcome guard, 400ms*attempt
+  backoff) diffed directly against ox's original and confirmed verbatim;
+  `gofmt`/`go vet`/`go build` clean, manifest.json valid JSON, all
+  extension JS passes `node --check`, full `go test -race ./...` and
+  `FERRO_TEST_BROWSER=1 go test -race ./...` green, zero-stub grep clean,
+  no orphaned Chrome processes. One documented structural deviation from
+  ox (not a technique change): navigation is handled in `background.js`
+  rather than the content script's poll loop, because a real page
+  navigation destroys and reinjects the content script.
   verifies: [UC-014]
   lane: agent
   acc: [loading the extension unpacked and pointing it at a local test HTML fixture, its content-script snapshot function returns a numbered element list; a second test asserts this list's ordering and element selection matches `internal/core/snapshot.go`'s output for the same fixture file, checked by a shared, versioned fixture page both the Go test and a Node-based extension test load]
@@ -382,32 +402,18 @@ unchanged from the prior plan revision.
 
 ## Progress log
 
-- 2026 09 10 (d): T12.2 done (PR pending): `extension/` -- a generic
-  Manifest V3 Chrome extension (`manifest.json`, `background.js`,
-  `content.js`, `adapter.js`, `popup.html`/`popup.js`), adapted from
-  `~/Code/dndungu/ox/extension/`'s techniques (chrome.debugger trusted
-  click/key with ox's dropped-debugger retry logic verbatim, native-setter
-  fill, single-tab pairing) but generic across sites, not oxalpha.com-
-  specific. `adapter.js`'s `takeSnapshot()` is a faithful JS port of
-  `internal/core/snapshot.go`'s element-selection/numbering algorithm
-  (its DOM-walk half is copied from `snapshotJS` verbatim). Parity proven
-  by a shared fixture (`extension/testdata/fixture.html`) loaded by both
-  `internal/core/snapshot_parity_test.go` (chromedp, real headless
-  Chrome) and `extension/snapshot.test.cjs` (Node's built-in test runner,
-  real headless Chrome via a ~150-line zero-dependency CDP client in
-  `extension/testsupport/cdp.cjs` -- jsdom/hand-mocked DOM were rejected
-  because the algorithm depends on real getComputedStyle/
-  getBoundingClientRect layout, which neither reproduces faithfully); both
-  compare against a checked-in golden (`internal/core/testdata/
-  fixture.golden.json`) and both pass. `blocked()` was generalized from
-  ox's oxalpha-specific text matching to generic structural/vocabulary
-  heuristics (password/email inputs, known challenge-provider iframes,
-  generic verification/rate-limit phrasing). Navigation ("goto") is
-  handled in `background.js` rather than mirroring ox's content-script
-  poll loop, because a real page navigation destroys and reinjects the
-  content script -- a deliberate, documented deviation from ox's
-  structure, not from its techniques.
-
+- 2026 09 10 (e): Wave 1 complete -- T12.0, T12.1, T12.2 all shipped
+  (PRs #8, #6, #10, all rebase-merged and independently re-verified by
+  the coordinator, not just taken on the dispatching agents' word). T12.2's
+  branch was built from a base that predated T12.0/T12.1's own doc-update
+  merges, so its `docs/plan.md` diff would have silently reverted their
+  checkboxes and shipped-notes if merged as-is -- caught before merging by
+  diffing the PR branch against current `main`, not by trusting GitHub's
+  `mergeStateStatus: CLEAN` (a line-based clean merge is not evidence the
+  result is semantically correct; this is the same stale-base failure
+  class as PR #3 earlier this session, see `docs/devlog.md`). Fixed by
+  resetting `docs/plan.md` to `main`'s version in the review worktree and
+  reapplying only T12.2's own checkbox/notes on top, before merging.
 - 2026 09 10 (c): Added E12 (extension execution backend + Tailscale remote
   transport) after David asked for DGX/Rakazo agents to drive his real
   Chrome session overnight. Surveyed `~/Code/dndungu/ox/extension/` as
