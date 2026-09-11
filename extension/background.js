@@ -1,0 +1,344 @@
+/* extension/background.js -- service worker: pairing state, the bridge
+ * poll/reply loop (ADR 006 decision #2), page navigation, and
+ * chrome.debugger-issued trusted click/key input (T12.2).
+ *
+ * Split vs. ~/Code/dndungu/ox/extension/background.js:
+ *   - ox's background.js is purely reactive: content.js owns the poll
+ *     loop and background.js only answers "poll"/"reply"/"click" messages
+ *     it relays to. ferro's action vocabulary includes "goto" (real page
+ *     navigation), which destroys and reinjects the content script -- a
+ *     poll loop living there would die mid-flight on every navigate. So
+ *     this file owns the poll loop itself (a service worker survives page
+ *     navigation) and content.js is reduced to a thin per-page relay (see
+ *     its header comment). "goto" is handled entirely here, via
+ *     chrome.tabs.update + chrome.tabs.onUpdated, never reaching adapter.js.
+ *   - The chrome.debugger trusted-click technique, including the
+ *     retry-on-dropped-debugger logic, is ported verbatim from ox's
+ *     background.js (see dispatchTrustedInput below) and generalized to
+ *     also cover trusted key dispatch (ferro's core.Action has a "key"
+ *     kind ox's fixed single-site vocabulary never needed).
+ *
+ * Bridge wire protocol (internal/extbridge, T12.1 -- built in parallel;
+ * this is this task's own best-effort encoding of ADR 006 decision #2's
+ * literal envelope, `{"id","action"}` for GET /next and
+ * `{"id","snapshot","result","error"}` for POST /reply; if T12.1 lands
+ * with a different shape, that's a follow-up integration fix, not solved
+ * here):
+ *   GET  {base}/next   -> 200 {"id": "...", "action": {"op": ..., ...}}
+ *                          or 204 (nothing queued)
+ *   POST {base}/reply  <- {"id": "...", "result"?: ..., "snapshot"?: ...,
+ *                          "blocked"?: "...", "error"?: "..."}
+ * action.op is one of: navigate, click, fill, select, key, scroll,
+ * wait_visible, extract, snapshot -- see adapter.js's perform() for the
+ * per-op payload shape (selector/text/value/to/fields/maxElements/budgetMs).
+ */
+
+const POLL_TIMEOUT_MS = 30000; // one long-poll GET at a time
+const POLL_ERROR_BACKOFF_MS = 2000; // bridge unreachable (laptop asleep, etc.)
+const NAV_TIMEOUT_MS = 20000;
+const CONTENT_READY_TIMEOUT_MS = 8000;
+const NAV_SETTLE_MS = 250; // mirrors WaitStrategy's default SettleDebounce
+const SEND_RETRY_ATTEMPTS = 5;
+const SEND_RETRY_DELAY_MS = 300;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function getConnection() {
+  const { connection } = await chrome.storage.session.get('connection');
+  return connection || null;
+}
+
+// ---------------------------------------------------------------------
+// Trusted click/key via chrome.debugger, ported from ox's background.js.
+// The retry structure (3 attempts, "already attached"/"another debugger"
+// classification, inputStarted distinguishing an uncertain outcome from a
+// safe-to-retry one, 400*(attempt+1) backoff) is verbatim ox logic;
+// dispatchTrustedInput is generalized to carry either a mouse click or a
+// key-event sequence through that same wrapper, since ferro's action
+// vocabulary needs both and ox only ever needed the former.
+// ---------------------------------------------------------------------
+
+const NAMED_KEYS = {
+  Enter: { key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r' },
+  Tab: { key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 },
+  Escape: { key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 },
+  Backspace: { key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 },
+  ArrowUp: { key: 'ArrowUp', code: 'ArrowUp', windowsVirtualKeyCode: 38 },
+  ArrowDown: { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 },
+  ArrowLeft: { key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 },
+  ArrowRight: { key: 'ArrowRight', code: 'ArrowRight', windowsVirtualKeyCode: 39 },
+};
+
+// dispatchTrustedKeys sends one CDP Input.dispatchKeyEvent triple
+// (keyDown/char/keyUp) per character, or a single named-key triple for a
+// handful of common control keys. This is a real, working implementation
+// for ASCII text plus the common named keys above -- not an exhaustive
+// keycode table for every possible key combination; see the PR
+// description for that documented limitation.
+async function dispatchTrustedKeys(target, text) {
+  const named = NAMED_KEYS[text];
+  const sequence = named
+    ? [named]
+    : Array.from(text).map((ch) => ({ key: ch, code: '', text: ch, windowsVirtualKeyCode: ch.charCodeAt(0) }));
+  for (const ch of sequence) {
+    await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
+      type: 'keyDown',
+      key: ch.key,
+      code: ch.code,
+      windowsVirtualKeyCode: ch.windowsVirtualKeyCode,
+      text: ch.text,
+    });
+    if (ch.text) {
+      await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
+        type: 'char',
+        key: ch.key,
+        text: ch.text,
+      });
+    }
+    await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      key: ch.key,
+      code: ch.code,
+      windowsVirtualKeyCode: ch.windowsVirtualKeyCode,
+    });
+  }
+}
+
+async function dispatchTrustedInput(tabId, kind, payload) {
+  const target = { tabId };
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await chrome.debugger.attach(target, '1.3');
+    } catch (error) {
+      if (!/already attached/i.test(error.message)) throw error;
+      if (/another debugger/i.test(error.message)) {
+        throw new Error('DevTools or another extension is debugging this tab; close it and resume');
+      }
+    }
+    let inputStarted = false;
+    try {
+      if (kind === 'click') {
+        const { x, y } = payload;
+        if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) {
+          throw new Error('invalid click coordinates');
+        }
+        await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+        inputStarted = true;
+        await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+          type: 'mousePressed', button: 'left', clickCount: 1, x, y,
+        });
+        await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+          type: 'mouseReleased', button: 'left', clickCount: 1, x, y,
+        });
+      } else if (kind === 'key') {
+        inputStarted = true;
+        await dispatchTrustedKeys(target, payload.text || '');
+      } else {
+        throw new Error(`unknown trusted-input kind ${JSON.stringify(kind)}`);
+      }
+      lastError = null;
+    } catch (error) {
+      lastError = error;
+    } finally {
+      try {
+        await chrome.debugger.detach(target);
+      } catch (_) {
+        /* already detached */
+      }
+    }
+    if (!lastError) return {};
+    if (inputStarted) {
+      // Chrome dropped the debugger *after* input began: we cannot tell
+      // whether the click/key landed. Do not retry into a possible
+      // duplicate action -- surface it and let the caller inspect the page.
+      throw new Error(`${kind} outcome is uncertain: ${lastError.message}. Inspect the page before resuming`);
+    }
+    if (!/not attached|detached/i.test(lastError.message)) throw lastError;
+    await sleep(400 * (attempt + 1));
+  }
+  throw new Error(
+    `Trusted ${kind} failed after retries: ${lastError.message}. Keep the tab focused and do not dismiss Chrome's debugging bar; then resume`
+  );
+}
+
+// ---------------------------------------------------------------------
+// Content-script readiness tracking (needed because "goto" reinjects it).
+// ---------------------------------------------------------------------
+const readyTabs = new Set();
+
+chrome.tabs.onRemoved.addListener((tabId) => readyTabs.delete(tabId));
+
+async function waitForContentReady(tabId, timeoutMs) {
+  if (readyTabs.has(tabId)) return;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (readyTabs.has(tabId)) return;
+    await sleep(150);
+  }
+  throw new Error('content script did not become ready after navigation');
+}
+
+async function sendToContent(tabId, message) {
+  let lastError;
+  for (let attempt = 0; attempt < SEND_RETRY_ATTEMPTS; attempt++) {
+    try {
+      return await chrome.tabs.sendMessage(tabId, message);
+    } catch (error) {
+      lastError = error;
+      await sleep(SEND_RETRY_DELAY_MS);
+    }
+  }
+  throw new Error(`could not reach the paired tab's content script: ${lastError?.message || 'unknown error'}`);
+}
+
+// ---------------------------------------------------------------------
+// Navigation -- owned here, not by adapter.js/content.js (see file header).
+// ---------------------------------------------------------------------
+function waitForTabComplete(tabId, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      chrome.tabs.onUpdated.removeListener(listener);
+      reject(new Error('navigation did not complete in time'));
+    }, timeoutMs);
+    function listener(updatedTabId, info) {
+      if (updatedTabId === tabId && info.status === 'complete') {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+}
+
+async function performNavigate(tabId, url) {
+  readyTabs.delete(tabId);
+  await chrome.tabs.update(tabId, { url });
+  await waitForTabComplete(tabId, NAV_TIMEOUT_MS);
+  await waitForContentReady(tabId, CONTENT_READY_TIMEOUT_MS);
+  await sleep(NAV_SETTLE_MS);
+  return {};
+}
+
+async function handleAction(tabId, action) {
+  if (action.op === 'navigate') return performNavigate(tabId, action.url);
+  return sendToContent(tabId, { type: 'ferro-perform', action });
+}
+
+// ---------------------------------------------------------------------
+// Bridge poll/reply loop (ADR 006 decision #2).
+// ---------------------------------------------------------------------
+async function fetchNext(base, token) {
+  const res = await fetch(`${base}/next`, {
+    headers: { Authorization: `Bearer ${token}` },
+    signal: AbortSignal.timeout(POLL_TIMEOUT_MS),
+  });
+  if (res.status === 204) return null;
+  if (!res.ok) throw new Error(`bridge GET /next: HTTP ${res.status}`);
+  return res.json();
+}
+
+async function postReply(base, token, reply) {
+  const res = await fetch(`${base}/reply`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(reply),
+    signal: AbortSignal.timeout(10000),
+  });
+  if (!res.ok) throw new Error(`bridge POST /reply: HTTP ${res.status}`);
+}
+
+let loopGeneration = 0;
+
+async function pollLoop(myGeneration) {
+  while (loopGeneration === myGeneration) {
+    const connection = await getConnection();
+    if (!connection) {
+      await sleep(1000);
+      continue;
+    }
+    try {
+      const next = await fetchNext(connection.base, connection.token);
+      if (loopGeneration !== myGeneration) return; // paired out from under us
+      if (!next) continue;
+      let reply;
+      try {
+        const result = await handleAction(connection.tabId, next.action);
+        reply = { id: next.id, ...result };
+      } catch (error) {
+        reply = { id: next.id, error: error.message };
+      }
+      await postReply(connection.base, connection.token, reply);
+    } catch (error) {
+      // Transport failure (bridge not running, laptop asleep, network
+      // hiccup) -- distinct from a "blocked" page: nothing gets POSTed
+      // here because there is no request id to reply to. Back off and
+      // keep trying; T12.7 verifies the caller-visible signal for this.
+      await sleep(POLL_ERROR_BACKOFF_MS);
+    }
+  }
+}
+
+function startPolling() {
+  loopGeneration++;
+  pollLoop(loopGeneration);
+}
+
+function stopPolling() {
+  loopGeneration++; // orphans any in-flight pollLoop invocation
+}
+
+// ---------------------------------------------------------------------
+// Message handlers: popup pairing, content-script readiness, trusted input.
+// ---------------------------------------------------------------------
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (!message) return false;
+
+  if (message.type === 'ferro-connect') {
+    chrome.storage.session.set({ connection: message.connection }).then(() => {
+      startPolling();
+      sendResponse({ ok: true });
+    });
+    return true;
+  }
+
+  if (message.type === 'ferro-disconnect') {
+    stopPolling();
+    chrome.storage.session.remove('connection').then(() => sendResponse({ ok: true }));
+    return true;
+  }
+
+  if (message.type === 'ferro-content-ready') {
+    if (sender.tab) readyTabs.add(sender.tab.id);
+    return false;
+  }
+
+  if (message.type === 'ferro-trusted-input') {
+    if (!sender.tab) return false;
+    (async () => {
+      try {
+        const connection = await getConnection();
+        if (!connection || connection.tabId !== sender.tab.id) {
+          sendResponse({ error: 'this tab is not the paired tab' });
+          return;
+        }
+        const result = await dispatchTrustedInput(sender.tab.id, message.kind, message);
+        sendResponse(result);
+      } catch (error) {
+        sendResponse({ error: error.message });
+      }
+    })();
+    return true;
+  }
+
+  return false;
+});
+
+// Resume polling if the service worker restarts (MV3 idle eviction, Chrome
+// restart) while a pairing is still active in session storage.
+chrome.storage.session.get('connection').then(({ connection }) => {
+  if (connection) startPolling();
+});

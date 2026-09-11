@@ -1,0 +1,92 @@
+{
+  "title": "Snapshot fixture",
+  "elements": [
+    {
+      "ref": 1,
+      "tag": "h1",
+      "text": "Fixture page for ferro snapshot parity"
+    },
+    {
+      "ref": 2,
+      "tag": "a",
+      "text": "Getting started",
+      "href": "/docs/getting-started"
+    },
+    {
+      "ref": 3,
+      "tag": "h2",
+      "text": "Sign in"
+    },
+    {
+      "ref": 4,
+      "tag": "input",
+      "name": "Email"
+    },
+    {
+      "ref": 5,
+      "tag": "input",
+      "name": "Search"
+    },
+    {
+      "ref": 6,
+      "tag": "button",
+      "text": "Sign in"
+    },
+    {
+      "ref": 7,
+      "tag": "button",
+      "name": "Close dialog"
+    },
+    {
+      "ref": 8,
+      "tag": "h3",
+      "text": "Preferences"
+    },
+    {
+      "ref": 9,
+      "tag": "select",
+      "text": "English\nFrench",
+      "name": "Language"
+    },
+    {
+      "ref": 10,
+      "tag": "textarea",
+      "name": "Comments"
+    },
+    {
+      "ref": 11,
+      "tag": "div",
+      "role": "button",
+      "text": "Do the thing",
+      "name": "Custom widget button"
+    },
+    {
+      "ref": 12,
+      "tag": "div",
+      "role": "checkbox",
+      "text": "Accept",
+      "name": "Accept terms"
+    },
+    {
+      "ref": 13,
+      "tag": "summary",
+      "text": "Expand details"
+    },
+    {
+      "ref": 14,
+      "tag": "h4",
+      "text": "Long text truncation check"
+    },
+    {
+      "ref": 15,
+      "tag": "button",
+      "text": "Long",
+      "name": "Long button label that goes past the eighty character truncation boundary set by"
+    },
+    {
+      "ref": 16,
+      "tag": "button",
+      "text": "This button has an extremely long visible text label that will definitely exceed…"
+    }
+  ]
+}

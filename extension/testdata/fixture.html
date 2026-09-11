@@ -1,0 +1,75 @@
+<!doctype html>
+<!--
+  Shared snapshot-parity fixture (T12.2 / ADR 006 decision #3).
+
+  Loaded by BOTH sides of the ref-numbering parity test:
+    - internal/core/snapshot_parity_test.go (Go, via chromedp + TakeSnapshot)
+    - extension/snapshot.test.cjs (Node, via a real headless Chrome
+      tab evaluating extension/adapter.js's takeSnapshot())
+
+  It exercises internal/core/snapshot.go's selection/visibility/ordering
+  rules: interactive tags, ARIA-role-only interactivity, heading levels,
+  display:none / visibility:hidden / opacity:0 / zero-size / off-screen
+  exclusion, label[for] name resolution, aria-label / placeholder name
+  precedence, href-to-pathname resolution, unlabeled-element skipping, and
+  both the name (hard cut, no ellipsis) and text (cut + ellipsis)
+  80-character truncation rules.
+
+  If you change this fixture, regenerate
+  internal/core/testdata/fixture.golden.json (FERRO_UPDATE_GOLDEN=1 go test
+  -run TestSnapshotParity ./internal/core/...) and re-run the Node parity
+  test.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>Snapshot fixture</title>
+<style>
+  .zero-size { width: 0; height: 0; overflow: hidden; border: 0; padding: 0; margin: 0; }
+  .offscreen { position: absolute; top: 99999px; left: 0; }
+</style>
+</head>
+<body>
+  <h1>Fixture page for ferro snapshot parity</h1>
+  <h5>Heading level five is not counted (only h1-h4)</h5>
+
+  <nav>
+    <a href="/docs/getting-started">Getting started</a>
+    <a class="empty-link"></a>
+  </nav>
+
+  <section>
+    <h2>Sign in</h2>
+    <label for="email-field">Email</label>
+    <input id="email-field" type="email">
+    <input type="hidden" name="csrf" value="abc123">
+    <input type="text" aria-label="Search" placeholder="Search the site">
+    <button>Sign in</button>
+    <button aria-label="Close dialog"></button>
+    <button style="display:none">Hidden via display:none</button>
+    <button style="visibility:hidden">Hidden via visibility</button>
+    <button style="opacity:0">Hidden via opacity</button>
+    <button class="zero-size">Zero size button</button>
+    <button class="offscreen">Off-screen button</button>
+    <button></button>
+  </section>
+
+  <section>
+    <h3>Preferences</h3>
+    <select id="lang-select" aria-label="Language">
+      <option value="en">English</option>
+      <option value="fr">French</option>
+    </select>
+    <textarea placeholder="Comments"></textarea>
+    <div role="button" aria-label="Custom widget button">Do the thing</div>
+    <div role="checkbox" aria-label="Accept terms">Accept</div>
+    <div>Plain non-interactive div, should be excluded</div>
+    <summary>Expand details</summary>
+    <p>Some paragraph text that should not be picked up as an element.</p>
+  </section>
+
+  <h4>Long text truncation check</h4>
+  <button aria-label="Long button label that goes past the eighty character truncation boundary set by the algorithm to keep tokens down">Long</button>
+  <button>This button has an extremely long visible text label that will definitely exceed the eighty character cutoff enforced by the compiler</button>
+</body>
+</html>
