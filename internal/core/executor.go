@@ -8,8 +8,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/chromedp/chromedp"
 )
 
 // BrowserContext is one task's handle on a browser: navigation, CDP access,
@@ -17,13 +15,14 @@ import (
 // wrapper; defined here because the Runner (below) is the consumer.
 type BrowserContext interface {
 	Navigate(url string) error
-	// CDP returns the chromedp execution context for the tab. Every
-	// chromedp.Run this package makes — snapshots, action execution,
-	// repairs — must run against this context (or a context derived from
-	// it), never a caller's unrelated ctx: whichever context first ran on
-	// the tab owns its CDP event-listener goroutine for the tab's whole
-	// lifetime, and passing a different context makes chromedp.Run fail
-	// with "invalid context". See docs/adr/001-chromedp-context-lifetime.md.
+	// CDP returns the chromedp execution context for the tab. Every CDP
+	// round trip this package (or its PageDriver, see driver.go) makes —
+	// snapshots, action execution, repairs — must run against this context
+	// (or a context derived from it), never a caller's unrelated ctx:
+	// whichever context first ran on the tab owns its CDP event-listener
+	// goroutine for the tab's whole lifetime, and passing a different
+	// context makes such a call fail with "invalid context". See
+	// docs/adr/001-chromedp-context-lifetime.md.
 	CDP() context.Context
 	SnapshotMaxElements() int
 	Release()
@@ -60,15 +59,32 @@ type Executor struct {
 	// cache makes every cache lookup/record a no-op, so caching is purely
 	// additive on top of the base snapshot-resolution path.
 	cache *ResolutionCache
+
+	// driver is the PageDriver (driver.go) every action method below runs
+	// against — Executor has zero direct knowledge of chromedp or CDP; see
+	// docs/adr/006. NewExecutor defaults it to a ChromedpDriver matching
+	// wait, so existing callers that never call WithDriver keep today's
+	// exact behavior.
+	driver PageDriver
 }
 
 func NewExecutor(w WaitStrategy) *Executor {
-	return &Executor{wait: w.withDefaults()}
+	w = w.withDefaults()
+	return &Executor{wait: w, driver: NewChromedpDriver(w)}
 }
 
 // WithCache attaches a resolution cache (M4). Chainable.
 func (x *Executor) WithCache(c *ResolutionCache) *Executor {
 	x.cache = c
+	return x
+}
+
+// WithDriver overrides the PageDriver Executor's action methods run
+// against (default: a ChromedpDriver built from Executor's WaitStrategy —
+// see NewExecutor). Chainable, like WithCache. docs/adr/006's
+// ExtensionDriver (T12.3) is the intended second implementation.
+func (x *Executor) WithDriver(d PageDriver) *Executor {
+	x.driver = d
 	return x
 }
 
@@ -187,15 +203,7 @@ func (x *Executor) executeAction(ctx context.Context, a Action, extracted extrac
 // --- individual actions ---
 
 func (x *Executor) doGoto(ctx context.Context, a Action) error {
-	// Navigate, then settle. NetworkIdle is deliberately NOT used (RFC decision:
-	// unreliable on SPAs with websockets); DOM settle + budget covers it.
-	return chromedp.Run(ctx,
-		chromedp.Navigate(a.URL),
-		chromedp.WaitReady("body"),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			return domSettle(ctx, x.wait)
-		}),
-	)
+	return x.driver.Navigate(ctx, a.URL)
 }
 
 func (x *Executor) doClick(ctx context.Context, a Action) error {
@@ -206,13 +214,7 @@ func (x *Executor) doClick(ctx context.Context, a Action) error {
 	if err != nil {
 		return err
 	}
-	err = chromedp.Run(ctx,
-		chromedp.WaitVisible(sel, chromedp.ByQuery),
-		chromedp.Click(sel, chromedp.ByQuery),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			return domSettle(ctx, x.wait) // clicks often trigger rerenders
-		}),
-	)
+	err = x.driver.Click(ctx, sel)
 	x.recordOutcome(key, sel, err) // success -> Put; stale_ref -> Invalidate
 	return err
 }
@@ -222,23 +224,7 @@ func (x *Executor) doFill(ctx context.Context, a Action) error {
 	if err != nil {
 		return err
 	}
-	err = chromedp.Run(ctx, chromedp.WaitVisible(sel, chromedp.ByQuery))
-	if err == nil {
-		// chromedp.Clear reads a textarea's current value from its DOM child
-		// #text node, but a framework-controlled textarea (React, Vue, ...)
-		// never has one — its value lives in JS state, not static markup —
-		// so Clear fails on every such field, empty or not, with "does not
-		// have child #text node", not just an edge case. Treat that specific
-		// failure as "nothing to clear" and proceed to type; any other Clear
-		// failure (bad selector, wrong element kind) still aborts the fill.
-		if cerr := chromedp.Run(ctx, chromedp.Clear(sel, chromedp.ByQuery)); cerr != nil &&
-			!strings.Contains(cerr.Error(), "does not have child #text node") {
-			err = cerr
-		}
-	}
-	if err == nil {
-		err = chromedp.Run(ctx, chromedp.SendKeys(sel, a.Text, chromedp.ByQuery))
-	}
+	err = x.driver.Fill(ctx, sel, a.Text)
 	x.recordOutcome(key, sel, err)
 	return err
 }
@@ -249,22 +235,10 @@ func (x *Executor) doSelect(ctx context.Context, a Action) error {
 		return err
 	}
 	defer func() { x.recordOutcome(key, sel, err) }()
-	// Select by visible label first, fall back to value.
-	js := fmt.Sprintf(`(() => {
-		const el = document.querySelector(%q);
-		if (!el || el.tagName !== 'SELECT') return 'no-select';
-		for (const opt of el.options) {
-			if (opt.text.trim() === %q || opt.value === %q) {
-				el.value = opt.value;
-				el.dispatchEvent(new Event('change', {bubbles: true}));
-				return 'ok';
-			}
-		}
-		return 'no-option';
-	})()`, sel, a.Value, a.Value)
 
 	var status string
-	if err = chromedp.Run(ctx, chromedp.Evaluate(js, &status)); err != nil {
+	status, err = x.driver.Select(ctx, sel, a.Value)
+	if err != nil {
 		return err
 	}
 	if status != "ok" {
@@ -275,31 +249,17 @@ func (x *Executor) doSelect(ctx context.Context, a Action) error {
 }
 
 func (x *Executor) doKey(ctx context.Context, a Action) error {
-	return chromedp.Run(ctx, chromedp.KeyEvent(a.Text))
+	return x.driver.Key(ctx, a.Text)
 }
 
 func (x *Executor) doScroll(ctx context.Context, a Action) error {
-	var js string
-	switch a.To {
-	case "top":
-		js = `window.scrollTo(0, 0)`
-	case "bottom":
-		js = `window.scrollTo(0, document.body.scrollHeight)`
-	default:
-		// Target may be a ref rendered as string, e.g. "12".
-		return fmt.Errorf("scroll to ref %q: ref-scroll not wired in v0.1; use top|bottom", a.To)
-	}
-	var dummy any
-	if err := chromedp.Run(ctx, chromedp.Evaluate(js, &dummy)); err != nil {
-		return err
-	}
-	return domSettle(ctx, x.wait) // scroll-loaded content needs the settle
+	return x.driver.Scroll(ctx, a.To)
 }
 
 func (x *Executor) doWait(ctx context.Context, a Action) error {
 	switch {
 	case a.For == "dom_settle":
-		return domSettle(ctx, x.wait)
+		return x.driver.Settle(ctx)
 	case strings.HasSuffix(a.For, "s") || strings.HasSuffix(a.For, "ms"):
 		d, err := time.ParseDuration(a.For)
 		if err != nil {
@@ -316,7 +276,7 @@ func (x *Executor) doWait(ctx context.Context, a Action) error {
 		}
 	default:
 		// Treat as CSS selector.
-		return chromedp.Run(ctx, chromedp.WaitVisible(a.For, chromedp.ByQuery))
+		return x.driver.WaitVisible(ctx, a.For)
 	}
 }
 
@@ -353,23 +313,16 @@ func (x *Executor) doExtract(ctx context.Context, a Action, store extractStore) 
 					sel, key, err = x.resolveRef(ctx, ref, string(KindExtract))
 				}
 			}
-			var got struct {
-				Value string `json:"value"`
-				Error string `json:"error"`
-			}
+			var value string
 			if err == nil {
-				js := fmt.Sprintf(`(() => {try {const e=document.querySelector(%q);if(!e)return {error:"no matching element"};return {value:String(e.value ?? e.innerText ?? "").trim()}}catch(e){return {error:e.message}}})()`, sel)
-				err = chromedp.Run(ctx, chromedp.Evaluate(js, &got))
-				if err == nil && got.Error != "" {
-					err = fmt.Errorf("%s", got.Error)
-				}
+				value, err = x.driver.ExtractField(ctx, sel)
 			}
 			x.recordOutcome(key, sel, err)
 			if err != nil {
 				out[field] = ""
 				failures[field] = err.Error()
 			} else {
-				out[field] = got.Value
+				out[field] = value
 				successes++
 			}
 		}
@@ -386,8 +339,8 @@ func (x *Executor) doExtract(ctx context.Context, a Action, store extractStore) 
 		}
 		return out, nil
 	}
-	var text string
-	if err := chromedp.Run(ctx, chromedp.Evaluate(`document.body.innerText.slice(0,20000)`, &text)); err != nil {
+	text, err := x.driver.ExtractText(ctx)
+	if err != nil {
 		return nil, err
 	}
 	return nil, &structureRequest{Text: text, Schema: a.Schema}

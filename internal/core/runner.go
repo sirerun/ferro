@@ -56,7 +56,7 @@ type Task struct {
 func (r *Runner) Run(ctx context.Context, execCtx BrowserContext, t Task) (result any, m RunMetrics, err error) {
 	r.init.Do(r.defaults)
 	// Keep all execution state local; only the synchronized cache is shared.
-	local := &Runner{LLM: r.LLM, MaxRepairs: r.MaxRepairs, Executor: NewExecutor(r.Executor.wait).WithCache(r.Executor.cache)}
+	local := &Runner{LLM: r.LLM, MaxRepairs: r.MaxRepairs, Executor: NewExecutor(r.Executor.wait).WithCache(r.Executor.cache).WithDriver(r.Executor.driver)}
 	local.Executor.metrics = &m
 	start := time.Now()
 	cache := local.Executor.cache
