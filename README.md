@@ -271,8 +271,8 @@ Environment variables:
 | Variable | Meaning |
 |---|---|
 | `FERRO_MCP_HOME` | Where the lock file, relay socket, allowlist, and (by default) the Chrome profile live. Default `~/.ferro-mcp` |
-| `FERRO_MCP_LLM_BASE_URL` | Required. An OpenAI-compatible `/v1` endpoint |
-| `FERRO_MCP_LLM_MODEL` | Required. Model name |
+| `FERRO_MCP_LLM_BASE_URL` | Optional for direct tools; required for `run_task`. An OpenAI-compatible `/v1` endpoint |
+| `FERRO_MCP_LLM_MODEL` | Required with the LLM endpoint; otherwise omit both |
 | `FERRO_MCP_LLM_API_KEY` | API key, if the endpoint needs one |
 | `FERRO_MCP_CHROME_USER_DATA_DIR` | Chrome profile directory. Default `$FERRO_MCP_HOME/chrome-profile` |
 | `FERRO_MCP_CHROME_PROFILE_DIRECTORY` | Chrome's `--profile-directory` value, for a user data dir holding more than one profile |
@@ -287,8 +287,8 @@ Tools: `run_task` runs an autonomous goal end to end (the MCP equivalent of
 `snapshot`, `navigate`, `click`, `fill`, `select`, `key`, `scroll`, `wait`,
 `extract`.
 
-`snapshot` and `wait` are always available. Every other tool, including
-`run_task`, is gated by a deny-by-default per-origin allowlist at
+Page reads (including `snapshot`), actions, DOM waits and every step inside
+`run_task` are gated by a deny-by-default per-origin allowlist at
 `$FERRO_MCP_HOME/allowlist.json` — a flat JSON array of allowed origins
 (scheme + host + port):
 
@@ -301,7 +301,7 @@ Tools: `run_task` runs an autonomous goal end to end (the MCP equivalent of
 
 A call against a page whose origin isn't listed fails with an error naming
 the blocked origin and the file to edit. No restart needed — the file is
-re-read whenever its modification time changes. See
+re-read on every check; deletion or malformed edits revoke access. See
 `docs/adr/005-mcp-origin-allowlist.md`.
 
 ```sh
@@ -335,12 +335,122 @@ profile, not just configuration.
 | `DESIGN.md` | Package split, principles, known sharp edges |
 | `conversation.md` | The design conversation and RFC the code grew from |
 
+## Your existing Chrome session
+
+The `extension` backend works inside a tab in your normal Chrome profile, using
+its existing login. It does not launch Chrome or copy cookies. The default `cdp`
+backend still launches a dedicated automation profile.
+
+Build this checkout and start the local service:
+
+```sh
+go build -o .claude/scratch/ferro-mcp ./cmd/ferro-mcp
+FERRO_MCP_BACKEND=extension .claude/scratch/ferro-mcp serve
+```
+
+The default state directory is `~/.ferro-mcp`. Create `allowlist.json` there
+containing the exact origins you want to authorize, for example:
+
+```json
+["https://gemini.google.com"]
+```
+
+Open `chrome://extensions` in the Chrome profile you use, enable Developer mode,
+and choose **Load unpacked**, selecting this checkout's `extension/` directory.
+Reload the website tab if it was open before installing the extension. Open the
+Ferro extension popup on that tab, enter `http://127.0.0.1:4173` and the token from
+`~/.ferro-mcp/bridge-token`, and choose **Connect this tab**. The service writes
+that token to a private file; it never prints it. Keep Chrome and the tab open.
+Disconnect before pairing a different tab. Chrome restart requires pairing again.
+
+Configure a local MCP client to run the same binary with
+`FERRO_MCP_BACKEND=extension` and the same `FERRO_MCP_HOME`. It will relay to the
+running service. A minimal stdio configuration is:
+
+```json
+{
+  "mcpServers": {
+    "ferro": {
+      "command": "/absolute/path/to/ferro-mcp",
+      "env": {"FERRO_MCP_BACKEND": "extension"}
+    }
+  }
+}
+```
+
+An agent calls `browser_status`, then `acquire_tab`, `snapshot`, and whichever
+actions it needs, followed by `release_tab`. Call `acquire_tab` again to renew
+(default 300 seconds, maximum 900). Refs belong to the latest snapshot; take a
+new one after navigation. Another MCP session cannot act while your lease is
+active. `run_task` can reserve the tab for its whole call without an explicit
+lease, but needs `FERRO_MCP_LLM_BASE_URL` and `FERRO_MCP_LLM_MODEL`. Set
+`FERRO_MCP_LLM_API_KEY` if the selected model endpoint needs it. Page snapshots
+and extracted text used by `run_task` are sent to that model endpoint.
+
+`cancel_task` cancels the calling session's active task. It does not undo actions
+already performed. Results with `status` equal to `outcome_uncertain` must be
+inspected before retrying. `blocked` and `login_required` require human
+intervention; retry after resolving the page. `disconnected` means no live
+extension is paired. `tab_busy` means another session holds the lease. `pairing_changed` means the
+selected tab changed; take a fresh snapshot before continuing.
+
+## Remote/DGX access
+
+Keep the service on the machine running Chrome. Both machines must be connected
+to your Tailscale network, and the `tailscale` CLI must be on the service's PATH:
+
+```sh
+FERRO_MCP_BACKEND=extension FERRO_MCP_REMOTE=true \
+  .claude/scratch/ferro-mcp serve
+```
+
+Connect the remote agent's MCP client using Streamable HTTP at
+`http://<browser-machine-tailscale-ip>:4174/mcp`, with an
+`Authorization: Bearer <contents-of-remote-token>` header. The separate token is
+stored at `$FERRO_MCP_HOME/remote-token` with mode 0600. Configure it through your
+client's secret storage. It is not the extension pairing token. Remote clients
+must retain the MCP session across acquire/action/release calls.
+
+| Setting | Default / meaning |
+|---|---|
+| `FERRO_MCP_BACKEND` | `cdp` or `extension` |
+| `FERRO_MCP_BRIDGE_ADDR` | `127.0.0.1:4173`; loopback IP only |
+| `FERRO_MCP_REMOTE` | `false`; enable the private remote MCP listener |
+| `FERRO_MCP_REMOTE_PORT` | `4174` |
+| `FERRO_MCP_BIND_HOST` | Optional; must equal the verified local Tailscale IPv4 address |
+| `FERRO_MCP_BLOCK_TIMEOUT` | `15m`; overall call deadline, maximum `1h`; blocked pages return immediately |
+
+If Tailscale is unavailable, automatic remote binding is skipped and local
+service operation continues. An unverifiable explicit bind fails startup. The
+service never listens for remote MCP on a wildcard, public or LAN address.
+Tailscale provides network encryption; the bearer token authorizes the agent.
+
+Use a **10-second connection timeout** in remote clients. If the browser machine
+is asleep or offline, connection refusal/timeout is a transport failure, distinct
+from a live MCP `blocked` result. `browser_status` reports pairing and active-call
+state without disclosing page content or tokens. `ferro-mcp status` and
+`ferro-mcp stop` control the local owner.
+
+**Security note:** this backend acts in your real logged-in sessions. The origin
+allowlist, explicit tab pairing and bearer token limit access, but do not isolate
+agents into different accounts. Install only on the Chrome profile you intend to
+expose, and allow only the sites those agents should use. Human use of the paired
+tab can still change its page while automation runs.
+
+Current scope is one paired top-level tab. File transfer, popup/multi-tab flows,
+cross-origin frames and canvas-based interaction are not implemented. See
+[ADR 006](docs/adr/006-extension-execution-backend.md),
+[ADR 007](docs/adr/007-tailscale-remote-transport.md), and
+[ADR 008](docs/adr/008-browser-service-sessions.md).
+
+
 ## Development
 
 ```sh
 go build ./... && go vet ./...
 go test ./...                                  # unit tests
-FERRO_TEST_BROWSER=1 go test ./...             # adds browser-backed tests (needs Chrome)
+FERRO_TEST_BROWSER=1 go test ./...             # browser tests, including the real unpacked extension
+FERRO_TEST_BROWSER=1 node --test extension/*.test.cjs # extension snapshot parity and protocol tests
 FERRO_MODEL_URL=http://localhost:11434/v1 FERRO_MODEL_NAME=qwen2.5:14b \
   go test -tags=integration ./integration/...  # real-model suite
 ```
@@ -369,3 +479,5 @@ Two rules for contributors, both recorded in `docs/adr/`:
 ## License
 
 MIT. See `LICENSE`.
+
+For unpacked-extension tests, use a recent Chrome with the browser-target `Extensions.loadUnpacked` debugging API (`CHROME_PATH` overrides discovery). The harness enables extension debugging only in a disposable profile. Tests use local fixture sites.

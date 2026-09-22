@@ -86,3 +86,39 @@ top-level tests (12 browser tests skipped without Chrome); the Chrome-enabled
 race suite ran all 24 with zero failures. This entry is kept for provenance
 only -- see the 2026-09-10 entry above for what this pass's own status note
 got wrong.
+
+
+## 2026-09-22 — Existing Chrome session service completed
+
+The previously separate extension and bridge used incompatible command envelopes
+and the extension omitted the required tab header. The resolved `Command` format
+now carries `op`, resolved selector, expected origin and a deadline. The missing
+ExtensionDriver, runner snapshot plumbing and MCP backend selection are wired.
+
+Safety-related behavior is tested: an expired queued action is never dispatched;
+a canceled dispatched action is terminal/uncertain; pairing generations prevent
+old tasks crossing into a newly paired tab; session leases prevent agents from
+interleaving primitive sequences; shutdown/cancellation propagate through the
+Unix relay; model-generated steps and page snapshots enforce the origin policy.
+All bridge round trips are capped at five seconds, inside the overall call limit.
+Polling is twenty seconds so it does not exceed MV3's fetch response idle window.
+
+Validation on the implementation branch: `go build ./...`, `go vet ./...`,
+`go test -race -p 1 ./...`, `FERRO_TEST_BROWSER=1 go test -race -p 1 ./...`,
+and `FERRO_TEST_BROWSER=1 node --test extension/*.test.cjs` all pass. The tests
+include real Chrome loading the real unpacked extension and exercising direct
+actions plus a model-generated plan (fixture model endpoint), blocked/login
+handoffs, independent MCP clients and process boundaries. A temporary binary
+service on the actual local Tailscale interface accepted authenticated status
+and rejected absent/wrong bearer tokens; it was stopped and its credentials removed.
+No real account actions or cross-machine routing were tested.
+
+Test-harness finding: installed and newly downloaded Chrome for Testing builds
+could not reach plain loopback fixture pages on this machine. Regular Chrome
+could. Browser-target `Extensions.loadUnpacked` on regular Chrome, enabled in a
+disposable profile, resolved the harness requirement without changing the user's
+Chrome settings. Calling that method on a page target incorrectly reports that
+the method is unavailable. Temporary downloaded test-browser files were removed.
+
+Ajent inbox/search/diagnose continued returning HTTP 409; prior findings were
+unavailable. Inspection and verification used the local repositories instead.
