@@ -88,7 +88,6 @@ async function dispatchTrustedKeys(target, text) {
       key: ch.key,
       code: ch.code,
       windowsVirtualKeyCode: ch.windowsVirtualKeyCode,
-      text: ch.text,
     });
     if (ch.text) {
       await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
@@ -120,6 +119,7 @@ async function dispatchTrustedInput(tabId, kind, payload) {
     }
     let inputStarted = false;
     try {
+      if (!activeAction || payload.commandID !== activeAction.commandID || Date.now() >= activeAction.deadlineMs) throw new Error('action expired before input');
       if (kind === 'click') {
         const { x, y } = payload;
         if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0) {
@@ -172,10 +172,10 @@ const readyTabs = new Set();
 chrome.tabs.onRemoved.addListener((tabId) => readyTabs.delete(tabId));
 
 async function waitForContentReady(tabId, timeoutMs) {
-  if (readyTabs.has(tabId)) return;
+  try { if ((await chrome.tabs.sendMessage(tabId, { type:'ferro-ping' }))?.ready) return; } catch (_) {}
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (readyTabs.has(tabId)) return;
+    try { if ((await chrome.tabs.sendMessage(tabId, { type:'ferro-ping' }))?.ready) return; } catch (_) {}
     await sleep(150);
   }
   throw new Error('content script did not become ready after navigation');
@@ -216,14 +216,22 @@ function waitForTabComplete(tabId, timeoutMs) {
 
 async function performNavigate(tabId, url) {
   readyTabs.delete(tabId);
+  const complete = waitForTabComplete(tabId, NAV_TIMEOUT_MS);
   await chrome.tabs.update(tabId, { url });
-  await waitForTabComplete(tabId, NAV_TIMEOUT_MS);
+  await complete;
   await waitForContentReady(tabId, CONTENT_READY_TIMEOUT_MS);
   await sleep(NAV_SETTLE_MS);
   return {};
 }
 
 async function handleAction(tabId, action) {
+  if (!action || Date.now() >= action.deadlineMs) throw new Error('action expired before execution');
+  if (action.op === 'location') {
+    const tab = await chrome.tabs.get(tabId);
+    return { result: tab.url };
+  }
+  const expected = action.op === 'navigate' ? new URL(action.url).origin : new URL((await chrome.tabs.get(tabId)).url).origin;
+  if (!action.origin || expected !== action.origin) return { code: 'origin_changed', error: 'Tab origin changed; take a fresh snapshot.' };
   if (action.op === 'navigate') return performNavigate(tabId, action.url);
   return sendToContent(tabId, { type: 'ferro-perform', action });
 }
@@ -231,10 +239,11 @@ async function handleAction(tabId, action) {
 // ---------------------------------------------------------------------
 // Bridge poll/reply loop (ADR 006 decision #2).
 // ---------------------------------------------------------------------
-async function fetchNext(base, token) {
+async function fetchNext(base, token, tabId) {
+  pendingPoll = new AbortController();
   const res = await fetch(`${base}/next`, {
-    headers: { Authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(POLL_TIMEOUT_MS),
+    headers: { Authorization: `Bearer ${token}`, 'X-Ferro-Tab-Id': String(tabId) },
+    signal: AbortSignal.any([pendingPoll.signal, AbortSignal.timeout(POLL_TIMEOUT_MS)]),
   });
   if (res.status === 204) return null;
   if (!res.ok) throw new Error(`bridge GET /next: HTTP ${res.status}`);
@@ -252,6 +261,8 @@ async function postReply(base, token, reply) {
 }
 
 let loopGeneration = 0;
+let activeAction = null;
+let pendingPoll = null;
 
 async function pollLoop(myGeneration) {
   while (loopGeneration === myGeneration) {
@@ -261,16 +272,18 @@ async function pollLoop(myGeneration) {
       continue;
     }
     try {
-      const next = await fetchNext(connection.base, connection.token);
+      const next = await fetchNext(connection.base, connection.token, connection.tabId);
       if (loopGeneration !== myGeneration) return; // paired out from under us
       if (!next) continue;
       let reply;
       try {
-        const result = await handleAction(connection.tabId, next.action);
+        activeAction = {...next.action, commandID:next.id};
+        const result = await handleAction(connection.tabId, activeAction);
         reply = { id: next.id, ...result };
       } catch (error) {
-        reply = { id: next.id, error: error.message };
+        reply = { id: next.id, code: 'outcome_uncertain', error: error.message };
       }
+      activeAction = null;
       await postReply(connection.base, connection.token, reply);
     } catch (error) {
       // Transport failure (bridge not running, laptop asleep, network
@@ -283,11 +296,13 @@ async function pollLoop(myGeneration) {
 }
 
 function startPolling() {
+  pendingPoll?.abort();
   loopGeneration++;
   pollLoop(loopGeneration);
 }
 
 function stopPolling() {
+  pendingPoll?.abort();
   loopGeneration++; // orphans any in-flight pollLoop invocation
 }
 
@@ -298,16 +313,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) return false;
 
   if (message.type === 'ferro-connect') {
-    chrome.storage.session.set({ connection: message.connection }).then(() => {
-      startPolling();
-      sendResponse({ ok: true });
-    });
+    (async () => {
+      try {
+        // Pairing may only be requested by our own popup, never page content.
+        if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) throw new Error('pair using the extension popup');
+        const c = message.connection;
+        if (!/^http:\/\/(127\.0\.0\.1|localhost):[0-9]+$/.test(c.base)) throw new Error('use a local bridge URL');
+        const response = await fetch(`${c.base}/pair`, { method: 'POST', headers: { Authorization: `Bearer ${c.token}`, 'X-Ferro-Tab-Id': String(c.tabId) }, signal: AbortSignal.timeout(5000) });
+        if (!response.ok) throw new Error(`Pairing failed: HTTP ${response.status}`);
+        await chrome.storage.session.set({ connection: c });
+        startPolling();
+        sendResponse({ ok: true });
+      } catch (error) { sendResponse({ error: error.message }); }
+    })();
     return true;
   }
 
   if (message.type === 'ferro-disconnect') {
-    stopPolling();
-    chrome.storage.session.remove('connection').then(() => sendResponse({ ok: true }));
+    (async () => {
+      if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) { sendResponse({error:'disconnect using the popup'}); return; }
+      stopPolling();
+      const c = await getConnection();
+      await chrome.storage.session.remove('connection');
+      try { if (c) await fetch(`${c.base}/disconnect`, { method:'POST', headers:{Authorization:`Bearer ${c.token}`, 'X-Ferro-Tab-Id':String(c.tabId)}, signal:AbortSignal.timeout(5000) }); } catch (_) {}
+      sendResponse({ ok:true });
+    })();
     return true;
   }
 
@@ -321,7 +351,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       try {
         const connection = await getConnection();
-        if (!connection || connection.tabId !== sender.tab.id) {
+        if (!connection || connection.tabId !== sender.tab.id || !activeAction || message.commandID !== activeAction.commandID || Date.now() >= activeAction.deadlineMs || new URL(sender.url).origin !== activeAction.origin || new URL((await chrome.tabs.get(sender.tab.id)).url).origin !== activeAction.origin) {
           sendResponse({ error: 'this tab is not the paired tab' });
           return;
         }

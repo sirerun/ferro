@@ -195,7 +195,7 @@
 
     // A visible password or email input, with no action of ours having
     // asked for one, implies a login gate is blocking the paired tab.
-    if (Array.from(document.querySelectorAll('input[type="password"], input[type="email"]')).some(visible)) {
+    if (Array.from(document.querySelectorAll('input[type="password"]')).some(visible)) {
       return 'A sign-in form is visible on this tab. Sign in manually, then resume.';
     }
 
@@ -213,6 +213,7 @@
       throw new Error(`invalid selector ${JSON.stringify(selector)}: ${error.message}`);
     }
     if (!el) throw new Error(`no element matches ${JSON.stringify(selector)}`);
+    if (document.querySelectorAll(selector).length !== 1) throw new Error('ambiguous selector; refusing to choose an arbitrary element');
     return el;
   }
 
@@ -235,6 +236,7 @@
   }
 
   function fill(el, text) {
+    el.focus();
     if ('value' in el) {
       setNativeValue(el, text);
       el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -300,6 +302,17 @@
     }
   }
 
+  async function settle(budgetMs) {
+    await new Promise((resolve) => {
+      let quiet;
+      const finish = () => { clearTimeout(quiet); clearTimeout(limit); observer.disconnect(); resolve(); };
+      const observer = new MutationObserver(() => { clearTimeout(quiet); quiet = setTimeout(finish, 250); });
+      const limit = setTimeout(finish, Math.max(1, budgetMs || 5000));
+      quiet = setTimeout(finish, 250);
+      observer.observe(document, {subtree:true, childList:true, attributes:true, characterData:true});
+    });
+  }
+
   async function trustedInput(kind, payload) {
     const response = await chrome.runtime.sendMessage({ type: 'ferro-trusted-input', kind, ...payload });
     if (response && response.error) throw new Error(response.error);
@@ -314,28 +327,35 @@
   // resolved CSS selector (ChromedpDriver's callers already resolve
   // ref -> selector Go-side before reaching the driver interface).
   async function perform(action) {
+    const guard = () => {
+      if (action.origin !== location.origin) throw new Error('origin changed before action');
+      if (Date.now() >= action.deadlineMs) throw new Error('action expired before execution');
+    };
+    guard();
     // snapshot always runs, blocked or not -- it's how a caller (or a human
     // resuming later) sees what the block actually looks like. Every other
     // action short-circuits on a blocked page instead of acting into it.
     if (action.op === 'snapshot') {
       const snapshot = takeSnapshot(action.maxElements);
       const reason = blocked();
-      return reason ? { snapshot, blocked: reason } : { snapshot };
+      return reason ? { blocked: reason, code: reason.startsWith('A sign-in') ? 'login_required' : 'blocked' } : { snapshot };
     }
     const reason = blocked();
-    if (reason) return { blocked: reason };
+    if (reason) return { blocked: reason, code: reason.startsWith('A sign-in') ? 'login_required' : 'blocked' };
 
     switch (action.op) {
       case 'click': {
         const el = mustFind(action.selector);
         await scrollIntoViewIfNeeded(el);
+        guard();
         const rect = el.getBoundingClientRect();
-        await trustedInput('click', { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+        await trustedInput('click', { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, commandID:action.commandID });
         return {};
       }
       case 'fill': {
         const el = mustFind(action.selector);
         await scrollIntoViewIfNeeded(el);
+        guard();
         fill(el, action.text || '');
         return {};
       }
@@ -345,13 +365,17 @@
         return {};
       }
       case 'key': {
-        await trustedInput('key', { text: action.text || '' });
+        await trustedInput('key', { text: action.text || '', commandID:action.commandID });
         return {};
       }
       case 'scroll': {
         if (action.to === 'top') window.scrollTo(0, 0);
         else if (action.to === 'bottom') window.scrollTo(0, document.body.scrollHeight);
         else throw new Error(`scroll to ${JSON.stringify(action.to)}: ref-scroll not wired; use top|bottom`);
+        return {};
+      }
+      case 'settle': {
+        await settle(action.budgetMs);
         return {};
       }
       case 'wait_visible': {

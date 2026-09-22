@@ -60,7 +60,7 @@ async function waitFor(predicate, timeoutMs, intervalMs) {
 // and returns a small client exposing navigate()/evaluate()/close().
 // windowSize MUST match snapshot_parity_test.go's chromedp.WindowSize(...)
 // call exactly -- see that file's comment on why.
-async function launchChrome({ windowSize = [1280, 3000] } = {}) {
+async function launchChrome({ windowSize = [1280, 3000], extraArgs = [] } = {}) {
   const chromePath = findChrome();
   if (!chromePath) {
     throw new Error(
@@ -77,6 +77,7 @@ async function launchChrome({ windowSize = [1280, 3000] } = {}) {
       '--remote-debugging-port=0',
       `--window-size=${windowSize[0]},${windowSize[1]}`,
       `--user-data-dir=${userDataDir}`,
+      ...extraArgs,
       'about:blank',
     ],
     { stdio: 'ignore' }
@@ -115,28 +116,25 @@ async function launchChrome({ windowSize = [1280, 3000] } = {}) {
     }
   });
 
-  function send(method, params) {
+  function send(method, params, sessionId) {
     const id = nextId++;
     return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      ws.send(JSON.stringify({ id, method, params }));
+      const timer = setTimeout(() => { pending.delete(id); reject(new Error(`CDP ${method} timed out`)); }, 10000);
+      pending.set(id, {resolve: value => {clearTimeout(timer);resolve(value);}, reject: error => {clearTimeout(timer);reject(error);}});
+      ws.send(JSON.stringify({ id, method, params, sessionId }));
     });
   }
 
   async function navigate(url) {
     await send('Page.enable', {});
-    const loaded = new Promise((resolve) => {
-      const handler = (event) => {
-        const msg = JSON.parse(event.data);
-        if (msg.method === 'Page.loadEventFired') {
-          ws.removeEventListener('message', handler);
-          resolve();
-        }
-      };
-      ws.addEventListener('message', handler);
-    });
-    await send('Page.navigate', { url });
-    await loaded;
+    const result = await send('Page.navigate', { url });
+    if (result.errorText) throw new Error(result.errorText);
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      try { if (await evaluate(`location.href === ${JSON.stringify(url)} && document.readyState === 'complete'`)) return; } catch (_) {}
+      await new Promise(r => setTimeout(r, 50));
+    }
+    throw new Error(`navigation did not reach ${url}`);
   }
 
   async function evaluate(expression) {
@@ -152,14 +150,40 @@ async function launchChrome({ windowSize = [1280, 3000] } = {}) {
     return result.result.value;
   }
 
+  // Extension installation is a browser-target operation, not a page operation.
+  const version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
+  const browserWS = new WebSocket(version.webSocketDebuggerUrl);
+  await new Promise((resolve,reject) => {browserWS.addEventListener('open',resolve,{once:true});browserWS.addEventListener('error',reject,{once:true});});
+  let browserID = 0;
+  const browserPending = new Map();
+  browserWS.addEventListener('message', event => {
+    const m = JSON.parse(event.data), p = browserPending.get(m.id);
+    if (!p) return;
+    browserPending.delete(m.id);clearTimeout(p.timer);
+    if (m.error) p.reject(new Error(m.error.message));else p.resolve(m.result);
+  });
+  function browserSend(method,params) {
+    const id = ++browserID;
+    return new Promise((resolve,reject) => {
+      const timer=setTimeout(()=>{browserPending.delete(id);reject(new Error(`${method} timed out`));},10000);
+      browserPending.set(id,{resolve,reject,timer});browserWS.send(JSON.stringify({id,method,params}));
+    });
+  }
+
   async function close() {
     try {
       ws.close();
+      browserWS.close();
     } catch (_) {
       /* ignore */
     }
-    proc.kill();
-    await new Promise((resolve) => proc.once('exit', resolve)).catch(() => {});
+    if (proc.exitCode === null) {
+      const exited = new Promise(resolve => proc.once('exit', resolve));
+      proc.kill();
+      const killTimer = setTimeout(() => proc.kill('SIGKILL'), 3000);
+      await exited;
+      clearTimeout(killTimer);
+    }
     try {
       fs.rmSync(userDataDir, { recursive: true, force: true });
     } catch (_) {
@@ -167,7 +191,7 @@ async function launchChrome({ windowSize = [1280, 3000] } = {}) {
     }
   }
 
-  return { navigate, evaluate, close };
+  return { navigate, evaluate, close, send, browserSend };
 }
 
 module.exports = { launchChrome, findChrome };

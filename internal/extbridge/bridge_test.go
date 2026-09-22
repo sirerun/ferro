@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"testing"
 	"time"
-
-	"github.com/dndungu/ferro/internal/core"
 )
 
 // --- Tier 1: queue/pairing logic in isolation (no HTTP) ---------------------
@@ -65,7 +63,7 @@ func TestEnqueueDeliver_MatchesByID(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	action := core.Action{Kind: core.KindClick, Ref: 3}
+	action := Command{Op: "click", Selector: "#three"}
 	done := make(chan Reply, 1)
 	errs := make(chan error, 1)
 	go func() {
@@ -83,7 +81,7 @@ func TestEnqueueDeliver_MatchesByID(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for enqueued action to appear on the queue")
 	}
-	if pa.action.Kind != core.KindClick || pa.action.Ref != 3 {
+	if pa.action.Op != "click" || pa.action.Selector != "#three" {
 		t.Fatalf("queued action = %+v, want the enqueued action unchanged", pa.action)
 	}
 
@@ -122,7 +120,7 @@ func TestEnqueue_ContextCanceledBeforeReply(t *testing.T) {
 
 	errs := make(chan error, 1)
 	go func() {
-		_, err := b.Enqueue(ctx, core.Action{Kind: core.KindClick, Ref: 1})
+		_, err := b.Enqueue(ctx, Command{Op: "click", Selector: "#one"})
 		errs <- err
 	}()
 
@@ -172,7 +170,7 @@ func TestHTTP_LongPollNextThenReply(t *testing.T) {
 
 	// The Go-side caller (a stand-in for T12.3's ExtensionDriver) enqueues
 	// an action and blocks for its reply, exactly like a real caller would.
-	action := core.Action{Kind: core.KindFill, Ref: 7, Text: "hello"}
+	action := Command{Op: "fill", Selector: "#seven", Text: "hello"}
 	replyCh := make(chan Reply, 1)
 	errCh := make(chan error, 1)
 	go func() {
@@ -208,7 +206,7 @@ func TestHTTP_LongPollNextThenReply(t *testing.T) {
 	if next.ID == "" {
 		t.Fatal("/next returned an empty id")
 	}
-	if next.Action.Kind != core.KindFill || next.Action.Ref != 7 || next.Action.Text != "hello" {
+	if next.Action.Op != "fill" || next.Action.Selector != "#seven" || next.Action.Text != "hello" {
 		t.Fatalf("/next action = %+v, want the enqueued action unchanged", next.Action)
 	}
 	if got := b.PairedTab(); got != "tab-42" {

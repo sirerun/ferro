@@ -21,6 +21,7 @@
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === 'ferro-ping') { sendResponse({ready:true}); return false; }
     if (!message || message.type !== 'ferro-perform') return false;
     globalThis.FerroAdapter.perform(message.action)
       .then(sendResponse)
