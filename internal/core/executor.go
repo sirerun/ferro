@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -319,6 +320,10 @@ func (x *Executor) doExtract(ctx context.Context, a Action, store extractStore) 
 			}
 			x.recordOutcome(key, sel, err)
 			if err != nil {
+				var stopped *StopError
+				if errors.As(err, &stopped) || ctx.Err() != nil {
+					return nil, err
+				}
 				out[field] = ""
 				failures[field] = err.Error()
 			} else {

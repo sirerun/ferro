@@ -20,7 +20,7 @@ import (
 // repairer — which is exactly the designed path for drift.
 func (x *Executor) resolveRef(ctx context.Context, ref int, kind string) (selector string, key CacheKey, err error) {
 	snap, ok := snapshotFromCtx(ctx)
-	if !ok {
+	if !ok || snap == nil {
 		return "", CacheKey{}, fmt.Errorf("no snapshot in context; runner must attach one before execute")
 	}
 	el := snap.element(ref)
@@ -37,7 +37,7 @@ func (x *Executor) resolveRef(ctx context.Context, ref int, kind string) (select
 	// Fast path: cached selector for this exact element signature.
 	if x.cache != nil {
 		if sel, hit := x.cache.Get(key); hit {
-			if selectorMatches(ctx, sel, el) {
+			if _, cdp := x.driver.(*ChromedpDriver); cdp && selectorMatches(ctx, sel, el) {
 				if x.metrics != nil {
 					x.metrics.CacheHits++
 				}
