@@ -38,8 +38,6 @@ const POLL_ERROR_BACKOFF_MS = 2000; // bridge unreachable (laptop asleep, etc.)
 const NAV_TIMEOUT_MS = 20000;
 const CONTENT_READY_TIMEOUT_MS = 8000;
 const NAV_SETTLE_MS = 250; // mirrors WaitStrategy's default SettleDebounce
-const SEND_RETRY_ATTEMPTS = 5;
-const SEND_RETRY_DELAY_MS = 300;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -181,17 +179,36 @@ async function waitForContentReady(tabId, timeoutMs) {
   throw new Error('content script did not become ready after navigation');
 }
 
-async function sendToContent(tabId, message) {
-  let lastError;
-  for (let attempt = 0; attempt < SEND_RETRY_ATTEMPTS; attempt++) {
+// Static content scripts do not attach to documents opened before installation.
+// Prepare only the requested tab, before dispatching any action. Coalesce
+// concurrent preparation and never retry a possibly delivered browser input.
+const preparingTabs = new Map();
+async function ensureContentReady(tabId) {
+  if (preparingTabs.has(tabId)) return preparingTabs.get(tabId);
+  const prepare = (async () => {
+    const tab = await chrome.tabs.get(tabId);
+    if (!/^https?:\/\//.test(tab.url || '')) throw new Error('Choose a normal website tab; Chrome internal pages cannot be controlled.');
     try {
-      return await chrome.tabs.sendMessage(tabId, message);
-    } catch (error) {
-      lastError = error;
-      await sleep(SEND_RETRY_DELAY_MS);
+      if ((await chrome.tabs.sendMessage(tabId, {type:'ferro-ping'}, {frameId:0}))?.ready) return;
+    } catch (_) { /* an existing document may not have a receiver yet */ }
+    try {
+      await chrome.scripting.executeScript({target:{tabId, frameIds:[0]}, files:['adapter.js','content.js']});
+    } catch (_) {
+      throw new Error('Ferro cannot attach to this page. Click the Ferro toolbar icon on the website tab and reconnect, or refresh that tab. Chrome internal pages, the Web Store and built-in PDF pages are not supported.');
     }
-  }
-  throw new Error(`could not reach the paired tab's content script: ${lastError?.message || 'unknown error'}`);
+    if (!(await chrome.tabs.sendMessage(tabId, {type:'ferro-ping'}, {frameId:0}))?.ready) {
+      throw new Error('The page is not ready for Ferro. Refresh the website tab and reconnect.');
+    }
+  })().catch(error => { error.code = 'page_unavailable'; throw error; });
+  preparingTabs.set(tabId, prepare);
+  try { await prepare; } finally { preparingTabs.delete(tabId); }
+}
+
+async function sendToContent(tabId, message) {
+  await ensureContentReady(tabId);
+  // A failure after this send may mean input happened and the response was
+  // lost. Surface uncertainty instead of blindly sending the action again.
+  return chrome.tabs.sendMessage(tabId, message, {frameId:0});
 }
 
 // ---------------------------------------------------------------------
@@ -281,7 +298,7 @@ async function pollLoop(myGeneration) {
         const result = await handleAction(connection.tabId, activeAction);
         reply = { id: next.id, ...result };
       } catch (error) {
-        reply = { id: next.id, code: 'outcome_uncertain', error: error.message };
+        reply = { id: next.id, code: error.code || 'outcome_uncertain', error: error.message };
       }
       activeAction = null;
       await postReply(connection.base, connection.token, reply);
@@ -315,10 +332,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'ferro-connect') {
     (async () => {
       try {
-        // Pairing may only be requested by our own popup, never page content.
-        if (sender.id !== chrome.runtime.id || ![chrome.runtime.getURL('popup.html'), chrome.runtime.getURL('sidepanel.html')].includes(sender.url)) throw new Error('pair using the extension popup');
+        // Pairing may only be requested by our own popup or panel, never page content.
+        if (sender.id !== chrome.runtime.id || ![chrome.runtime.getURL('popup.html'), chrome.runtime.getURL('sidepanel.html')].includes(sender.url)) throw new Error('pair using the extension popup or side panel');
         const c = message.connection;
         if (!/^http:\/\/(127\.0\.0\.1|localhost):[0-9]+$/.test(c.base)) throw new Error('use a local bridge URL');
+        if (!Number.isInteger(c.tabId) || c.tabId < 0) throw new Error('Choose a website tab to connect.');
+        await ensureContentReady(c.tabId);
         const response = await fetch(`${c.base}/pair`, { method: 'POST', headers: { Authorization: `Bearer ${c.token}`, 'X-Ferro-Tab-Id': String(c.tabId) }, signal: AbortSignal.timeout(5000) });
         if (!response.ok) throw new Error(`Pairing failed: HTTP ${response.status}`);
         await chrome.storage.session.set({ connection: c });

@@ -368,7 +368,9 @@ containing the exact origins you want to authorize, for example:
 
 Open `chrome://extensions` in the Chrome profile you use, enable Developer mode,
 and choose **Load unpacked**, selecting this checkout's `extension/` directory.
-Reload the website tab if it was open before installing the extension. Open the
+Ferro checks and attaches its page receiver when you pair, including tabs opened
+before installation. If Chrome denies attachment, click Ferro on that website
+tab and reconnect, or refresh the tab. Open the
 Ferro extension popup on that tab, enter `http://127.0.0.1:4173` and the token from
 `~/.ferro-mcp/bridge-token`, and choose **Connect this tab**. The service writes
 that token to a private file; it never prints it. Keep Chrome and the tab open.

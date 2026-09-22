@@ -173,3 +173,25 @@ machine's latest boot; no matching build process remained. It was released
 with the canonical compare-and-swap primitive before acquiring our own lease.
 Ajent inbox/search/diagnose continued returning HTTP 409; local repository
 inspection and tests supplied the evidence.
+
+
+## 2026-09-22 — Receiver missing on pre-existing Chrome tabs
+
+Reproduced the operator's exact "Receiving end does not exist" failure by
+opening a fixture tab before installing the extension. The previous test opened
+its tab after installation and missed this lifecycle. Pairing had only checked
+the Go bridge; it could report success without any page receiver.
+
+Pairing now pings the top-frame receiver, injects the packaged adapter/relay
+using Chrome scripting permission when absent, and verifies readiness before
+claiming a connection. Injection still requires existing host or activeTab
+authority; restricted pages return actionable errors. The relay is idempotent
+when programmatic and document-idle injection overlap. Concurrent preparation
+shares one injection. Readiness is checked before commands, and actual input
+is sent once: a lost response no longer causes blind repeated input.
+
+The pre-install-tab browser regression failed before the fix and passed after.
+Targeted browser/race and Node checks cover the existing extension path,
+attachment, denied access, injection coalescing and one-time command dispatch.
+The installed extension files are updated separately from the running Go
+service; Chrome must reload the extension to activate the changed manifest.

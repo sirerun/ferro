@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Ferro",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Chat with Ferro to work in one explicitly paired Chrome tab.",
   "permissions": [
     "storage",
     "activeTab",
     "tabs",
     "debugger",
-    "sidePanel"
+    "sidePanel",
+    "scripting"
   ],
   "host_permissions": [
     "http://127.0.0.1/*",

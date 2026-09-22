@@ -480,3 +480,6 @@ Cloud hosting, billing, campaigns, scheduling and commercial approvals remain
 outside this local browser-engine slice. Existing workflow/orchestration storage
 owns acquisition records; the panel saves only local chat text. No campaign is
 started by installing this build.
+
+
+- [x] Local chat follow-up (codex): reproduce missing receivers in tabs opened before installation; verify readiness before pairing and attach when Chrome permits. Add regression coverage and update installed extension.

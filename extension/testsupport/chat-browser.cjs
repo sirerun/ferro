@@ -11,13 +11,25 @@ const {launchChrome}=require('./cdp.cjs');
  const browser=await launchChrome({windowSize:[390,850],extraArgs:['--enable-unsafe-extension-debugging','--no-proxy-server']});
  for(const signal of ['SIGTERM','SIGINT'])process.once(signal,async()=>{await browser.close();process.exit(1)});
  try {
+  // This page predates installation: static content_scripts have not run.
+  const existing=await browser.browserSend('Target.createTarget',{url:config.url});
+  const attached=await browser.browserSend('Target.attachToTarget',{targetId:existing.targetId,flatten:true});
+  const deadline=Date.now()+10000;
+  for(;;){
+   const ready=await browser.browserSend('Runtime.evaluate',{expression:'document.readyState'},attached.sessionId);
+   if(ready.result.value==='complete')break;
+   if(Date.now()>deadline)throw new Error('Fixture did not load before installation');
+   await new Promise(r=>setTimeout(r,50));
+  }
   const {id}=await browser.browserSend('Extensions.loadUnpacked',{path:path.resolve(__dirname,'..')});
   await browser.navigate(`chrome-extension://${id}/sidepanel.html`);
   async function until(expression,timeout=15000){const end=Date.now()+timeout;while(!await browser.evaluate(expression)){if(Date.now()>end)throw new Error('Timed out: '+expression+'; UI: '+await browser.evaluate('document.body.innerText'));await new Promise(r=>setTimeout(r,80));}}
   await until('!!session');
   // Pair from the actual trusted side-panel document, exactly as its Connect button does.
   await browser.evaluate(`(async()=>{
-   const tab=await chrome.tabs.create({url:${JSON.stringify(config.url)},active:true});
+   const [tab]=await chrome.tabs.query({url:${JSON.stringify(config.url+'/*')}});
+   if(!tab)throw new Error('Pre-install fixture tab missing');
+   await chrome.tabs.update(tab.id,{active:true});
    connection={base:${JSON.stringify(config.base)},token:${JSON.stringify(config.token)},tabId:tab.id};
    const reply=await chrome.runtime.sendMessage({type:'ferro-connect',connection});if(reply.error)throw new Error(reply.error);
    await refresh();
