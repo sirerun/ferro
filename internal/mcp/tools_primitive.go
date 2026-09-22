@@ -95,8 +95,8 @@ func registerPrimitiveTools(server *sdk.Server, c caller) {
 }
 
 // currentOrigin returns the shared tab's current page origin
-// (scheme://host[:port]), used to gate every primitive tool except
-// snapshot/wait (ADR 005) and to gate navigate against its target instead.
+// (scheme://host[:port]). Driver actions gate content reads and effects;
+// navigation is checked against its target, and fixed sleeps read no content.
 func (o *Owner) currentOrigin(ctx context.Context) (string, error) {
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
@@ -185,9 +185,6 @@ func (o *Owner) navigate(ctx context.Context, args json.RawMessage) (any, error)
 	if in.URL == "" {
 		return nil, fmt.Errorf("url is required")
 	}
-	if err := o.checkOrigin(ctx, in.URL); err != nil {
-		return nil, err
-	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
 	res, err := o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindGoto, URL: in.URL}, o.extracted)
@@ -205,9 +202,6 @@ func (o *Owner) click(ctx context.Context, args json.RawMessage) (any, error) {
 	if err := json.Unmarshal(args, &in); err != nil {
 		return nil, fmt.Errorf("decode click args: %w", err)
 	}
-	if err := o.checkOrigin(ctx, ""); err != nil {
-		return nil, err
-	}
 	if o.snap == nil {
 		return nil, fmt.Errorf("no snapshot yet; call snapshot before targeting a ref")
 	}
@@ -220,9 +214,6 @@ func (o *Owner) fill(ctx context.Context, args json.RawMessage) (any, error) {
 	var in fillArgs
 	if err := json.Unmarshal(args, &in); err != nil {
 		return nil, fmt.Errorf("decode fill args: %w", err)
-	}
-	if err := o.checkOrigin(ctx, ""); err != nil {
-		return nil, err
 	}
 	if o.snap == nil {
 		return nil, fmt.Errorf("no snapshot yet; call snapshot before targeting a ref")
@@ -237,9 +228,6 @@ func (o *Owner) selectOption(ctx context.Context, args json.RawMessage) (any, er
 	if err := json.Unmarshal(args, &in); err != nil {
 		return nil, fmt.Errorf("decode select args: %w", err)
 	}
-	if err := o.checkOrigin(ctx, ""); err != nil {
-		return nil, err
-	}
 	if o.snap == nil {
 		return nil, fmt.Errorf("no snapshot yet; call snapshot before targeting a ref")
 	}
@@ -253,9 +241,6 @@ func (o *Owner) key(ctx context.Context, args json.RawMessage) (any, error) {
 	if err := json.Unmarshal(args, &in); err != nil {
 		return nil, fmt.Errorf("decode key args: %w", err)
 	}
-	if err := o.checkOrigin(ctx, ""); err != nil {
-		return nil, err
-	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
 	return o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindKey, Text: in.Text}, o.extracted)
@@ -265,9 +250,6 @@ func (o *Owner) scroll(ctx context.Context, args json.RawMessage) (any, error) {
 	var in scrollArgs
 	if err := json.Unmarshal(args, &in); err != nil {
 		return nil, fmt.Errorf("decode scroll args: %w", err)
-	}
-	if err := o.checkOrigin(ctx, ""); err != nil {
-		return nil, err
 	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
@@ -292,9 +274,6 @@ func (o *Owner) extract(ctx context.Context, args json.RawMessage) (any, error) 
 	}
 	if len(in.Fields) == 0 {
 		return nil, fmt.Errorf("fields is required and must be non-empty; schema-based extraction needs an LLM call and is only available via run_task")
-	}
-	if err := o.checkOrigin(ctx, ""); err != nil {
-		return nil, err
 	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()

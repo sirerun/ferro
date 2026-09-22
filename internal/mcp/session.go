@@ -11,6 +11,8 @@ import (
 
 type clientKey struct{}
 
+const maxLeaseSeconds = 900
+
 func clientIdentity(ctx context.Context) string {
 	v, _ := ctx.Value(clientKey{}).(string)
 	if v == "" {
@@ -68,7 +70,7 @@ func (o *Owner) lease(who, tool string, args json.RawMessage) (string, bool, err
 	if in.Seconds == 0 {
 		in.Seconds = 300
 	}
-	if in.Seconds < 1 || in.Seconds > 900 {
+	if in.Seconds < 1 || in.Seconds > maxLeaseSeconds {
 		return stopResult("invalid_lease", "seconds must be between 1 and 900")
 	}
 	o.leaseOwner = who

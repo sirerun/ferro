@@ -4,9 +4,9 @@ See `docs/devlog.md` for the pre-2026-09-10 investigation history (the
 original "Runtime hardening" claim and its correction) -- superseded here by
 the Shipped entries below, which reflect independently re-verified reality.
 
-## Implemented, pending merge (2026-09-22)
+## Shipped — Chrome session service (2026-09-22)
 
-E12 is complete in `codex/chrome-api-service`: extension driver, agent session
+E12 is complete: extension driver, agent session
 leases, backend selection, authenticated Tailscale MCP HTTP, explicit blocked and
 disconnected results, cancellation, and setup documentation. Build/vet, both
 race suites, real-Chrome extension execution and snapshot parity pass. A live
@@ -19,7 +19,7 @@ its publishing workflow are unchanged; file-transfer/multi-tab browser APIs rema
 outside this change. See ADR 008 and README's setup sections.
 
 
-## Shipped (E12, in progress)
+## Earlier E12 milestones
 - E12 T12.1 `internal/extbridge` poll/reply HTTP server: PR #6, merged
   2026-09-10 (rebase). Independently re-verified against merged `main`
   (build/vet/gofmt clean, 13 named tests plus the full suite green). One
@@ -86,7 +86,7 @@ outside this change. See ADR 008 and README's setup sections.
   `FERRO_MCP_MAX_ELEMENTS`) is reachable from `main`.
 
 ## In progress
-- E12 implementation is verified and awaiting merge; see above.
+- (none)
 
 ## In flight
 - (none)

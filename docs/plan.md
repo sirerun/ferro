@@ -2,8 +2,7 @@
 
 ## Current implementation — 2026-09-22
 
-E12 is implemented and verified in branch `codex/chrome-api-service`, pending
-merge. The original discovery below is historical; the missing driver, backend
+E12 is implemented, verified, and merged into local `main`. The original discovery below is historical; the missing driver, backend
 selection, remote transport and verification are now present. ADR 008 records
 session leases, immediate blocked results, per-action origin checks, fail-closed
 policy revocation, and the resolved extension command protocol.

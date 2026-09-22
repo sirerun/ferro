@@ -122,3 +122,23 @@ the method is unavailable. Temporary downloaded test-browser files were removed.
 
 Ajent inbox/search/diagnose continued returning HTTP 409; prior findings were
 unavailable. Inspection and verification used the local repositories instead.
+
+
+## 2026-09-22 — Headless Claude pre-merge review
+
+An independent headless Claude session reviewed the complete Chrome service
+branch against main. Its four findings were corrected: selector caching now
+uses an optional validation capability preserved by the CDP policy decorator;
+the extension authorizes its command URL without duplicate owner/decorator
+location queries; idle HTTP sessions outlive the longest tab lease; and the
+origin-gating comment matches current behavior. Drivers without selector
+validation do not populate the selector cache.
+
+Regression tests exercise actual guarded CDP runner cache hits and policy
+revocation, and count HTTP extension commands through Owner.Call: navigation
+uses one command; snapshot/fill each use one location lookup plus one action.
+Revoking the allowlist prevents the action from dispatching. Build, vet, the
+full browser-enabled Go race suite, and all four Node extension tests pass.
+
+Claude re-reviewed the fixes and reported all four resolved with no remaining
+concrete findings. The reviewed branch was fast-forwarded into local main.

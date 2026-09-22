@@ -8,6 +8,16 @@ import (
 	"github.com/chromedp/chromedp"
 )
 
+// SelectorValidator is an optional driver capability for safely reusing a
+// cached selector. Decorators must preserve both validation and access checks.
+type SelectorValidator interface {
+	SelectorMatches(context.Context, string, *Element) (bool, error)
+}
+
+func (d *ChromedpDriver) SelectorMatches(ctx context.Context, sel string, el *Element) (bool, error) {
+	return selectorMatches(ctx, sel, el), nil
+}
+
 // resolveRef relocates a snapshot element by signature (tag + name/text),
 // cache-first: if a resolution cache is attached and holds a selector for
 // this element's signature that still matches exactly one visible element,
@@ -35,9 +45,14 @@ func (x *Executor) resolveRef(ctx context.Context, ref int, kind string) (select
 	}
 
 	// Fast path: cached selector for this exact element signature.
-	if x.cache != nil {
+	validator, validates := x.driver.(SelectorValidator)
+	if x.cache != nil && validates {
 		if sel, hit := x.cache.Get(key); hit {
-			if _, cdp := x.driver.(*ChromedpDriver); cdp && selectorMatches(ctx, sel, el) {
+			matches, err := validator.SelectorMatches(ctx, sel, el)
+			if err != nil {
+				return "", key, err
+			}
+			if matches {
 				if x.metrics != nil {
 					x.metrics.CacheHits++
 				}
@@ -57,6 +72,9 @@ func (x *Executor) resolveRef(ctx context.Context, ref int, kind string) (select
 // (the selector may be fine; the page was just slow). A nil cache makes
 // this a no-op.
 func (x *Executor) recordOutcome(key CacheKey, sel string, err error) {
+	if _, validates := x.driver.(SelectorValidator); !validates {
+		return
+	}
 	if x.cache == nil || key.Signature == "" {
 		return
 	}

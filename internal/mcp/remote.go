@@ -120,7 +120,8 @@ func (o *Owner) startRemote(ctx context.Context) error {
 // transport on loopback. Production binding always passes validateTailnetHost.
 func remoteHandler(c caller, token, host string) http.Handler {
 	server := NewServer(c)
-	handler := sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, &sdk.StreamableHTTPOptions{SessionTimeout: 10 * time.Minute})
+	// An idle session must remain valid for the entire longest tab lease.
+	handler := sdk.NewStreamableHTTPHandler(func(*http.Request) *sdk.Server { return server }, &sdk.StreamableHTTPOptions{SessionTimeout: time.Duration(maxLeaseSeconds)*time.Second + 5*time.Minute})
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if token == "" || subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+token)) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)

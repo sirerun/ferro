@@ -114,8 +114,11 @@ func NewOwner(ctx context.Context, cfg Config) (*Owner, error) {
 		o.tab = tab
 		o.driver = core.NewChromedpDriver(core.WaitStrategy{})
 	}
-	// All actions, including those compiled by the model, use this same gate.
-	o.driver = &guardedDriver{PageDriver: o.driver, owner: o}
+	// The extension authorizes the exact URL it sends with each command.
+	// CDP needs a decorator to apply the same policy to every driver action.
+	if cfg.Backend != "extension" {
+		o.driver = &guardedDriver{PageDriver: o.driver, owner: o}
+	}
 	o.exec = core.NewExecutor(core.WaitStrategy{}).WithDriver(o.driver)
 	var client ferro.LLMClient
 	if cfg.LLMBaseURL != "" && cfg.LLMModel != "" {

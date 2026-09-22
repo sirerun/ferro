@@ -84,16 +84,17 @@ func (d *ExtensionDriver) Location(ctx context.Context) (string, error) {
 }
 func (d *ExtensionDriver) command(ctx context.Context, a Command) (Reply, error) {
 	ctx = d.Bridge.Pin(ctx)
-	raw, err := d.Location(ctx)
-	if err != nil {
-		return Reply{}, err
-	}
-	if a.Op == "navigate" {
-		raw = a.URL
+	raw := a.URL
+	if a.Op != "navigate" {
+		var err error
+		raw, err = d.Location(ctx)
+		if err != nil {
+			return Reply{}, err
+		}
 	}
 	if d.CheckURL != nil {
 		if err := d.CheckURL(raw); err != nil {
-			return Reply{}, err
+			return Reply{}, &core.StopError{Code: "origin_denied", Message: err.Error()}
 		}
 	}
 	// Rechecked by the content script immediately before touching the DOM.

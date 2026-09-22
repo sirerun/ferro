@@ -12,6 +12,16 @@ type guardedDriver struct {
 	owner *Owner
 }
 
+func (d *guardedDriver) SelectorMatches(ctx context.Context, sel string, el *core.Element) (bool, error) {
+	if err := d.check(ctx, ""); err != nil {
+		return false, err
+	}
+	if validator, ok := d.PageDriver.(core.SelectorValidator); ok {
+		return validator.SelectorMatches(ctx, sel, el)
+	}
+	return false, nil
+}
+
 func (d *guardedDriver) check(ctx context.Context, target string) error {
 	if err := d.owner.checkOrigin(ctx, target); err != nil {
 		return &core.StopError{Code: "origin_denied", Message: err.Error()}
