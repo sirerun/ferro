@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -115,6 +116,13 @@ func (l *Leader) Call(ctx context.Context, tool string, args json.RawMessage) (s
 		return text, isError, nil
 	}
 
+	if ctx.Err() != nil {
+		return "", false, ctx.Err()
+	}
+	var op *net.OpError
+	if !errors.As(err, &op) || op.Op != "dial" {
+		return "", false, fmt.Errorf("owner connection lost; action outcome uncertain, inspect before retrying: %w", err)
+	}
 	o, promoted, perr := l.tryBecomeOwner()
 	if perr != nil {
 		return "", false, fmt.Errorf("relay to owner failed (%v) and could not take over (%v)", err, perr)
@@ -142,7 +150,7 @@ func (l *Leader) Close() error {
 	err := o.Close()
 	_ = os.Remove(l.cfg.SocketPath())
 	_ = releaseLock(f)
-	_ = os.Remove(l.cfg.LockPath())
+	// Keep the lock inode: unlinking it lets a racing owner lock a different file.
 	return err
 }
 
@@ -183,15 +191,17 @@ func writePID(f *os.File) error {
 // response. Used both by Leader.Call (shim relay) and by the status/stop
 // CLI commands (T11.7), which never attempt promotion.
 func relayCall(ctx context.Context, sockPath, tool string, args json.RawMessage) (string, bool, error) {
-	conn, err := net.Dial("unix", sockPath)
+	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", sockPath)
 	if err != nil {
 		return "", false, fmt.Errorf("dial owner socket %s: %w", sockPath, err)
 	}
 	defer func() { _ = conn.Close() }()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 	if dl, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(dl)
 	}
-	if err := json.NewEncoder(conn).Encode(relayRequest{Tool: tool, Args: args}); err != nil {
+	if err := json.NewEncoder(conn).Encode(relayRequest{Tool: tool, Args: args, Client: clientIdentity(ctx)}); err != nil {
 		return "", false, fmt.Errorf("send relay request: %w", err)
 	}
 	var resp relayResponse

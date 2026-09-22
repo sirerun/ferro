@@ -2,6 +2,8 @@ package mcp
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 
@@ -15,9 +17,13 @@ import (
 // talked to") — they differ only in what c.Call actually does: an Owner
 // answers directly, a Leader acting as a shim relays over the socket.
 func NewServer(c caller) *sdk.Server {
+	var nonce [16]byte
+	_, _ = rand.Read(nonce[:])
+	c = &identifiedCaller{caller: c, namespace: hex.EncodeToString(nonce[:])}
 	server := sdk.NewServer(&sdk.Implementation{Name: "ferro-mcp", Version: "0.1.0"}, nil)
 	registerRunTaskTool(server, c)
 	registerPrimitiveTools(server, c)
+	registerSessionTools(server, c)
 	return server
 }
 
@@ -27,11 +33,12 @@ func NewServer(c caller) *sdk.Server {
 // generate its JSON input schema via reflection, same as the prototype's
 // runTaskArgs).
 func addRelayTool[Args any](server *sdk.Server, tool *sdk.Tool, c caller) {
-	sdk.AddTool(server, tool, func(ctx context.Context, _ *sdk.CallToolRequest, args Args) (*sdk.CallToolResult, any, error) {
+	sdk.AddTool(server, tool, func(ctx context.Context, req *sdk.CallToolRequest, args Args) (*sdk.CallToolResult, any, error) {
 		argsJSON, err := json.Marshal(args)
 		if err != nil {
 			return nil, nil, fmt.Errorf("marshal %s args: %w", tool.Name, err)
 		}
+		ctx = context.WithValue(ctx, clientKey{}, req.Session.ID())
 		text, isError, err := c.Call(ctx, tool.Name, argsJSON)
 		if err != nil {
 			// A transport-level failure (e.g. the relay socket is gone and

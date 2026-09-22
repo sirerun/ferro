@@ -79,3 +79,29 @@ func TestAllowlist_ReloadsOnMtimeChange(t *testing.T) {
 		t.Errorf("Check did not pick up the extended allowlist without a restart: %v", err)
 	}
 }
+
+func TestAllowlistRevocationFailsClosed(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "allowlist.json")
+	if err := os.WriteFile(path, []byte(`["https://example.com"]`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	a, err := NewAllowlist(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = a.Check("https://example.com"); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(path, []byte(`{`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if a.Check("https://example.com") == nil {
+		t.Fatal("malformed policy kept old access")
+	}
+	if err = os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if a.Check("https://example.com") == nil {
+		t.Fatal("deleted policy kept old access")
+	}
+}

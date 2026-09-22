@@ -6,18 +6,10 @@
 // persists across calls, so a multi-turn session (e.g. a chat thread) keeps
 // its state.
 //
-// Chrome refuses to enable the remote-debugging (CDP) protocol at all when
-// --user-data-dir resolves to the OS's actual default profile location —
-// this is a deliberate Chrome guardrail against automating a user's real
-// logged-in session, and it applies regardless of whether that profile is
-// currently open elsewhere. So this server can never attach to a Chrome
-// install's real default profile (e.g. "Profile 7" inside
-// ~/Library/Application Support/Google/Chrome); it must use a dedicated,
-// non-default profile directory instead: a persistent profile the server
-// owns outright, signed into by hand once in a headful window (see README
-// "Staying signed in"), then reused headless-or-headful on every later
-// launch. FERRO_MCP_CHROME_USER_DATA_DIR defaults to exactly such a
-// directory, under $FERRO_MCP_HOME.
+// The default cdp backend uses a dedicated persistent Chrome profile.
+// FERRO_MCP_BACKEND=extension instead drives an explicitly paired tab in an
+// existing Chrome profile without launching Chrome. Optional authenticated
+// remote MCP runs on the local Tailscale interface; see README.
 //
 // Any number of ferro-mcp processes can point at the same $FERRO_MCP_HOME
 // (e.g. one per Claude Code session) without hitting Chrome's per-profile
@@ -29,6 +21,7 @@
 //
 //	ferro-mcp          serve the MCP tool set on stdio (default; auto
 //	                    leader-elects per internal/mcp.NewLeader)
+//	ferro-mcp serve     run as a service without stdio
 //	ferro-mcp status    report the owner's PID and socket path, or "not
 //	                    running"
 //	ferro-mcp stop      ask the owner to close the browser pool and remove
@@ -61,9 +54,11 @@ func main() {
 // later doesn't require restructuring this dispatch.
 func runCLI(args []string) error {
 	if len(args) == 0 {
-		return serve()
+		return serve(false)
 	}
 	switch args[0] {
+	case "serve":
+		return serve(true)
 	case "status":
 		fs := flag.NewFlagSet("status", flag.ExitOnError)
 		if err := fs.Parse(args[1:]); err != nil {
@@ -77,8 +72,9 @@ func runCLI(args []string) error {
 		}
 		return stop()
 	case "-h", "-help", "--help", "help":
-		fmt.Println("usage: ferro-mcp [status|stop]")
+		fmt.Println("usage: ferro-mcp [serve|status|stop]")
 		fmt.Println("  (no argument)  serve the MCP tool set on stdio")
+		fmt.Println("  serve          run as a service without stdio")
 		fmt.Println("  status         report the owner's PID and socket path, or \"not running\"")
 		fmt.Println("  stop           ask the owner to close the browser pool and remove the lock/socket")
 		return nil
@@ -107,7 +103,7 @@ func stop() error {
 
 // serve leader-elects (internal/mcp's ADR 004 implementation) and serves
 // the MCP tool set on this process's own stdio.
-func serve() error {
+func serve(daemon bool) error {
 	cfg, err := fmcp.ConfigFromEnv()
 	if err != nil {
 		return err
@@ -122,8 +118,29 @@ func serve() error {
 	}
 	defer func() { _ = leader.Close() }()
 
-	server := fmcp.NewServer(leader)
-	_ = server.Run(ctx, &sdk.StdioTransport{})
+	if !daemon {
+		server := fmcp.NewServer(leader)
+		finished := make(chan struct{})
+		go func() { defer close(finished); _ = server.Run(ctx, &sdk.StdioTransport{}) }()
+		if o := leader.Owner(); o != nil {
+			select {
+			case <-finished:
+			case <-o.StopRequested():
+				cancel()
+				return nil
+			case <-ctx.Done():
+				return nil
+			}
+		} else {
+			select {
+			case <-finished:
+			case <-ctx.Done():
+			}
+			return nil
+		}
+	} else if !leader.IsOwner() {
+		return fmt.Errorf("a Ferro owner is already running; use ferro-mcp status")
+	}
 
 	if o := leader.Owner(); o != nil {
 		// T11.6 / ADR 004: the owner must keep serving connected shims even

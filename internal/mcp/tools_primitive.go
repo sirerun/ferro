@@ -11,6 +11,7 @@ import (
 	"github.com/chromedp/chromedp"
 
 	"github.com/dndungu/ferro/internal/core"
+	"github.com/dndungu/ferro/internal/extbridge"
 )
 
 // Primitive tool argument shapes. Each maps 1:1 onto one core.ActionKind
@@ -57,7 +58,7 @@ type (
 func registerPrimitiveTools(server *sdk.Server, c caller) {
 	addRelayTool[snapshotArgs](server, &sdk.Tool{
 		Name:        "snapshot",
-		Description: "Take a fresh snapshot of the shared tab's current page: URL, title, and a numbered list of interactive elements (refs) for click/fill/select/extract to target. Not gated by the origin allowlist (ADR 005) -- an agent can always see what page it is on.",
+		Description: "Take a fresh snapshot of the shared tab's current page: URL, title, and a numbered list of interactive elements (refs) for click/fill/select/extract to target. Gated by the origin allowlist because snapshots contain authenticated page content.",
 	}, c)
 	addRelayTool[navigateArgs](server, &sdk.Tool{
 		Name:        "navigate",
@@ -85,7 +86,7 @@ func registerPrimitiveTools(server *sdk.Server, c caller) {
 	}, c)
 	addRelayTool[waitArgs](server, &sdk.Tool{
 		Name:        "wait",
-		Description: "Wait for dom_settle, a fixed duration (e.g. \"2s\"), or a CSS selector to become visible. Not gated by the origin allowlist (ADR 005) -- purely passive.",
+		Description: "Wait for dom_settle, a fixed duration (e.g. \"2s\"), or a CSS selector to become visible. DOM waits are gated by the origin allowlist.",
 	}, c)
 	addRelayTool[extractArgs](server, &sdk.Tool{
 		Name:        "extract",
@@ -100,7 +101,14 @@ func (o *Owner) currentOrigin(ctx context.Context) (string, error) {
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
 	var raw string
-	if err := chromedp.Run(runCtx, chromedp.Location(&raw)); err != nil {
+	if o.bridge != nil {
+		d := &extbridge.ExtensionDriver{Bridge: o.bridge}
+		var err error
+		raw, err = d.Location(runCtx)
+		if err != nil {
+			return "", err
+		}
+	} else if err := chromedp.Run(runCtx, chromedp.Location(&raw)); err != nil {
 		return "", fmt.Errorf("read current URL: %w", err)
 	}
 	return originOf(raw)
@@ -127,6 +135,9 @@ func originOf(raw string) (string, error) {
 // caller's cancellation on top via AfterFunc rather than by using the
 // caller's context as the base.
 func (o *Owner) actionCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	if o.tab == nil {
+		return context.WithCancel(ctx)
+	}
 	runCtx, cancel := context.WithCancel(o.tab.CDP())
 	stop := context.AfterFunc(ctx, cancel)
 	return runCtx, func() {
@@ -158,7 +169,7 @@ func (o *Owner) checkOrigin(ctx context.Context, target string) error {
 func (o *Owner) snapshot(ctx context.Context, _ json.RawMessage) (any, error) {
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
-	snap, err := core.TakeSnapshot(runCtx, o.tab.SnapshotMaxElements())
+	snap, err := o.driver.Snapshot(runCtx, o.cfg.MaxElements)
 	if err != nil {
 		return nil, err
 	}
@@ -268,8 +279,7 @@ func (o *Owner) wait(ctx context.Context, args json.RawMessage) (any, error) {
 	if err := json.Unmarshal(args, &in); err != nil {
 		return nil, fmt.Errorf("decode wait args: %w", err)
 	}
-	// Not gated -- ADR 005: "snapshot and wait are ungated -- purely
-	// passive."
+	// Fixed sleeps read no page content. The driver gates DOM waits.
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
 	return o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindWait, For: in.For}, o.extracted)

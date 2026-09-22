@@ -10,8 +10,9 @@ import (
 // 004). This is never MCP JSON-RPC — MCP is spoken only between each
 // process and its own client, on that process's own stdio.
 type relayRequest struct {
-	Tool string          `json:"tool"`
-	Args json.RawMessage `json:"args,omitempty"`
+	Client string          `json:"client,omitempty"`
+	Tool   string          `json:"tool"`
+	Args   json.RawMessage `json:"args,omitempty"`
 }
 
 type relayResponse struct {

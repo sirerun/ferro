@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"time"
 )
 
 // Config bundles every environment-derived setting cmd/ferro-mcp needs:
@@ -19,7 +20,13 @@ type Config struct {
 	// Home is $FERRO_MCP_HOME: the directory holding the lock file, the
 	// relay socket, the allowlist, and (by default) the Chrome profile.
 	// Defaults to $HOME/.ferro-mcp.
-	Home string
+	Home         string
+	Backend      string
+	BridgeAddr   string
+	BindHost     string
+	RemotePort   int
+	Remote       bool
+	BlockTimeout time.Duration
 
 	LLMBaseURL string
 	LLMModel   string
@@ -75,12 +82,38 @@ func ConfigFromEnv() (Config, error) {
 		ProfileDirectory: os.Getenv("FERRO_MCP_CHROME_PROFILE_DIRECTORY"),
 		StartURL:         os.Getenv("FERRO_MCP_START_URL"),
 		MaxRepairs:       2,
+		Backend:          os.Getenv("FERRO_MCP_BACKEND"),
+		BridgeAddr:       os.Getenv("FERRO_MCP_BRIDGE_ADDR"),
+		BindHost:         os.Getenv("FERRO_MCP_BIND_HOST"),
+		Remote:           envBool("FERRO_MCP_REMOTE", false),
+		RemotePort:       4174,
+		BlockTimeout:     15 * time.Minute,
 	}
-	if cfg.LLMBaseURL == "" {
-		return cfg, fmt.Errorf("FERRO_MCP_LLM_BASE_URL is required (an OpenAI-compatible /v1 endpoint)")
+	if (cfg.LLMBaseURL == "") != (cfg.LLMModel == "") {
+		return cfg, fmt.Errorf("set both FERRO_MCP_LLM_BASE_URL and FERRO_MCP_LLM_MODEL, or neither for direct tools")
 	}
-	if cfg.LLMModel == "" {
-		return cfg, fmt.Errorf("FERRO_MCP_LLM_MODEL is required")
+	if cfg.Backend == "" {
+		cfg.Backend = "cdp"
+	}
+	if cfg.Backend != "cdp" && cfg.Backend != "extension" {
+		return cfg, fmt.Errorf("FERRO_MCP_BACKEND must be cdp or extension")
+	}
+	if cfg.BridgeAddr == "" {
+		cfg.BridgeAddr = "127.0.0.1:4173"
+	}
+	if value := os.Getenv("FERRO_MCP_REMOTE_PORT"); value != "" {
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > 65535 {
+			return cfg, fmt.Errorf("invalid FERRO_MCP_REMOTE_PORT")
+		}
+		cfg.RemotePort = n
+	}
+	if value := os.Getenv("FERRO_MCP_BLOCK_TIMEOUT"); value != "" {
+		d, err := time.ParseDuration(value)
+		if err != nil || d <= 0 || d > time.Hour {
+			return cfg, fmt.Errorf("FERRO_MCP_BLOCK_TIMEOUT must be positive and at most 1h")
+		}
+		cfg.BlockTimeout = d
 	}
 	if cfg.UserDataDir == "" {
 		// A dedicated, non-default directory this server owns outright —
