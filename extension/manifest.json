@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
-  "name": "ferro remote execution bridge",
+  "name": "Ferro",
   "version": "0.1.0",
-  "description": "Pair one Chrome tab with a local ferro-mcp process so remote agents can drive your real, signed-in browser session (ADR 006).",
+  "description": "Chat with Ferro to work in one explicitly paired Chrome tab.",
   "permissions": [
     "storage",
     "activeTab",
     "tabs",
-    "debugger"
+    "debugger",
+    "sidePanel"
   ],
   "host_permissions": [
     "http://127.0.0.1/*",
@@ -17,7 +18,7 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_popup": "popup.html"
+    "default_title": "Open Ferro chat"
   },
   "content_scripts": [
     {
@@ -30,5 +31,9 @@
       ],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "minimum_chrome_version": "116",
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  }
 }

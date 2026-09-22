@@ -316,7 +316,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       try {
         // Pairing may only be requested by our own popup, never page content.
-        if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) throw new Error('pair using the extension popup');
+        if (sender.id !== chrome.runtime.id || ![chrome.runtime.getURL('popup.html'), chrome.runtime.getURL('sidepanel.html')].includes(sender.url)) throw new Error('pair using the extension popup');
         const c = message.connection;
         if (!/^http:\/\/(127\.0\.0\.1|localhost):[0-9]+$/.test(c.base)) throw new Error('use a local bridge URL');
         const response = await fetch(`${c.base}/pair`, { method: 'POST', headers: { Authorization: `Bearer ${c.token}`, 'X-Ferro-Tab-Id': String(c.tabId) }, signal: AbortSignal.timeout(5000) });
@@ -331,7 +331,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'ferro-disconnect') {
     (async () => {
-      if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) { sendResponse({error:'disconnect using the popup'}); return; }
+      if (sender.id !== chrome.runtime.id || ![chrome.runtime.getURL('popup.html'), chrome.runtime.getURL('sidepanel.html')].includes(sender.url)) { sendResponse({error:'disconnect using the popup'}); return; }
       stopPolling();
       const c = await getConnection();
       await chrome.storage.session.remove('connection');
@@ -372,3 +372,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.storage.session.get('connection').then(({ connection }) => {
   if (connection) startPolling();
 });
+
+// Chrome owns the panel frame; the extension renders only its contents.
+chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});

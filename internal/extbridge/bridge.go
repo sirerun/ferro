@@ -67,6 +67,10 @@ type pendingAction struct {
 // Option configures a Bridge at construction time.
 type Option func(*Bridge)
 
+// WithChatHandler mounts the local, bearer-authenticated side-panel API.
+// Configure before Start; the handler never receives unauthenticated requests.
+func WithChatHandler(h http.Handler) Option { return func(b *Bridge) { b.chat = h } }
+
 // WithToken sets the bearer token both endpoints require, instead of
 // generating a random one. Mainly useful for tests that need a known token.
 func WithToken(token string) Option {
@@ -97,8 +101,9 @@ type Bridge struct {
 	// srv and ln back Start/Stop; the HTTP wiring itself (handlers, routing,
 	// auth) lives in server.go, kept separate from the queue/pairing logic
 	// above.
-	srv *http.Server
-	ln  net.Listener
+	chat http.Handler
+	srv  *http.Server
+	ln   net.Listener
 }
 
 // New constructs a Bridge, generating a random bearer token unless

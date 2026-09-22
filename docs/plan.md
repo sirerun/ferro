@@ -465,3 +465,18 @@ unchanged from the prior plan revision.
 - 2026 09 04: Replaced the raw v0.1 extraction with a new plan. Added E7 to
   E10, archived E1 to E6 as outlines. Created ADR 001 and ADR 002. Created
   `docs/roadmap.md`.
+
+### Local standalone chat — 2026-09-22
+
+Owner: codex. Trigger: immediate operator use of the research-to-draft workflow.
+
+- [x] Add the Glass Chat side-panel UI with frame-color matching, pairing, model setup and history/export.
+- [x] Wire authenticated local chat requests to the existing Go executor, with per-session cancellation and default read-only enforcement.
+- [x] Verify real Chrome UI, model transport, mutation gating, cancellation, history recovery and existing regressions.
+- [x] Install a local runnable build and document the first research-to-draft journey.
+- [ ] Operator: load the unpacked extension, select a provider/model and qualify a permitted live source before relying on its outputs.
+
+Cloud hosting, billing, campaigns, scheduling and commercial approvals remain
+outside this local browser-engine slice. Existing workflow/orchestration storage
+owns acquisition records; the panel saves only local chat text. No campaign is
+started by installing this build.

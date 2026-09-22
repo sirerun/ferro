@@ -46,6 +46,17 @@ func (b *Bridge) Start(addr string) error {
 	b.ln = ln
 
 	mux := http.NewServeMux()
+	if b.chat != nil {
+		mux.Handle("/chat/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			origin := r.Header.Get("Origin")
+			if r.Host != ln.Addr().String() || (origin != "" && !strings.HasPrefix(origin, "chrome-extension://")) || !b.authorized(r) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			b.chat.ServeHTTP(w, r)
+		}))
+	}
 	mux.HandleFunc("/next", b.handleNext)
 	mux.HandleFunc("/reply", b.handleReply)
 	mux.HandleFunc("/pair", b.handlePair)

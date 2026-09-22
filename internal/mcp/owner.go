@@ -86,7 +86,7 @@ func NewOwner(ctx context.Context, cfg Config) (*Owner, error) {
 		if err != nil {
 			return nil, err
 		}
-		b, err := extbridge.New(extbridge.WithToken(token))
+		b, err := extbridge.New(extbridge.WithToken(token), extbridge.WithChatHandler(o.chatHandler()))
 		if err != nil {
 			return nil, err
 		}

@@ -57,13 +57,20 @@ func (o *Owner) runTask(ctx context.Context, args json.RawMessage) (any, error) 
 		return nil, err
 	}
 
-	if o.cfg.LLMBaseURL == "" || o.cfg.LLMModel == "" {
+	runner := o.runner
+	driver := o.driver
+	if chat, ok := ctx.Value(chatTaskKey{}).(chatTask); ok {
+		runner = chat.runner
+		if chat.readOnly {
+			driver = readOnlyDriver{PageDriver: driver}
+		}
+	} else if o.cfg.LLMBaseURL == "" || o.cfg.LLMModel == "" {
 		return nil, fmt.Errorf("run_task requires FERRO_MCP_LLM_BASE_URL and FERRO_MCP_LLM_MODEL; direct browser tools do not")
 	}
 	o.snap = nil
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
-	result, metrics, err := o.runner.RunDriver(runCtx, o.driver, o.cfg.MaxElements, ferro.Task{
+	result, metrics, err := runner.RunDriver(runCtx, driver, o.cfg.MaxElements, ferro.Task{
 		Goal:         in.Goal,
 		StartURL:     in.StartURL,
 		MaxPlannings: in.MaxPlannings,

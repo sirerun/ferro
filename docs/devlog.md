@@ -142,3 +142,32 @@ full browser-enabled Go race suite, and all four Node extension tests pass.
 
 Claude re-reviewed the fixes and reported all four resolved with no remaining
 concrete findings. The reviewed branch was fast-forwarded into local main.
+
+
+## 2026-09-22 — Standalone local Chrome chat
+
+Implemented the supplied floating Glass Chat design in Chrome's side panel,
+with a frame-colored light/dark background and custom theme color. Model setup,
+explicit tab pairing, exact-origin policy editing, bounded chat retention,
+export and cancellation are wired to the existing Go executor. The default
+read-only driver prevents clicks, typing, selection and key presses even when
+the model requests them. Interaction mode remains explicitly selectable.
+
+Validation: full Go build/vet, full browser-enabled race suite and all four
+Node extension tests passed. Real Chrome UI tests exercise settings and model
+authentication, read-only refusal, successful interaction and extraction,
+chat reload, HTML-as-text rendering, active provider cancellation and denial
+of cancellation by a different session. Targeted browser/race tests passed
+again after adding API-key redaction for provider errors; the test endpoint
+intentionally echoes its fixture key and the transcript receives [redacted].
+
+Installed and started a local extension-backend build, with a launcher and
+setup guide. No real profile was driven, no live model key was selected, and
+no research campaign or outbound action was executed. Human extension loading
+and provider/source qualification remain explicit acceptance steps.
+
+The shared build lease found at verification had expired and predated the
+machine's latest boot; no matching build process remained. It was released
+with the canonical compare-and-swap primitive before acquiring our own lease.
+Ajent inbox/search/diagnose continued returning HTTP 409; local repository
+inspection and tests supplied the evidence.

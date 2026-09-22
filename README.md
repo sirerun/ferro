@@ -335,6 +335,17 @@ profile, not just configuration.
 | `DESIGN.md` | Package split, principles, known sharp edges |
 | `conversation.md` | The design conversation and RFC the code grew from |
 
+## Standalone Chrome chat
+
+Use Ferro directly from a Chrome side panel: connect a tab, configure your model
+provider, and describe the work. The floating Glass Chat interface runs against
+the local Go service, with saved chat/export, cancellation and default read-only
+execution. No Claude Code or Codex session is required.
+
+See [Standalone Chrome chat](docs/local-chat.md) for installation and a first
+research-to-draft session. This is a local prototype, not the hosted multi-user
+product. The side panel is separate from the AMSL credential review branch.
+
 ## Your existing Chrome session
 
 The `extension` backend works inside a tab in your normal Chrome profile, using
