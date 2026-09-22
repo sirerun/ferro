@@ -161,8 +161,10 @@ of cancellation by a different session. Targeted browser/race tests passed
 again after adding API-key redaction for provider errors; the test endpoint
 intentionally echoes its fixture key and the transcript receives [redacted].
 
-Installed and started a local extension-backend build, with a launcher and
-setup guide. No real profile was driven, no live model key was selected, and
+Installed a local extension-backend build, with a launcher and setup guide.
+The default bridge port was occupied by an existing local dashboard; this
+installation uses port 4175 with matching launcher/panel defaults. Owner status
+confirmed the service running on loopback with no tab paired. No real profile was driven, no live model key was selected, and
 no research campaign or outbound action was executed. Human extension loading
 and provider/source qualification remain explicit acceptance steps.
 
