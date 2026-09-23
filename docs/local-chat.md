@@ -15,6 +15,7 @@ FERRO_MCP_BACKEND=extension ./ferro-mcp serve
 
 The foreground process remains running. In Chrome, open `chrome://extensions`,
 enable Developer mode, and **Load unpacked** this checkout's `extension/` folder.
+Ferro uses a cyan cursor focus mark as its logo in Chrome and its side panel.
 Pin Ferro, open the website tab you want to use, and click Ferro to open its panel.
 Ferro checks the page receiver and attaches it when needed, including tabs
 opened before installation. If Chrome denies attachment, click the Ferro toolbar

@@ -195,3 +195,13 @@ Targeted browser/race and Node checks cover the existing extension path,
 attachment, denied access, injection coalescing and one-time command dispatch.
 The installed extension files are updated separately from the running Go
 service; Chrome must reload the extension to activate the changed manifest.
+
+
+## 2026-09-22 — Cursor focus mark as Ferro logo
+
+Created a cyan cursor-focus mark from a center dot, segmented aiming ring and
+pointer tail, echoing Ox's animated target cursor. Added PNG sizes for Chrome's
+manifest/action icons and retained the generated PNG master plus an SVG for UI
+use. The side-panel wordmark pulses a light outer ring; reduced-motion settings
+disable that animation. The old extension popup shares the mark. Updated the
+extension version so Chrome recognizes the UI/icon change.
