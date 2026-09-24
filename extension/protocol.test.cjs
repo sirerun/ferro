@@ -210,7 +210,7 @@ test('startup repairs disabled panel overrides without changing pairing', async 
   context.chrome.tabs.query=async()=>[{id:42},{id:43}];
   context.chrome.storage.session.set=async()=>{throw new Error('Panel recovery must not change pairing');};
   await vm.runInContext('restoreSidePanelAccess()',context);
-  assert.equal(behavior.openPanelOnActionClick,false);
+  assert.equal(behavior.openPanelOnActionClick,true);
   assert.deepEqual(options.map(x=>x.tabId),[undefined,42,43]);
   assert.ok(options.every(x=>x.enabled && x.path==='sidepanel.html'));
 });
@@ -246,10 +246,15 @@ test('lost local pairing asks for confirmation before releasing service pairing'
  assert.equal(response.requiresConfirmation,true);assert.deepEqual(routes,['/chat/status']);
 });
 
-test('disconnected panel closes only on its tab and toolbar can reopen it',async()=>{
+test('disconnect closes the panel without disabling toolbar access',async()=>{
  const {context}=worker();const calls=[];
- context.chrome.sidePanel={setOptions:async value=>calls.push(['options',value.tabId,value.enabled,value.path]),open:async value=>calls.push(['open',value.tabId])};
+ context.chrome.sidePanel={close:async value=>calls.push(['close',value.tabId]),setOptions:async()=>{throw new Error('Must not disable panel');}};
  await vm.runInContext('closeDisconnectedPanel(41)',context);
- await vm.runInContext('openFerroPanel({id:41})',context);
- assert.deepEqual(calls,[['options',41,false,'sidepanel.html'],['options',41,true,'sidepanel.html'],['open',41]]);
+ assert.deepEqual(calls,[['close',41]]);
+});
+test('older Chrome fallback restores availability after hiding a panel',async()=>{
+ const {context}=worker();const calls=[];
+ context.chrome.sidePanel={setOptions:async value=>calls.push(value.enabled)};
+ await vm.runInContext('closeDisconnectedPanel(41)',context);
+ assert.deepEqual(calls,[false,true]);
 });
