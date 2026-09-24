@@ -328,3 +328,29 @@ func TestRunnerPreservesProviderDeadlineFromRepair(t *testing.T) {
 		t.Fatalf("provider detail leaked: %v", runErr)
 	}
 }
+
+type cancellingRepairProviderV2 struct{ cancel context.CancelFunc }
+
+func (p cancellingRepairProviderV2) CompleteWithUsage(context.Context, string, string) (CompletionV2, error) {
+	p.cancel()
+	return CompletionV2{Transmission: TransmissionResponseReceivedV2}, context.Canceled
+}
+func TestRunnerPreservesTaskCancellationDuringRepair(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	driver := &driverFixture{fail: errors.New("element vanished")}
+	budget := &budgetSpyV2{}
+	client, err := NewBudgetedClientV2(cancellingRepairProviderV2{cancel}, budget, DefaultLimitsV2())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &Runner{LLM: client, Executor: NewExecutor(WaitStrategy{}).WithDriver(driver), MaxRepairs: 2}
+	plan := &Plan{Steps: []Action{{Kind: KindFill, Ref: 1, Text: "x"}, {Kind: KindDone, Result: "ok"}}}
+	_, _, runErr := r.executeWithRepairs(ctx, ctx, plan, &Snapshot{URL: "https://fixture.test", Elements: []Element{{Ref: 1, Tag: "input", Name: "q"}}}, 20, nil)
+	if runErr == nil || !errors.Is(runErr.Err, context.Canceled) {
+		t.Fatalf("task cancellation hidden by old browser failure: %v", runErr)
+	}
+	if driver.fills != 1 || len(budget.reconciled) != 1 {
+		t.Fatalf("retry or missing reconciliation: fills=%d reconciled=%d", driver.fills, len(budget.reconciled))
+	}
+}

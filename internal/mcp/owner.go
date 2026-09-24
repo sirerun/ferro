@@ -313,6 +313,28 @@ func (o *Owner) Call(ctx context.Context, tool string, args json.RawMessage) (st
 		}
 		return string(data), false, nil
 	}
+	if tool == "run_task_v2" && o.receipts != nil {
+		if in, err := ValidateTaskRequestV2(args); err == nil {
+			digest, digestErr := canonicalRequestDigestV2(in)
+			if digestErr != nil {
+				return digestErr.Error(), true, nil
+			}
+			previous, lookupErr := o.receipts.Lookup(ctx, privateReceiptOwnerV2, in.TaskID)
+			if lookupErr == nil {
+				if previous.RequestDigest != digest {
+					return ErrReceiptConflictV2.Error(), true, nil
+				}
+				data, marshalErr := json.Marshal(receiptResponseV2(previous))
+				if marshalErr != nil {
+					return "", false, marshalErr
+				}
+				return string(data), false, nil
+			}
+			if !errors.Is(lookupErr, ErrReceiptNotFoundV2) {
+				return lookupErr.Error(), true, nil
+			}
+		}
+	}
 	select {
 	case o.gate <- struct{}{}:
 	case <-ctx.Done():

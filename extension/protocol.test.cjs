@@ -383,7 +383,7 @@ test('hosted worker restart rejoins the same server pair, and explicitly pairs o
   const afterRestart=restartedWorker();
   const rejoined=await connect(afterRestart);
   assert.equal(rejoined.ok,true);
-  assert.deepEqual(routes.map(r=>r[0].replace('/bridge','')),['/chat/status']);
+  assert.deepEqual(routes.map(r=>r[0].replace('/bridge','')),['/chat/status','/pair']);
 
   // If the service itself restarted and forgot the pair, recovery explicitly
   // claims it with /pair before polling.
@@ -394,4 +394,72 @@ test('hosted worker restart rejoins the same server pair, and explicitly pairs o
   assert.equal(pairedAgain.ok,true);
   assert.equal(paired,'browser-context-restart-1234.42');
   assert.deepEqual(routes.map(r=>r[0].replace('/bridge','')),['/chat/status','/pair']);
+});
+
+test('hosted retained connection explicitly re-pairs after server restart', async()=>{
+  const connection={base:'https://ferro.sire.run/bridge',token:'shared-token',browserId:'browser-context-live-1234',tabId:42};
+  const routes=[];
+  let paired='';
+  const {context,listeners}=worker({fetch:async(url,options={})=>{
+    const path=new URL(url).pathname;
+    routes.push(path);
+    if(path.endsWith('/pair')){
+      paired=`${options.headers['X-Ferro-Browser-Id']}.${options.headers['X-Ferro-Tab-Id']}`;
+      return {ok:true,status:204};
+    }
+    return {ok:true,status:200,json:async()=>({busy:false,leased:false,paired_tab:null}),text:async()=>''};
+  }});
+  context.chrome.storage.local.get=async key=>({[key]:'browser-context-live-1234'});
+  context.chrome.storage.session.get=async()=>({connection});
+  context.ensureContentReady=async()=>{};
+  context.startPolling=()=>{};
+  context.restoreSidePanelAccess=async()=>{};
+
+  const response=await new Promise(resolve=>listeners[0]({type:'ferro-connect',connection},{id:'test-extension',url:'chrome-extension://test-extension/popup.html'},resolve));
+  assert.equal(response.ok,true);
+  assert.equal(paired,'browser-context-live-1234.42');
+  assert.deepEqual(routes,['/bridge/pair']);
+});
+
+test('disconnect clears only a stale local pair after authoritative empty status', async()=>{
+  const connection={base:'https://ferro.sire.run/bridge',token:'shared-token',browserId:'browser-context-live-1234',tabId:42};
+  let stored=true;
+  const routes=[];
+  const {context,listeners}=worker({fetch:async(url)=>{
+    const path=new URL(url).pathname;
+    routes.push(path);
+    if(path.endsWith('/disconnect'))return {ok:false,status:409,text:async()=> 'wrong pairing'};
+    return {ok:true,status:200,json:async()=>({busy:false,leased:false,paired_tab:null}),text:async()=>''};
+  }});
+  context.chrome.storage.session.get=async()=>({connection});
+  context.chrome.storage.session.remove=async()=>{stored=false};
+  context.stopPolling=()=>{};
+  context.startPolling=()=>{};
+  context.restoreSidePanelAccess=async()=>{};
+
+  const response=await new Promise(resolve=>listeners[0]({type:'ferro-disconnect'},{id:'test-extension',url:'chrome-extension://test-extension/popup.html'},resolve));
+  assert.equal(response.ok,true);
+  assert.equal(stored,false);
+  assert.deepEqual(routes,['/bridge/disconnect','/bridge/chat/status']);
+});
+
+test('disconnect preserves local state when another browser owns the pair', async()=>{
+  const connection={base:'https://ferro.sire.run/bridge',token:'shared-token',browserId:'browser-context-stale-1234',tabId:42};
+  let stored=true;
+  const routes=[];
+  const {context,listeners}=worker({fetch:async(url)=>{
+    const path=new URL(url).pathname;
+    routes.push(path);
+    if(path.endsWith('/disconnect'))return {ok:false,status:409,text:async()=> 'wrong pairing'};
+    return {ok:true,status:200,json:async()=>({busy:false,leased:false,paired_tab:'browser-context-other-1234.42'}),text:async()=>''};
+  }});
+  context.chrome.storage.session.get=async()=>({connection});
+  context.chrome.storage.session.remove=async()=>{stored=false};
+  context.stopPolling=()=>{};
+  context.startPolling=()=>{};
+
+  const response=await new Promise(resolve=>listeners[0]({type:'ferro-disconnect'},{id:'test-extension',url:'chrome-extension://test-extension/popup.html'},resolve));
+  assert.match(response.error,/wrong pairing/);
+  assert.equal(stored,true);
+  assert.deepEqual(routes,['/bridge/disconnect','/bridge/chat/status']);
 });
