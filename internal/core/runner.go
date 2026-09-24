@@ -45,6 +45,9 @@ type Task struct {
 	// ReplayKey, when set, lets the runner persist and replay validated plans
 	// across sessions (see cache.go); zero LLM calls on a warm hit.
 	ReplayKey string
+	// FreshReplayOnly restricts plan caching to plans whose Done result is
+	// derived entirely from the latest extract step. Used by task v2.
+	FreshReplayOnly bool
 	// Schema optionally constrains the shape of the Done result.
 	Schema json.RawMessage
 	// MaxPlannings bounds PlanAgain chains. Default 3.
@@ -134,7 +137,11 @@ func (r *Runner) run(ctx, runCtx context.Context, maxElements int, t Task, drive
 		var plan *Plan
 		if t.ReplayKey != "" && cache != nil {
 			key = replayID(t, snap)
-			plan = cache.getPlan(key)
+			if t.FreshReplayOnly {
+				plan = cache.getFreshReplayPlanV2(key)
+			} else {
+				plan = cache.getPlan(key)
+			}
 		}
 		replayed := plan != nil
 		if replayed {
@@ -163,7 +170,11 @@ func (r *Runner) run(ctx, runCtx context.Context, maxElements int, t Task, drive
 			}
 			if key != "" {
 				if m.Repairs == 0 {
-					cache.putPlan(key, plan)
+					if t.FreshReplayOnly {
+						cache.putFreshReplayPlanV2(key, plan)
+					} else {
+						cache.putPlan(key, plan)
+					}
 				} else {
 					cache.deletePlan(key)
 				}
@@ -251,7 +262,11 @@ Rules:
 		if client, ok := r.LLM.(SchemaCompleter); ok {
 			raw, err = client.CompleteSchema(ctx, system, user, planSchema())
 		} else {
-			raw, err = r.LLM.Complete(ctx, system, user)
+			kind := budgetKindPlanningV2
+			if attempt == 1 {
+				kind = budgetKindParseRetryV2
+			}
+			raw, err = r.LLM.Complete(withBudgetRequestKindV2(ctx, kind), system, user)
 		}
 		if m != nil {
 			m.LLMCalls++
@@ -312,7 +327,7 @@ func (r *Runner) executeWithRepairs(ctx context.Context, cdpCtx context.Context,
 		}
 
 		var stopped *StopError
-		if errors.As(rerr, &stopped) || ctx.Err() != nil {
+		if errors.As(rerr, &stopped) || ctx.Err() != nil || isTaskV2BudgetFailure(rerr.Err) {
 			return nil, extracted, rerr
 		}
 
@@ -333,6 +348,12 @@ func (r *Runner) executeWithRepairs(ctx context.Context, cdpCtx context.Context,
 		}
 
 		patched, ok, err := r.repairStep(ctx, rerr, snap, fresh, m)
+		if err != nil {
+			var repairStop *StopError
+			if errors.As(err, &repairStop) || isTaskV2BudgetFailure(err) {
+				return nil, extracted, &RunError{StepIndex: rerr.StepIndex, Action: rerr.Action, Err: err}
+			}
+		}
 		if err != nil || !ok {
 			return nil, extracted, rerr // original error wins
 		}
@@ -397,7 +418,7 @@ func (r *Runner) structure(ctx context.Context, request *structureRequest, m *Ru
 		system += " Return an object with exactly one key, result, containing the schema-conforming value."
 	}
 	user := "Schema: " + string(request.Schema) + "\nPage text:\n" + request.Text
-	raw, err := r.LLM.Complete(ctx, system, user)
+	raw, err := r.LLM.Complete(withBudgetRequestKindV2(ctx, budgetKindExtractionV2), system, user)
 	m.LLMCalls++
 	m.EstimatedTokens += (len(system) + len(user) + len(raw)) / 4
 	if err != nil {
