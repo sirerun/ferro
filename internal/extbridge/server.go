@@ -162,6 +162,7 @@ func (b *Bridge) handleNext(w http.ResponseWriter, r *http.Request) {
 			live := waiting && pa.ctx.Err() == nil
 			if live {
 				pa.delivered = true
+				b.dispatched[pa.id] = true
 			}
 			b.mu.Unlock()
 			if !live {
@@ -264,11 +265,16 @@ func (b *Bridge) handleDisconnect(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "wrong pairing", 409)
 		return
 	}
+	if b.hasDispatchedLocked() {
+		http.Error(w, "an action reply is still pending", http.StatusConflict)
+		return
+	}
 	b.pairedTab = ""
 	b.generation++
 	for id, ch := range b.waiting {
 		ch <- Reply{Code: "disconnected", Error: "extension disconnected; inspect the page before retrying"}
 		delete(b.waiting, id)
+		delete(b.dispatched, id)
 	}
 	w.WriteHeader(204)
 }

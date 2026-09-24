@@ -112,6 +112,32 @@ test('reconnecting the exact current tab does not interrupt a poll or action',as
   assert.equal(started,0);
 });
 
+test('disconnect keeps the connection and resumes polling when the server rejects it',async()=>{
+  const connection={base:'http://127.0.0.1:4173',token:'token',tabId:41};
+  let removed=0,stopped=0,started=0;
+  const {context,listeners}=worker({fetch:async()=>({ok:false,status:409,text:async()=> 'an action reply is still pending'})});
+  context.chrome.storage.session.get=async()=>({connection});
+  context.chrome.storage.session.remove=async()=>{removed++};
+  context.stopPolling=()=>{stopped++};
+  context.startPolling=()=>{started++};
+  const response=await new Promise(resolve=>listeners[0]({type:'ferro-disconnect'},{id:'test-extension',url:'chrome-extension://test-extension/popup.html'},resolve));
+  assert.match(response.error,/action reply is still pending/);
+  assert.equal(removed,0);
+  assert.equal(stopped,1);
+  assert.equal(started,1);
+});
+
+test('disconnect does not stop polling while a browser action is active',async()=>{
+  let stopped=0,fetches=0;
+  const {context,listeners}=worker({fetch:async()=>{fetches++;return {ok:true,status:204}}});
+  vm.runInContext('activeAction = {commandID:"running"}',context);
+  context.stopPolling=()=>{stopped++};
+  const response=await new Promise(resolve=>listeners[0]({type:'ferro-disconnect'},{id:'test-extension',url:'chrome-extension://test-extension/popup.html'},resolve));
+  assert.match(response.error,/action is still running/);
+  assert.equal(stopped,0);
+  assert.equal(fetches,0);
+});
+
 test('failed tab switch restores the previous pairing and resumes polling',async()=>{
   const previous={base:'http://127.0.0.1:4173',token:'old-token',tabId:41};
   let stored=previous;

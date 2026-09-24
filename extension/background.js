@@ -300,8 +300,11 @@ async function pollLoop(myGeneration) {
       } catch (error) {
         reply = { id: next.id, code: error.code || 'outcome_uncertain', error: error.message };
       }
-      activeAction = null;
-      await postReply(connection.base, connection.token, reply);
+      try {
+        await postReply(connection.base, connection.token, reply);
+      } finally {
+        activeAction = null;
+      }
     } catch (error) {
       // Transport failure (bridge not running, laptop asleep, network
       // hiccup) -- distinct from a "blocked" page: nothing gets POSTed
@@ -395,11 +398,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type === 'ferro-disconnect') {
     (async () => {
       if (sender.id !== chrome.runtime.id || ![chrome.runtime.getURL('popup.html'), chrome.runtime.getURL('sidepanel.html')].includes(sender.url)) { sendResponse({error:'disconnect using the popup'}); return; }
-      stopPolling();
+      if (activeAction) { sendResponse({error:'A browser action is still running. Wait for it to finish before disconnecting.'}); return; }
       const c = await getConnection();
+      stopPolling();
+      let warning = '';
+      try {
+        if (c) {
+          const response = await fetch(`${c.base}/disconnect`, { method:'POST', headers:{Authorization:`Bearer ${c.token}`, 'X-Ferro-Tab-Id':String(c.tabId)}, signal:AbortSignal.timeout(5000) });
+          if (!response.ok) {
+            const detail = (await response.text()).trim();
+            if (response.status === 409) {
+              startPolling();
+              sendResponse({error:`Disconnect failed: ${detail || `HTTP ${response.status}`}`});
+              return;
+            }
+            warning = `The bridge did not confirm disconnect (HTTP ${response.status}).`;
+          }
+        }
+      } catch (error) {
+        warning = `The bridge could not confirm disconnect: ${error.message}`;
+      }
       await chrome.storage.session.remove('connection');
-      try { if (c) await fetch(`${c.base}/disconnect`, { method:'POST', headers:{Authorization:`Bearer ${c.token}`, 'X-Ferro-Tab-Id':String(c.tabId)}, signal:AbortSignal.timeout(5000) }); } catch (_) {}
-      sendResponse({ ok:true });
+      sendResponse({ ok:true, warning });
     })();
     return true;
   }

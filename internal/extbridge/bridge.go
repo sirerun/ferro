@@ -97,6 +97,7 @@ type Bridge struct {
 	pairedTab   string                // "" until the first /next request pairs
 	activePolls map[string]int        // live /next requests by tab
 	waiting     map[string]chan Reply // action id -> the Enqueue call awaiting its reply
+	dispatched  map[string]bool       // actions handed to the extension but not yet replied
 	queue       chan *pendingAction   // actions waiting to be handed to /next
 
 	// srv and ln back Start/Stop; the HTTP wiring itself (handlers, routing,
@@ -114,6 +115,7 @@ func New(opts ...Option) (*Bridge, error) {
 	b := &Bridge{
 		pollTimeout: defaultPollTimeout,
 		waiting:     make(map[string]chan Reply),
+		dispatched:  make(map[string]bool),
 		activePolls: make(map[string]int),
 		queue:       make(chan *pendingAction, defaultQueueCapacity),
 	}
@@ -165,7 +167,7 @@ func (b *Bridge) pairExplicit(tabID string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.pairedTab == tabID {
-		if len(b.waiting) > 0 {
+		if b.hasDispatchedLocked() {
 			return fmt.Errorf("tab %q has an action in progress; wait for it to finish before reconnecting", tabID)
 		}
 		b.resetPairingLocked()
@@ -178,11 +180,11 @@ func (b *Bridge) pairLocked(tabID string) error {
 	// If the old extension no longer has a live poll, replace it immediately.
 	// Otherwise preserve the active pairing until it disconnects.
 	if b.pairedTab != "" && b.pairedTab != tabID {
-		if b.activePolls[b.pairedTab] > 0 || len(b.waiting) > 0 {
+		if b.activePolls[b.pairedTab] > 0 || b.hasDispatchedLocked() {
 			return fmt.Errorf("tab %q is already paired; disconnect it or wait for its current action or poll to stop", b.pairedTab)
 		}
 		b.resetPairingLocked()
-	} else if b.pairedTab != "" && b.activePolls[b.pairedTab] == 0 && time.Since(b.lastSeen) >= 45*time.Second {
+	} else if b.pairedTab != "" && b.activePolls[b.pairedTab] == 0 && !b.hasDispatchedLocked() && time.Since(b.lastSeen) >= 45*time.Second {
 		// A restarted Chrome may reuse a numeric tab id; force refs to be
 		// reacquired even when the id happens to match.
 		b.resetPairingLocked()
@@ -196,12 +198,15 @@ func (b *Bridge) pairLocked(tabID string) error {
 	return nil
 }
 
+func (b *Bridge) hasDispatchedLocked() bool { return len(b.dispatched) > 0 }
+
 func (b *Bridge) resetPairingLocked() {
 	b.pairedTab = ""
 	b.generation++
 	for id, ch := range b.waiting {
 		ch <- Reply{Code: "disconnected", Error: "extension disconnected; inspect the page before retrying"}
 		delete(b.waiting, id)
+		delete(b.dispatched, id)
 	}
 	for {
 		select {
@@ -238,6 +243,7 @@ func (b *Bridge) Enqueue(ctx context.Context, action Command) (Reply, error) {
 	case <-ctx.Done():
 		b.mu.Lock()
 		delete(b.waiting, id)
+		delete(b.dispatched, id)
 		b.mu.Unlock()
 		return Reply{}, ctx.Err()
 	}
@@ -248,6 +254,7 @@ func (b *Bridge) Enqueue(ctx context.Context, action Command) (Reply, error) {
 	case <-ctx.Done():
 		b.mu.Lock()
 		delete(b.waiting, id)
+		delete(b.dispatched, id)
 		delivered := pa.delivered
 		b.mu.Unlock()
 		if delivered {
@@ -265,6 +272,7 @@ func (b *Bridge) deliver(id string, reply Reply) bool {
 	ch, ok := b.waiting[id]
 	if ok {
 		delete(b.waiting, id)
+		delete(b.dispatched, id)
 	}
 	b.mu.Unlock()
 	if !ok {

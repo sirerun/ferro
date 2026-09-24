@@ -156,7 +156,7 @@ $('disconnect').onclick = async () => {
   if (running) { notice('Stop the task before disconnecting.'); return; }
   const reply = await chrome.runtime.sendMessage({type:'ferro-disconnect'});
   if (reply?.error) { notice(reply.error); return; }
-  connection = null; $('token').value = ''; await refresh(); notice('Disconnected.');
+  connection = null; $('token').value = ''; await refresh(); notice(reply?.warning ? `Disconnected locally. ${reply.warning}` : 'Disconnected.');
 };
 $('model-form').onsubmit = async event => {
   event.preventDefault();
