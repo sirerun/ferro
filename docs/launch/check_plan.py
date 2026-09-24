@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parent
 
 def render(tasks, waves):
     lines = ['# Executable task cards', '', 'Generated from tasks.json; change that file and run `python3 docs/launch/check_plan.py --write`.', '', 'All listed checks are required future verification, not claims that they already ran. Read agent-runbook.md before assigning work.', '']
-    lines += ['## Dependency waves', '', 'A wave is a dependency frontier, not permission to run every task simultaneously. Enforce path ownership and the build lease; use at most four initial lanes.', '']
+    lines += ['## Dependency waves', '', 'A wave is a dependency frontier, not permission to run every task simultaneously. Enforce path ownership and the build lease; use at most three coding lanes plus one coordinator across both tracks.', '']
     for i, wave in enumerate(waves):
         lines += [f'- Wave {i}: '+', '.join(wave)]
     lines += ['']
@@ -17,7 +17,7 @@ def render(tasks, waves):
         lines += [f'{n}. {s}' for n,s in enumerate(task['steps'],1)]
         lines += ['', 'Acceptance:', ''] + ['- '+s for s in task['acceptance']]
         lines += ['', '**Required verification:** '+task['verification'], '']
-    return '\n'.join(lines)+'\n'
+    return '\n'.join(lines).rstrip()+'\n'
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--write',action='store_true');args=parser.parse_args()

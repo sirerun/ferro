@@ -6,7 +6,7 @@ All listed checks are required future verification, not claims that they already
 
 ## Dependency waves
 
-A wave is a dependency frontier, not permission to run every task simultaneously. Enforce path ownership and the build lease; use at most four initial lanes.
+A wave is a dependency frontier, not permission to run every task simultaneously. Enforce path ownership and the build lease; use at most three coding lanes plus one coordinator across both tracks.
 
 - Wave 0: D01
 - Wave 1: D02
@@ -1313,4 +1313,3 @@ Acceptance:
 - No planned/skipped critical work presented as complete; public status and AMSL maturity distinguished.
 
 **Required verification:** Final evidence audit, link checks, plan graph validation and release-owner decision
-
