@@ -7,11 +7,13 @@ const path = require('node:path');
 
 function worker(overrides = {}) {
   const listeners = [];
+  const localState = {};
   const context = vm.createContext({
     console, URL, AbortController, AbortSignal, setTimeout, clearTimeout,
+    crypto:{randomUUID:()=> 'browser-context-default-1234'},
     fetch: async () => ({ok:true,status:204}),
     chrome: {
-      storage: {session:{get:async()=>({}),set:async()=>{},remove:async()=>{}}},
+      storage: {session:{get:async()=>({}),set:async()=>{},remove:async()=>{}},local:{get:async key=>({[key]:localState[key]}),set:async value=>Object.assign(localState,value)}},
       tabs:{onRemoved:{addListener(){}},onUpdated:{addListener(){},removeListener(){}},get:async()=>({url:'https://allowed.test/'}),sendMessage:async()=>({result:'content'})},
       runtime:{id:'test-extension',getURL:p=>`chrome-extension://test-extension/${p}`,onMessage:{addListener:f=>listeners.push(f)}},
     },
@@ -27,6 +29,13 @@ test('poll includes the pairing tab id and bearer credential', async () => {
   await vm.runInContext('fetchNext("http://127.0.0.1:4173","test-token",42)',context);
   assert.equal(sent.opts.headers['X-Ferro-Tab-Id'],'42');
   assert.equal(sent.opts.headers.Authorization,'Bearer test-token');
+});
+test('hosted polls carry the installation identity separately from the numeric Chrome tab id', async()=>{
+  let sent;
+  const {context}=worker({fetch:async(url,opts)=>{sent=opts;return {ok:true,status:204}}});
+  await vm.runInContext('fetchNext("https://ferro.sire.run/bridge","test-token",42,"browser-context-a-123456")',context);
+  assert.equal(sent.headers['X-Ferro-Tab-Id'],'42');
+  assert.equal(sent.headers['X-Ferro-Browser-Id'],'browser-context-a-123456');
 });
 test('origin change and expired commands never reach content', async()=>{
   const {context}=worker();
@@ -278,4 +287,58 @@ test('trusted popup switch reuses the stored token without returning it',async()
  const response=await new Promise(resolve=>listeners[0]({type:'ferro-connect',connection:{base:previous.base,tabId:42},confirmDisconnectTab:'41'},{id:'test-extension',url:'chrome-extension://test-extension/popup.html'},resolve));
  assert.equal(response.ok,true);assert.equal(stored.token,'saved-token');assert.equal(stored.tabId,42);
  assert.ok(auth.every(x=>x==='Bearer saved-token'));assert.equal(JSON.stringify(response).includes('saved-token'),false);
+});
+
+
+test('hosted pairing scopes equal numeric tabs to separate extension contexts and requires owner disconnect', async()=>{
+  let paired='';
+  const events=[];
+  const serverFetch=async(url,options={})=>{
+    const path=new URL(url).pathname;
+    const headers=options.headers||{};
+    const browser=headers['X-Ferro-Browser-Id'];
+    const tab=headers['X-Ferro-Tab-Id'];
+    events.push({path,browser,tab});
+    if(path.endsWith('/chat/status'))return {ok:true,status:200,json:async()=>({busy:false,leased:false,paired_tab:paired||null})};
+    if(path.endsWith('/pair')){
+      if(paired)return {ok:false,status:409,text:async()=>'another browser owns the pairing'};
+      paired=`${browser}.${tab}`;return {ok:true,status:204};
+    }
+    if(path.endsWith('/disconnect')){
+      if(paired!==`${browser}.${tab}`)return {ok:false,status:409,text:async()=>'identity mismatch'};
+      paired='';return {ok:true,status:204};
+    }
+    return {ok:true,status:204};
+  };
+  function hostedContext(identity){
+    const {context,listeners}=worker({fetch:serverFetch,crypto:{randomUUID:()=>identity}});
+    context.ensureContentReady=async()=>{};
+    context.startPolling=()=>{};
+    context.stopPolling=()=>{};
+    context.restoreSidePanelAccess=async()=>{};
+    let session={};
+    context.chrome.storage.session.get=async key=>key ? {[key]:session[key]} : session;
+    context.chrome.storage.session.set=async value=>{session={...session,...value}};
+    context.chrome.storage.session.remove=async key=>{delete session[key]};
+    return {context,listeners};
+  }
+  const connect=async(agent,confirmDisconnectTab)=>new Promise(resolve=>agent.listeners[0]({type:'ferro-connect',connection:{base:'https://ferro.sire.run/bridge',token:'shared-token',tabId:42},confirmDisconnectTab},{id:'test-extension',url:'chrome-extension://test-extension/popup.html'},resolve));
+  const a=hostedContext('browser-context-a-123456');
+  const b=hostedContext('browser-context-b-123456');
+  assert.equal((await connect(a)).ok,true);
+  assert.equal(paired,'browser-context-a-123456.42');
+  const needsConfirmation=await connect(b);
+  assert.equal(needsConfirmation.requiresConfirmation,true);
+  assert.equal(needsConfirmation.pairedTab,'browser-context-a-123456.42');
+  assert.equal(events.some(e=>e.path==='/disconnect'),false,'new browser must not disconnect the remote owner');
+  const attempted=await connect(b,needsConfirmation.pairedTab);
+  assert.match(attempted.error,/Pairing failed/);
+  assert.equal(paired,'browser-context-a-123456.42','confirmed takeover cannot silently displace the owner');
+  assert.equal(events.filter(e=>e.path==='/disconnect').length,0);
+  const disconnected=await new Promise(resolve=>a.listeners[0]({type:'ferro-disconnect'},{id:'test-extension',url:'chrome-extension://test-extension/popup.html'},resolve));
+  assert.equal(disconnected.ok,true);
+  assert.equal(paired,'');
+  assert.equal((await connect(b)).ok,true);
+  assert.equal(paired,'browser-context-b-123456.42');
+  assert.ok(events.filter(e=>e.path==='/pair').every(e=>e.tab==='42'&&e.browser));
 });

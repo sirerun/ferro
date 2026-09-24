@@ -87,7 +87,7 @@ toggle.onclick = async () => {
         type: 'ferro-connect', connection: { base, token, tabId: tab.id },
       });
       if (response?.requiresConfirmation) {
-        if (!confirm('Disconnect the current tab and connect this one?')) { actionError = 'Connection unchanged.'; return; }
+        if (!confirm(response.remote ? 'This pairing belongs to another browser. Continue only if you intend to connect after its owner disconnects.' : 'Disconnect the current tab and connect this one?')) { actionError = 'Connection unchanged.'; return; }
         response = await chrome.runtime.sendMessage({type:'ferro-connect', connection:{base,token,tabId:tab.id}, confirmDisconnectTab:response.pairedTab});
         if (response?.requiresConfirmation) throw new Error('The paired tab changed. Connect again to confirm.');
       }

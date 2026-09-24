@@ -36,6 +36,7 @@
 const POLL_TIMEOUT_MS = 30000; // one long-poll GET at a time
 const POLL_ERROR_BACKOFF_MS = 2000; // bridge unreachable (laptop asleep, etc.)
 const HOSTED_BRIDGE_BASE = 'https://ferro.sire.run/bridge';
+const HOSTED_BROWSER_ID_KEY = 'hostedBrowserIdentity';
 
 function validBridgeBase(base) {
   return /^http:\/\/(127\.0\.0\.1|localhost):[0-9]+$/.test(base) || base === HOSTED_BRIDGE_BASE;
@@ -51,6 +52,32 @@ function sleep(ms) {
 async function getConnection() {
   const { connection } = await chrome.storage.session.get('connection');
   return connection || null;
+}
+
+async function getHostedBrowserIdentity() {
+  const stored = await chrome.storage.local.get(HOSTED_BROWSER_ID_KEY);
+  if (stored[HOSTED_BROWSER_ID_KEY]) return stored[HOSTED_BROWSER_ID_KEY];
+  const identity = crypto.randomUUID();
+  await chrome.storage.local.set({[HOSTED_BROWSER_ID_KEY]: identity});
+  return identity;
+}
+
+function hostedWireTabId(connection) {
+  return `${connection.browserId}.${connection.tabId}`;
+}
+
+function parseHostedWireTabId(value) {
+  const match = /^([A-Za-z0-9_-]{16,128})\.([0-9]+)$/.exec(value || '');
+  if (match) return {browserId:match[1], tabId:Number(match[2]), wireTabId:value};
+  if (/^[0-9]+$/.test(value || '')) return {browserId:null, tabId:Number(value), wireTabId:value};
+  return null;
+}
+
+function tabIdentityHeaders(connection) {
+  if (connection.base === HOSTED_BRIDGE_BASE) {
+    return {'X-Ferro-Browser-Id':connection.browserId, 'X-Ferro-Tab-Id':String(connection.tabId)};
+  }
+  return {'X-Ferro-Tab-Id':String(connection.tabId)};
 }
 
 // ---------------------------------------------------------------------
@@ -261,10 +288,10 @@ async function handleAction(tabId, action) {
 // ---------------------------------------------------------------------
 // Bridge poll/reply loop (ADR 006 decision #2).
 // ---------------------------------------------------------------------
-async function fetchNext(base, token, tabId) {
+async function fetchNext(base, token, tabId, browserId) {
   pendingPoll = new AbortController();
   const res = await fetch(`${base}/next`, {
-    headers: { Authorization: `Bearer ${token}`, 'X-Ferro-Tab-Id': String(tabId) },
+    headers: { Authorization: `Bearer ${token}`, ...(base === HOSTED_BRIDGE_BASE ? {'X-Ferro-Browser-Id':browserId, 'X-Ferro-Tab-Id':String(tabId)} : {'X-Ferro-Tab-Id':String(tabId)}) },
     signal: AbortSignal.any([pendingPoll.signal, AbortSignal.timeout(POLL_TIMEOUT_MS)]),
   });
   if (res.status === 204) return null;
@@ -296,7 +323,7 @@ async function pollLoop(myGeneration) {
       continue;
     }
     try {
-      const next = await fetchNext(connection.base, connection.token, connection.tabId);
+      const next = await fetchNext(connection.base, connection.token, connection.tabId, connection.browserId);
       if (loopGeneration !== myGeneration) return; // paired out from under us
       lastPollSuccessAt = Date.now();
       lastPollError = "";
@@ -349,11 +376,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       let previous = null;
       let restartPreviousPoll = false;
+      let previousIsRemoteHosted = false;
+      let hadLocalConnection = false;
       try {
         if (activeAction) throw new Error('A browser action is still running. Stop it before reconnecting.');
         // Pairing may only be requested by our own popup or panel, never page content.
         if (sender.id !== chrome.runtime.id || ![chrome.runtime.getURL('popup.html'), chrome.runtime.getURL('sidepanel.html')].includes(sender.url)) throw new Error('pair using the extension popup or side panel');
         const c = {...message.connection};
+        if (c.base === HOSTED_BRIDGE_BASE) c.browserId = await getHostedBrowserIdentity();
         if (!c.token) {
           const stored = await chrome.storage.session.get(['connection','bridgeCredentials']);
           const saved = stored.connection || stored.bridgeCredentials;
@@ -364,7 +394,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!Number.isInteger(c.tabId) || c.tabId < 0) throw new Error('Choose a website tab to connect.');
         await ensureContentReady(c.tabId);
         previous = await getConnection();
-        const hadLocalConnection = !!previous;
+        hadLocalConnection = !!previous;
         if (!previous) {
           const statusResponse = await fetch(`${c.base}/chat/status`, {
             method:'POST', headers:{Authorization:`Bearer ${c.token}`, 'Content-Type':'application/json', 'X-Ferro-Chat-Session':'extension-pairing-recovery'},
@@ -374,11 +404,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const state = await statusResponse.json();
           if (state.busy !== false || state.leased !== false) throw new Error('A task or agent lease is still running. Stop it before connecting another tab.');
           if (state.paired_tab) {
-            if (!/^[0-9]+$/.test(state.paired_tab)) throw new Error('Invalid pairing status from the service.');
-            previous = {base:c.base, token:c.token, tabId:Number(state.paired_tab)};
+            const scoped = c.base === HOSTED_BRIDGE_BASE ? parseHostedWireTabId(state.paired_tab) : /^[0-9]+$/.test(state.paired_tab) ? {tabId:Number(state.paired_tab), wireTabId:state.paired_tab} : null;
+            if (!scoped) throw new Error('Invalid pairing status from the service.');
+            previous = {base:c.base, token:c.token, ...scoped};
           }
         }
-        if (previous && previous.base === c.base && previous.token === c.token && previous.tabId === c.tabId) {
+        const samePair = previous && previous.base === c.base && previous.token === c.token && previous.tabId === c.tabId && (c.base !== HOSTED_BRIDGE_BASE || previous.browserId === c.browserId);
+        if (samePair) {
           if (!hadLocalConnection) {
             await chrome.storage.session.set({connection:c,bridgeCredentials:{base:c.base,token:c.token}});
             startPolling();
@@ -388,29 +420,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             console.error('Could not update Ferro side panel after reconnect', error);
             warning = `The browser connection succeeded, but the side panel could not be updated: ${error.message}`;
           }
-          sendResponse({ ok: true, warning });
+          sendResponse({ ok: true, warning, browserId:c.browserId });
           return;
         }
-        if (previous && message.confirmDisconnectTab !== String(previous.tabId)) {
-          sendResponse({requiresConfirmation:true, pairedTab:String(previous.tabId)});
+        previousIsRemoteHosted = !!(previous && previous.base === HOSTED_BRIDGE_BASE && c.base === HOSTED_BRIDGE_BASE && previous.browserId !== c.browserId);
+        const previousConfirmationId = previous && (previous.wireTabId || (previous.browserId ? hostedWireTabId(previous) : String(previous.tabId)));
+        if (previous && message.confirmDisconnectTab !== previousConfirmationId) {
+          sendResponse({requiresConfirmation:true, pairedTab:previousConfirmationId, remote:previousIsRemoteHosted});
           return;
         }
-        if (previous) {
+        if (previous && !previousIsRemoteHosted) {
           if (activeAction) throw new Error('A browser action is still running. Stop it before reconnecting.');
           stopPolling();
           restartPreviousPoll = true;
         }
-        if (previous && previous.tabId !== c.tabId) {
+        if (previous && !previousIsRemoteHosted && (previous.tabId !== c.tabId || c.base === HOSTED_BRIDGE_BASE && previous.browserId !== c.browserId)) {
           const disconnected = await fetch(`${previous.base}/disconnect`, {
             method:'POST',
-            headers:{Authorization:`Bearer ${previous.token}`,'X-Ferro-Tab-Id':String(previous.tabId)},
+            headers:{Authorization:`Bearer ${previous.token}`,...tabIdentityHeaders(previous)},
             signal:AbortSignal.timeout(5000),
           });
           if (!disconnected.ok) {
             throw new Error(`Could not release the previous tab: HTTP ${disconnected.status}`);
           }
         }
-        const response = await fetch(`${c.base}/pair`, { method: 'POST', headers: { Authorization: `Bearer ${c.token}`, 'X-Ferro-Tab-Id': String(c.tabId) }, signal: AbortSignal.timeout(5000) });
+        const response = await fetch(`${c.base}/pair`, { method: 'POST', headers: { Authorization: `Bearer ${c.token}`, ...tabIdentityHeaders(c) }, signal: AbortSignal.timeout(5000) });
         if (!response.ok) {
           const detail = (await response.text()).trim();
           const retry = response.status === 409 ? ' Retry after the previous tab’s action or poll has stopped.' : '';
@@ -426,14 +460,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           console.error('Could not update Ferro side panel after pairing', error);
           warning = `The browser connection succeeded, but the side panel could not be updated: ${error.message}`;
         }
-        sendResponse({ ok: true, warning });
+        sendResponse({ ok: true, warning, browserId:c.browserId });
       } catch (error) {
         let message = error.message;
-        if (restartPreviousPoll) {
+        if (restartPreviousPoll && previous && (!previousIsRemoteHosted || hadLocalConnection)) {
           try {
             const restored = await fetch(`${previous.base}/pair`, {
               method: 'POST',
-              headers: { Authorization: `Bearer ${previous.token}`, 'X-Ferro-Tab-Id': String(previous.tabId) },
+              headers: { Authorization: `Bearer ${previous.token}`, ...tabIdentityHeaders(previous) },
               signal: AbortSignal.timeout(5000),
             });
             if (!restored.ok) message += ` The previous tab could not be restored (HTTP ${restored.status}).`;
@@ -458,6 +492,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         connected: !lastPollError && Date.now() - lastPollSuccessAt < 45000,
         base: c.base,
         tabId: c.tabId,
+        browserId: c.browserId,
         transportError: lastPollError,
       } : { configured: false, connected: false, base:bridgeCredentials?.base, credentialsAvailable:!!bridgeCredentials });
     })();
@@ -473,7 +508,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       let warning = '';
       try {
         if (c) {
-          const response = await fetch(`${c.base}/disconnect`, { method:'POST', headers:{Authorization:`Bearer ${c.token}`, 'X-Ferro-Tab-Id':String(c.tabId)}, signal:AbortSignal.timeout(5000) });
+          const response = await fetch(`${c.base}/disconnect`, { method:'POST', headers:{Authorization:`Bearer ${c.token}`, ...tabIdentityHeaders(c)}, signal:AbortSignal.timeout(5000) });
           if (!response.ok) {
             const detail = (await response.text()).trim();
             if (response.status === 409) {

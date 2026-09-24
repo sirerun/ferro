@@ -74,6 +74,23 @@ func TestPrivateHostedAuthAndRouting(t *testing.T) {
 			}
 		})
 	}
+	for _, path := range []string{"/bridge/pair", "/bridge/next", "/bridge/disconnect"} {
+		method := http.MethodPost
+		if path == "/bridge/next" {
+			method = http.MethodGet
+		}
+		req := httptest.NewRequest(method, path, nil)
+		req.Host = "ferro.sire.run"
+		req.TLS = &tls.ConnectionState{}
+		req.Header.Set("Authorization", "Bearer "+bridgeToken)
+		req.Header.Set("X-Ferro-Tab-Id", "42")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		if rr.Code != http.StatusBadRequest {
+			t.Errorf("unscoped %s status %d, want 400", path, rr.Code)
+		}
+	}
+
 	validMCP := httptest.NewRequest(http.MethodGet, "/mcp", nil)
 	validMCP.Host = "ferro.sire.run"
 	validMCP.TLS = &tls.ConnectionState{}
@@ -93,8 +110,22 @@ func TestPrivateHostedAuthAndRouting(t *testing.T) {
 	req.Header.Set("X-Ferro-Tab-Id", "42")
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("unscoped hosted pair status %d, want 400: %s", rr.Code, rr.Body.String())
+	}
+	req = httptest.NewRequest(http.MethodPost, "/bridge/pair", nil)
+	req.Host = "ferro.sire.run"
+	req.TLS = &tls.ConnectionState{}
+	req.Header.Set("Authorization", "Bearer "+bridgeToken)
+	req.Header.Set("X-Ferro-Browser-Id", "browser-context-a-123456")
+	req.Header.Set("X-Ferro-Tab-Id", "42")
+	rr = httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusNoContent {
-		t.Fatalf("pair status %d: %s", rr.Code, rr.Body.String())
+		t.Fatalf("scoped pair status %d: %s", rr.Code, rr.Body.String())
+	}
+	if got := owner.bridge.PairedTab(); got != "browser-context-a-123456.42" {
+		t.Fatalf("upstream paired identity %q, want browser-scoped tab", got)
 	}
 
 	// The proxy also preserves the chat guard's loopback Host requirement.
@@ -109,6 +140,21 @@ func TestPrivateHostedAuthAndRouting(t *testing.T) {
 	handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("proxied chat status %d: %s (bridge %s)", rr.Code, rr.Body.String(), owner.bridge.Addr())
+	}
+	if !strings.Contains(rr.Body.String(), `"paired_tab":"browser-context-a-123456.42"`) {
+		t.Fatalf("chat status lost browser-scoped pairing: %s", rr.Body.String())
+	}
+
+	disconnect := httptest.NewRequest(http.MethodPost, "/bridge/disconnect", nil)
+	disconnect.Host = "ferro.sire.run"
+	disconnect.TLS = &tls.ConnectionState{}
+	disconnect.Header.Set("Authorization", "Bearer "+bridgeToken)
+	disconnect.Header.Set("X-Ferro-Browser-Id", "browser-context-a-123456")
+	disconnect.Header.Set("X-Ferro-Tab-Id", "42")
+	disconnectResponse := httptest.NewRecorder()
+	handler.ServeHTTP(disconnectResponse, disconnect)
+	if disconnectResponse.Code != http.StatusNoContent || owner.bridge.PairedTab() != "" {
+		t.Fatalf("scoped disconnect status %d, paired tab %q: %s", disconnectResponse.Code, owner.bridge.PairedTab(), disconnectResponse.Body.String())
 	}
 }
 

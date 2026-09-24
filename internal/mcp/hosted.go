@@ -1,12 +1,14 @@
 package mcp
 
 import (
+	"crypto/subtle"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -55,6 +57,11 @@ func NewPrivateHostedHandler(owner *Owner, publicOrigin string) (http.Handler, e
 	target := &url.URL{Scheme: "http", Host: owner.bridge.Addr()}
 	bridge := httputil.NewSingleHostReverseProxy(target)
 	bridge.Director = func(r *http.Request) {
+		browserID := r.Header.Get("X-Ferro-Browser-Id")
+		if browserID != "" {
+			r.Header.Set("X-Ferro-Tab-Id", browserID+"."+r.Header.Get("X-Ferro-Tab-Id"))
+			r.Header.Del("X-Ferro-Browser-Id")
+		}
 		r.URL.Scheme = target.Scheme
 		r.URL.Host = target.Host
 		r.Host = target.Host
@@ -73,6 +80,17 @@ func NewPrivateHostedHandler(owner *Owner, publicOrigin string) (http.Handler, e
 		if origin.Scheme == "https" && r.TLS == nil {
 			http.Error(w, "HTTPS required", http.StatusForbidden)
 			return
+		}
+		if hostedPairingPath(r.URL.Path) {
+			if subtle.ConstantTimeCompare([]byte(r.Header.Get("Authorization")), []byte("Bearer "+bridgeToken)) != 1 {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			browserID, tabID := r.Header.Get("X-Ferro-Browser-Id"), r.Header.Get("X-Ferro-Tab-Id")
+			if !validHostedBrowserID(browserID) || !validHostedTabID(tabID) {
+				http.Error(w, "scoped browser and numeric tab identity required", http.StatusBadRequest)
+				return
+			}
 		}
 		switch {
 		case r.URL.Path == "/healthz" && r.Method == http.MethodGet:
@@ -95,4 +113,28 @@ func isLoopbackHost(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+func hostedPairingPath(path string) bool {
+	return path == "/bridge/pair" || path == "/bridge/next" || path == "/bridge/disconnect"
+}
+
+func validHostedBrowserID(value string) bool {
+	if len(value) < 16 || len(value) > 128 {
+		return false
+	}
+	for _, r := range value {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func validHostedTabID(value string) bool {
+	if value == "" || strings.HasPrefix(value, "+") || strings.HasPrefix(value, "-") {
+		return false
+	}
+	_, err := strconv.ParseUint(value, 10, 64)
+	return err == nil
 }
