@@ -622,6 +622,177 @@ func TestReceiptsV2_HTMLSchemaDigestAndRequestBounds(t *testing.T) {
 	}
 }
 
+func TestReceiptsV2_RecoveryReservesCapacity(t *testing.T) {
+	request := RunTaskV2Request{
+		Schema: "ferro.task/v2", TaskID: "task_capacity", Goal: "inspect", ModelProfile: "profile",
+		Policy:       &TaskPolicyV2{Mode: "read_only", Origins: []string{"https://example.com"}},
+		OutputSchema: []byte(`{"type":"object"}`),
+	}
+	digest, err := canonicalRequestDigestV2(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Run("rejects write without recovery headroom", func(t *testing.T) {
+		second := request
+		second.TaskID = "task_capacity2"
+		secondDigest, err := canonicalRequestDigestV2(second)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Calibrate to the exact active representation, including multiple rows
+		// and a running row with artifact data.
+		calibrationDir := t.TempDir()
+		calibration, err := OpenReceiptStoreV2(calibrationDir, 4096)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := calibration.Admit(context.Background(), "principal", request, digest); err != nil {
+			t.Fatal(err)
+		}
+		secondReceipt, _, err := calibration.Admit(context.Background(), "principal", second, secondDigest)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := calibration.PutArtifact(context.Background(), "principal", secondReceipt.ExecutionID, []byte("artifact"), "text/plain"); err != nil {
+			t.Fatal(err)
+		}
+		if err := calibration.Close(); err != nil {
+			t.Fatal(err)
+		}
+		info, err := os.Stat(filepath.Join(calibrationDir, receiptStoreFileV2))
+		if err != nil {
+			t.Fatal(err)
+		}
+		capacity := info.Size()
+		dir := t.TempDir()
+		s, err := OpenReceiptStoreV2(dir, capacity)
+		if err != nil {
+			t.Fatal(err)
+		}
+		firstReceipt, created, err := s.Admit(context.Background(), "principal", request, digest)
+		if err != nil || !created {
+			t.Fatalf("first capacity admission = %+v created=%v err=%v", firstReceipt, created, err)
+		}
+		secondReceipt, created, err = s.Admit(context.Background(), "principal", second, secondDigest)
+		if err != nil || !created {
+			t.Fatalf("second capacity admission = %+v created=%v err=%v", secondReceipt, created, err)
+		}
+		if _, err := s.PutArtifact(context.Background(), "principal", secondReceipt.ExecutionID, []byte("artifact"), "text/plain"); !errors.Is(err, ErrReceiptCapacityV2) {
+			t.Fatalf("artifact update without recovery headroom = %v", err)
+		}
+		if got, err := s.Lookup(context.Background(), "principal", request.TaskID); err != nil || got.State != ReceiptAdmittedV2 {
+			t.Fatalf("capacity rejection changed first active receipt: %+v %v", got, err)
+		}
+		if got, err := s.Lookup(context.Background(), "principal", second.TaskID); err != nil || got.State != ReceiptAdmittedV2 || len(got.Artifacts) != 0 {
+			t.Fatalf("capacity rejection changed second active receipt: %+v %v", got, err)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		reopened, err := OpenReceiptStoreV2(dir, capacity)
+		if err != nil {
+			t.Fatalf("capacity rejection poisoned empty store: %v", err)
+		}
+		defer reopened.Close()
+		for _, taskID := range []string{request.TaskID, second.TaskID} {
+			got, err := reopened.Lookup(context.Background(), "principal", taskID)
+			if err != nil || got.State != ReceiptUncertainV2 {
+				t.Fatalf("recovered receipt %s = %+v err=%v", taskID, got, err)
+			}
+		}
+	})
+	t.Run("accepted active receipt recovers", func(t *testing.T) {
+		dir := t.TempDir()
+		s, err := OpenReceiptStoreV2(dir, 4096)
+		if err != nil {
+			t.Fatal(err)
+		}
+		first, created, err := s.Admit(context.Background(), "principal", request, digest)
+		if err != nil || !created {
+			t.Fatalf("admission = %+v created=%v err=%v", first, created, err)
+		}
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		reopened, err := OpenReceiptStoreV2(dir, 4096)
+		if err != nil {
+			t.Fatalf("accepted active receipt could not recover: %v", err)
+		}
+		t.Cleanup(func() { _ = reopened.Close() })
+		got, err := reopened.Lookup(context.Background(), "principal", request.TaskID)
+		if err != nil || got.ExecutionID != first.ExecutionID || got.State != ReceiptUncertainV2 {
+			t.Fatalf("recovered receipt = %+v err=%v", got, err)
+		}
+	})
+}
+
+func TestReceiptsV2_UnicodeLineSeparatorDigestWithinWireBounds(t *testing.T) {
+	store, request, _ := receiptFixtureV2(t, t.TempDir())
+	request.TaskID = "task_unicode"
+	request.Goal = strings.Repeat("\u2028", 5461)
+	prefix, suffix := `{"description":"`, `"}`
+	count := (32768 - len(prefix) - len(suffix)) / len("\u2028")
+	request.OutputSchema = json.RawMessage(prefix + strings.Repeat("\u2028", count-1) + "\u2029" + suffix)
+	raw := receiptRequestJSONV2(request)
+	if len(raw) > 65536 || len(request.Goal) > 16384 || len(request.OutputSchema) > 32768 {
+		t.Fatalf("test request does not fit raw limits: request=%d goal=%d schema=%d", len(raw), len(request.Goal), len(request.OutputSchema))
+	}
+	validated, err := ValidateTaskRequestV2(raw)
+	if err != nil {
+		t.Fatalf("valid U+2028 request rejected before digest: %v", err)
+	}
+	if _, err := canonicalRequestDigestV2(validated); err != nil {
+		t.Fatalf("valid U+2028 request digest failed: %v", err)
+	}
+	digest, err := canonicalRequestDigestV2(validated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact := request
+	compact.Goal = "line\u2028line\u2029"
+	compact.OutputSchema = json.RawMessage(`{"description":"\u2028"}`)
+	literalValidated, err := ValidateTaskRequestV2(receiptRequestJSONV2(compact))
+	if err != nil {
+		t.Fatalf("literal equivalent request rejected: %v", err)
+	}
+	literalDigest, err := canonicalRequestDigestV2(literalValidated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	escapedRaw, err := json.Marshal(compact)
+	if err != nil {
+		t.Fatal(err)
+	}
+	escapedValidated, err := ValidateTaskRequestV2(escapedRaw)
+	if err != nil {
+		t.Fatalf("escaped equivalent request rejected: %v", err)
+	}
+	escapedDigest, err := canonicalRequestDigestV2(escapedValidated)
+	if err != nil || escapedDigest != literalDigest {
+		t.Fatalf("equivalent escaped request digest = %q err=%v want %q", escapedDigest, err, literalDigest)
+	}
+	if _, created, err := store.Admit(context.Background(), "principal", validated, digest); err != nil || !created {
+		t.Fatalf("valid U+2028 request admission created=%v err=%v", created, err)
+	}
+}
+
+func TestMarshalJSONNoHTMLEscapeV2LineSeparatorSemantics(t *testing.T) {
+	for _, separator := range []string{"\u2028", "\u2029"} {
+		value := map[string]string{"text": "left\\" + separator + "right", "literal": "\\u2028"}
+		encoded, err := marshalJSONNoHTMLEscapeV2(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded map[string]string
+		if err := json.Unmarshal(encoded, &decoded); err != nil {
+			t.Fatalf("encoded JSON invalid: %v", err)
+		}
+		if decoded["text"] != value["text"] || decoded["literal"] != value["literal"] {
+			t.Fatalf("round trip changed line separator or literal escape: got %#v want %#v", decoded, value)
+		}
+	}
+}
+
 func receiptRequestJSONV2(request RunTaskV2Request) []byte {
 	return []byte(`{"schema":"ferro.task/v2","task_id":"` + request.TaskID + `","goal":"` + request.Goal + `","model_profile":"` + request.ModelProfile + `","policy":{"mode":"` + request.Policy.Mode + `","origins":["https://example.com"]},"output_schema":` + string(request.OutputSchema) + `}`)
 }

@@ -250,7 +250,52 @@ func marshalJSONNoHTMLEscapeV2(value any) ([]byte, error) {
 		return nil, err
 	}
 	encoded := buffer.Bytes()
-	return append([]byte(nil), encoded[:len(encoded)-1]...), nil
+	return unescapeJSONLineSeparatorsV2(encoded[:len(encoded)-1]), nil
+}
+
+// encoding/json escapes U+2028 and U+2029 even with HTML escaping disabled.
+// Restore only those escapes in JSON strings, while preserving escaped
+// backslashes so literal text such as "\\u2028" retains its meaning.
+func unescapeJSONLineSeparatorsV2(encoded []byte) []byte {
+	result := make([]byte, 0, len(encoded))
+	inString := false
+	for i := 0; i < len(encoded); {
+		c := encoded[i]
+		if !inString {
+			result = append(result, c)
+			if c == '"' {
+				inString = true
+			}
+			i++
+			continue
+		}
+		if c == '"' {
+			result = append(result, c)
+			inString = false
+			i++
+			continue
+		}
+		if c == '\\' && i+1 < len(encoded) {
+			if encoded[i+1] == 'u' && i+6 <= len(encoded) {
+				switch string(encoded[i+2 : i+6]) {
+				case "2028":
+					result = append(result, 0xe2, 0x80, 0xa8)
+					i += 6
+					continue
+				case "2029":
+					result = append(result, 0xe2, 0x80, 0xa9)
+					i += 6
+					continue
+				}
+			}
+			result = append(result, c, encoded[i+1])
+			i += 2
+			continue
+		}
+		result = append(result, c)
+		i++
+	}
+	return result
 }
 
 func (s *receiptStoreV2) Admit(ctx context.Context, owner string, request RunTaskV2Request, requestDigest string) (ReceiptV2, bool, error) {
@@ -543,6 +588,9 @@ func (s *receiptStoreV2) persist(d receiptDiskV2) error {
 	if int64(len(b)) > s.maxBytes {
 		return ErrReceiptCapacityV2
 	}
+	if int64(len(marshalRecoveryProjectionV2(d))) > s.maxBytes {
+		return ErrReceiptCapacityV2
+	}
 	if err = s.writeFile(filepath.Join(s.dir, receiptStoreFileV2), b); err != nil {
 		// A failed durable boundary can leave the rename outcome uncertain.
 		// Poison the live instance; reopening will reconcile the actual disk state.
@@ -550,6 +598,24 @@ func (s *receiptStoreV2) persist(d receiptDiskV2) error {
 		return fmt.Errorf("persist receipt store: %w", err)
 	}
 	return nil
+}
+
+func marshalRecoveryProjectionV2(d receiptDiskV2) []byte {
+	projected := d
+	projected.Receipts = make(map[string]storedReceiptV2, len(d.Receipts))
+	maxRecoveryTime := time.Date(9999, time.December, 31, 23, 59, 59, 999999999, time.UTC)
+	for key, entry := range d.Receipts {
+		if entry.Receipt.State == ReceiptAdmittedV2 || entry.Receipt.State == ReceiptRunningV2 {
+			entry.Receipt.State = ReceiptUncertainV2
+			entry.UpdatedAt = maxRecoveryTime
+			if entry.Receipt.Result != nil {
+				entry.Reconciled = false
+			}
+		}
+		projected.Receipts[key] = entry
+	}
+	b, _ := json.Marshal(projected)
+	return b
 }
 func atomicReceiptWriteV2(path string, data []byte) error {
 	dir := filepath.Dir(path)
