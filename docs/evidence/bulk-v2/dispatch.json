@@ -3,7 +3,7 @@
   "coordinator": "codex@ferro",
   "base_sha": "38516376385f33f17fccc6079f1e0de65a5c967e",
   "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
-  "updated_at": "2026-09-24T18:48:43.458460+00:00",
+  "updated_at": "2026-09-24T18:51:22.347459+00:00",
   "gate_state": {
     "G00": "accepted_with_G05_reconciliation",
     "G01": "accepted",
@@ -128,14 +128,15 @@
     },
     {
       "id": "L03",
-      "state": "review_changes_requested",
+      "state": "accepted",
       "model": "gpt-6-luna",
       "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "branch": "codex/bulk-v2-l03",
       "agent": "/root/contract_review",
-      "commit_sha": "78cddec68c8d86705f102df54701ae300831c626",
-      "review": "Reject action admission after known token overrun."
+      "commit_sha": "b24a265c8bf5af6d15e160d6cf6037bd7d4df64c",
+      "integration_sha": "69e59c9",
+      "tests": "Focused/full core and targeted race passed; coordinator reran full core and demonstrated action-overrun regression fails with old condition restored. Reviewed malformed-total nonmutation correction."
     },
     {
       "id": "L04",
@@ -148,12 +149,12 @@
     },
     {
       "id": "L05",
-      "state": "queued",
+      "state": "running",
       "model": "gpt-6-luna",
       "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
-      "branch": null,
-      "agent": null
+      "branch": "codex/bulk-v2-l05",
+      "agent": "/root/contract_review"
     },
     {
       "id": "L06",
