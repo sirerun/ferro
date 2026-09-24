@@ -37,7 +37,7 @@
     },
     {
       "path": "docs/adr/009-bounded-task-contract.md",
-      "sha256": "83db1ef7c9a975242bdac29a8cb51449a65d2b1a4803223a80aed19bc99869d6"
+      "sha256": "7272592b0a5e7c2e0136740d3e518617ac8a2c7b7754edf9c56c151ca8430999"
     },
     {
       "path": "docs/contracts/check_bulk_v2.py",

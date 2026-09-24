@@ -1,4 +1,4 @@
-# ADR 009: Bounded task contract v2 
+# ADR 009: Bounded task contract v2
 
 Status: accepted for local bounded read-only implementation. Date: 2026-09-24.
 
