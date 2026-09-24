@@ -1,0 +1,1 @@
+{"schema":"ferro.task/v2","task_id":"guide_artifact_001","goal":"Extract the requested large JSON document from the page","model_profile":"legacy-mcp","policy":{"mode":"read_only","origins":["https://example.org"]},"output_schema":{"type":"object","properties":{"document":{"type":"string"}},"required":["document"],"additionalProperties":false},"evidence":"artifacts"}

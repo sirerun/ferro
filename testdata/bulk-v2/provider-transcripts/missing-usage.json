@@ -1,0 +1,9 @@
+{
+  "id": "provider-missing-usage-001",
+  "request_messages": [{"role":"user","content":"Summarize the current page."}],
+  "response": {
+    "id":"fixture-response-missing-usage-001",
+    "model":"fixture-model",
+    "choices":[{"message":{"role":"assistant","content":"{\"steps\":[{\"kind\":\"done\",\"result\":{\"summary\":\"Catalog item A\"}}]}"},"finish_reason":"stop"}]
+  }
+}

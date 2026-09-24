@@ -22,6 +22,7 @@ func NewServer(c caller) *sdk.Server {
 	c = &identifiedCaller{caller: c, namespace: hex.EncodeToString(nonce[:])}
 	server := sdk.NewServer(&sdk.Implementation{Name: "ferro-mcp", Version: "0.1.0"}, nil)
 	registerRunTaskTool(server, c)
+	registerTaskToolsV2(server, c)
 	registerPrimitiveTools(server, c)
 	registerSessionTools(server, c)
 	return server

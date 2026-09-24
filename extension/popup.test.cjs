@@ -125,3 +125,16 @@ test('cancelled switch preserves the existing pairing',async()=>{
  assert.equal(messages.filter(m=>m.type==='ferro-connect').length,1);
  assert.equal(elements['open-chat'].hidden,true);assert.match(elements.status.textContent,/Connection unchanged/);
 });
+
+test('popup accepts hosted endpoint and rejects arbitrary remote endpoints',async()=>{
+ const hosted=popup({configured:false,connected:false});
+ await settle(); hosted.elements.base.value='https://ferro.sire.run/bridge';
+ await hosted.elements['connection-toggle'].onclick();
+ assert.equal(hosted.messages.find(m=>m.type==='ferro-connect').connection.base,'https://ferro.sire.run/bridge');
+
+ const invalid=popup({configured:false,connected:false});
+ await settle(); invalid.elements.base.value='https://remote.example/bridge';
+ await invalid.elements['connection-toggle'].onclick();
+ assert.equal(invalid.messages.some(m=>m.type==='ferro-connect'),false);
+ assert.match(invalid.elements.status.textContent,/https:\/\/ferro\.sire\.run\/bridge/);
+});

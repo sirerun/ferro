@@ -1,5 +1,9 @@
 'use strict';
 const $ = id => document.getElementById(id);
+const HOSTED_BRIDGE_BASE = 'https://ferro.sire.run/bridge';
+function validBridgeBase(base) {
+  return /^http:\/\/127\.0\.0\.1:\d+$/.test(base) || base === HOSTED_BRIDGE_BASE;
+}
 let connection = null;
 let session = '';
 let messages = [];
@@ -106,7 +110,8 @@ async function refresh() {
   if (!connection) { $('connection-state').textContent = 'Connect a tab to begin'; return; }
   const state = await api('status');
   const tab = await chrome.tabs.get(connection.tabId).catch(() => null);
-  $('connection-state').textContent = state.connected && state.paired_tab === String(connection.tabId) ? (tab?.title || 'Tab connected') : 'Tab disconnected';
+  const pairedIdentity = connection.base === 'https://ferro.sire.run/bridge' ? `${connection.browserId}.${connection.tabId}` : String(connection.tabId);
+  $('connection-state').textContent = state.connected && state.paired_tab === pairedIdentity ? (tab?.title || 'Tab connected') : 'Tab disconnected';
   $('connection-state').title = tab?.url || '';
   return state;
 }
@@ -140,18 +145,18 @@ $('connection-form').onsubmit = async event => {
     if (!tab || !/^https?:\/\//.test(tab.url || '')) throw new Error('Open the website tab you want to work in first.');
     const base = $('base').value.trim().replace(/\/+$/, '');
     // Use the literal loopback host so the server can enforce its Host header.
-    if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(base)) throw new Error('Use http://127.0.0.1:<port> for the local service.');
+    if (!validBridgeBase(base)) throw new Error('Use http://127.0.0.1:<port> for a local bridge or https://ferro.sire.run/bridge for the hosted pilot.');
     const token = $('token').value.trim() || connection?.token;
-    if (!token) throw new Error('Paste the pairing token from bridge-token.');
+    if (!token) throw new Error('Paste the pairing token provided for this bridge endpoint.');
     const next = {base, token, tabId:tab.id};
     let reply = await chrome.runtime.sendMessage({type:'ferro-connect', connection:next});
     if (reply?.requiresConfirmation) {
-      if (!confirm('Disconnect the current tab and connect this one?')) { notice('Connection unchanged.'); return; }
+      if (!confirm(reply.remote ? 'This pairing belongs to another browser. Continue only if you intend to connect after its owner disconnects.' : 'Disconnect the current tab and connect this one?')) { notice('Connection unchanged.'); return; }
       reply = await chrome.runtime.sendMessage({type:'ferro-connect', connection:next, confirmDisconnectTab:reply.pairedTab});
       if (reply?.requiresConfirmation) throw new Error('The paired tab changed. Click Connect current tab again.');
     }
     if (!reply || reply.error) throw new Error(reply?.error || 'Could not pair this tab.');
-    connection = next; $('token').value = '';
+    connection = {...next,browserId:reply.browserId}; $('token').value = '';
     await refresh(); await loadSettings();
     if (!$('origins').value.trim()) $('origins').value = new URL(tab.url).origin;
     notice('Connected. Set your model and allowed websites, then close Settings.');

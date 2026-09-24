@@ -229,6 +229,25 @@ Any type with `Complete(ctx, system, user string) (string, error)`
 satisfies `ferro.LLMClient`, so other backends need no changes to the
 engine.
 
+## Bounded browser tasks
+
+MCP clients can use `run_task_v2` for read-only work with a unique task ID,
+explicit origins, an output schema and request/token/action limits. Model
+usage stays attached to the outcome, including failures. Durable receipts
+prevent duplicate dispatch and let a new client recover after a lost response.
+Large results can be fetched as bounded, digest-verified artifact chunks.
+
+See the [operator guide](docs/bulk-browser-operator.md) for requests, configured
+model profiles, receipt recovery and limitations. Existing chat, `run_task`
+and direct browser tools retain their interfaces. One tab executes at a time.
+
+`cmd/ferro-cloud` adds a private single-owner HTTPS deployment option for
+`ferro.sire.run`, with separate MCP and extension credentials. The Chrome
+extension supports its `/bridge` endpoint as well as localhost. See the
+[private pilot deployment guide](deploy/private-pilot/README.md). Deployment
+requires provisioned infrastructure and DNS; this is not a public signup,
+billing or multi-tenant service.
+
 ## MCP server
 
 `cmd/ferro-mcp` is a [Model Context Protocol](https://modelcontextprotocol.io)

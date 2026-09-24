@@ -1,0 +1,1 @@
+{"schema":"ferro.task/v2","task_id":"guide_read_title_001","goal":"Read the page title","model_profile":"legacy-mcp","policy":{"mode":"read_only","origins":["https://example.org"]},"output_schema":{"type":"object","properties":{"title":{"type":"string"}},"required":["title"],"additionalProperties":false},"evidence":"compact"}

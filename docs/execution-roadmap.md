@@ -1,6 +1,6 @@
 # Ferro execution roadmap
 
-Status: plans reconciled on 2026-09-24; implementation gates remain open.
+Status: foundation merged; bounded runtime and private hosted transport under final review on 2026-09-24. Detailed acceptance is recorded in [the dispatch ledger](evidence/bulk-v2/dispatch.json).
 
 ## Two delivery tracks, one integration owner
 
@@ -13,6 +13,15 @@ Status: plans reconciled on 2026-09-24; implementation gates remain open.
 The local track can deliver useful work before hosting is ready. Its Zatiti pilot is not a public-launch prerequisite. The hosted launch excludes unattended scheduling and public remote MCP OAuth; local MCP and external Zatiti dispatch do not silently expand that scope. Both preserve existing local mode.
 
 The companion plan is requirements and coverage mapping; it does not dispatch work or mark a ZB packet complete. Bulk.G03 qualifies Ferro's read-only executor fixtures, G04 qualifies Zatiti dispatch/recovery, and G05 qualifies the matching package and authorized pilot. G04's read-only lifecycle and G05's pilot are not gated on governed direct mutations (ZB02/ZB03/ZB07); mutation enablement requires its own accepted contract and evidence. See the [runbook gate crosswalk](tasks/bulk-browser/RUNBOOK.md#zatiti-companion-coverage-and-gate-crosswalk).
+
+## Private hosted pilot exception
+
+The separately authorized [single-owner pilot](adr/010-private-hosted-pilot.md)
+uses fixed private credentials while the AMSL account and billing components
+are developed independently. It does not complete the paid-service launch
+track or establish tenant isolation. The selected deployment is AWS containers
+managed through Pulumi with tested scale-to-zero/wake-up behavior; a dedicated
+always-on EC2 pilot is superseded. Preserve the local installation throughout.
 
 ## Authority and dependency rules
 

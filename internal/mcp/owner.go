@@ -39,6 +39,9 @@ type Owner struct {
 	bridge       *extbridge.Bridge
 	remoteServer *http.Server
 	remoteAddr   string
+	receipts     ReceiptStoreV2
+	taskCaches   map[string]*core.ResolutionCache // serialized by gate
+	replayEpoch  string
 
 	// exec, snap, and extracted back the primitive tools (T11.4): exec runs
 	// one Action at a time via ExecuteOne; snap is the last snapshot taken
@@ -130,6 +133,10 @@ func NewOwner(ctx context.Context, cfg Config) (*Owner, error) {
 		opts = append(opts, ferro.WithResolutionCache(cfg.CachePath))
 	}
 	o.runner = ferro.NewRunner(client, opts...)
+	if err := o.initializeTasksV2(); err != nil {
+		_ = o.Close()
+		return nil, err
+	}
 	if cfg.StartURL != "" && cfg.Backend == "cdp" {
 		runCtx, cancel := o.actionCtx(ctx)
 		err = o.driver.Navigate(runCtx, cfg.StartURL)
@@ -175,6 +182,9 @@ func (o *Owner) Close() error {
 	}
 	if o.browser != nil {
 		errs = append(errs, o.browser.Close())
+	}
+	if o.receipts != nil {
+		errs = append(errs, o.receipts.Close())
 	}
 	return errors.Join(errs...)
 }
@@ -292,6 +302,39 @@ func (o *Owner) Call(ctx context.Context, tool string, args json.RawMessage) (st
 	if tool == "browser_status" || tool == "cancel_task" {
 		return o.control(ctx, tool)
 	}
+	if tool == "get_task_receipt" || tool == "read_task_artifact" || tool == "cleanup_task_receipts" || tool == "list_model_profiles" {
+		result, err := o.taskControlV2(ctx, tool, args)
+		if err != nil {
+			return err.Error(), true, nil
+		}
+		data, err := json.Marshal(result)
+		if err != nil {
+			return "", false, err
+		}
+		return string(data), false, nil
+	}
+	if tool == "run_task_v2" && o.receipts != nil {
+		if in, err := ValidateTaskRequestV2(args); err == nil {
+			digest, digestErr := canonicalRequestDigestV2(in)
+			if digestErr != nil {
+				return digestErr.Error(), true, nil
+			}
+			previous, lookupErr := o.receipts.Lookup(ctx, privateReceiptOwnerV2, in.TaskID)
+			if lookupErr == nil {
+				if previous.RequestDigest != digest {
+					return ErrReceiptConflictV2.Error(), true, nil
+				}
+				data, marshalErr := json.Marshal(receiptResponseV2(previous))
+				if marshalErr != nil {
+					return "", false, marshalErr
+				}
+				return string(data), false, nil
+			}
+			if !errors.Is(lookupErr, ErrReceiptNotFoundV2) {
+				return lookupErr.Error(), true, nil
+			}
+		}
+	}
 	select {
 	case o.gate <- struct{}{}:
 	case <-ctx.Done():
@@ -316,7 +359,7 @@ func (o *Owner) Call(ctx context.Context, tool string, args json.RawMessage) (st
 		o.mu.Unlock()
 		return stopResult("tab_busy", "another agent owns this tab; retry after its lease expires")
 	}
-	if o.cfg.Backend == "extension" && tool != "run_task" && o.leaseOwner == "" {
+	if o.cfg.Backend == "extension" && tool != "run_task" && tool != "run_task_v2" && o.leaseOwner == "" {
 		o.mu.Unlock()
 		return stopResult("lease_required", "call acquire_tab before direct browser tools; release_tab when finished")
 	}
@@ -337,7 +380,12 @@ func (o *Owner) Call(ctx context.Context, tool string, args json.RawMessage) (st
 		}
 		return err.Error(), true, nil
 	}
-	body, err := json.MarshalIndent(result, "", "  ")
+	var body []byte
+	if tool == "run_task_v2" {
+		body, err = json.Marshal(result)
+	} else {
+		body, err = json.MarshalIndent(result, "", "  ")
+	}
 	if err != nil {
 		return "", false, fmt.Errorf("marshal %s result: %w", tool, err)
 	}
@@ -348,6 +396,8 @@ func (o *Owner) dispatch(ctx context.Context, tool string, args json.RawMessage)
 	switch tool {
 	case "run_task":
 		return o.runTask(ctx, args)
+	case "run_task_v2":
+		return o.runTaskV2(ctx, args)
 	case "snapshot":
 		return o.snapshot(ctx, args)
 	case "navigate":

@@ -91,7 +91,7 @@ func (r *Runner) repairStep(ctx context.Context, rerr *RunError, orig, fresh *Sn
 		string(failedJSON), Classify(rerr), rerr.Err, fresh.Render(),
 	)
 
-	raw, err := r.LLM.Complete(ctx, repairSystem, user)
+	raw, err := r.LLM.Complete(withBudgetRequestKindV2(ctx, budgetKindRepairV2), repairSystem, user)
 	if m != nil {
 		m.LLMCalls++
 		m.EstimatedTokens += (len(repairSystem) + len(user) + len(raw)) / 4

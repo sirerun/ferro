@@ -1,0 +1,13 @@
+{
+  "id": "provider-repair-001",
+  "request_messages": [
+    {"role":"assistant","content":"{\"steps\":[{\"kind\":\"extract\",\"fields\":\"title\"}]}"},
+    {"role":"user","content":"Repair the previous plan: fields must be a map of field names to selectors."}
+  ],
+  "response": {
+    "id":"fixture-response-repair-001",
+    "model":"fixture-model",
+    "choices":[{"message":{"role":"assistant","content":"{\"steps\":[{\"kind\":\"extract\",\"fields\":{\"title\":\"[data-testid=title]\"}},{\"kind\":\"done\",\"result\":{\"title\":\"Catalog item A\"}}]}"},"finish_reason":"stop"}],
+    "usage":{"prompt_tokens":241,"completion_tokens":49,"total_tokens":290}
+  }
+}

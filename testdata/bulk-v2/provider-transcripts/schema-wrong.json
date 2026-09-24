@@ -1,0 +1,10 @@
+{
+  "id": "provider-schema-wrong-001",
+  "request_messages": [{"role":"user","content":"Return a plan with a steps array."}],
+  "response": {
+    "id":"fixture-response-schema-wrong-001",
+    "model":"fixture-model",
+    "choices":[{"message":{"role":"assistant","content":"{\"steps\":\"done\"}"},"finish_reason":"stop"}],
+    "usage":{"prompt_tokens":88,"completion_tokens":11,"total_tokens":99}
+  }
+}
