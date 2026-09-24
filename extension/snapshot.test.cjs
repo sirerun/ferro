@@ -82,6 +82,14 @@ test('extension takeSnapshot() matches internal/core/snapshot.go golden (T12.2 p
       'extension snapshot does not match internal/core/snapshot.go golden -- ' +
         'ref numbering or element selection has drifted between the Go and JS ports'
     );
+
+    const selectors = await chrome.evaluate(`FerroAdapter.takeSnapshot(${MAX_ELEMENTS}, true).elements.map((el) => ({
+      selector: el.selector,
+      count: document.querySelectorAll(el.selector).length,
+    }))`);
+    assert.ok(selectors.length > 0);
+    assert.ok(selectors.every((entry) => entry.selector && entry.count === 1),
+      `execution snapshots must provide a unique live selector for every ref: ${JSON.stringify(selectors.filter((entry) => !entry.selector || entry.count !== 1).slice(0, 3))}`);
   } finally {
     await chrome.close();
   }

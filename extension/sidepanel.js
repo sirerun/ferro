@@ -217,7 +217,11 @@ $('composer').onsubmit = async event => {
   const goal=$('message').value.trim();
   if (!goal) return;
   if (!connection) { settings(true); notice('Connect a tab first.'); return; }
-  const history=messages.slice(-8).map(m=>`${m.role}: ${m.text}`).join('\n').slice(-14000);
+  const historyText=messages.slice(-8).map(m=>`${m.role}: ${m.text}`).join('\n');
+  const historyChars=Array.from(historyText);
+  let low=0,high=historyChars.length;
+  while(low<high){const mid=Math.floor((low+high)/2);if(new TextEncoder().encode(historyChars.slice(mid).join('')).length<=14000)high=mid;else low=mid+1;}
+  const history=historyChars.slice(low).join('');
   setRunning(true); request=new AbortController();
   const started=Date.now();
   try {

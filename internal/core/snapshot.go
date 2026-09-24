@@ -19,7 +19,27 @@ type Element struct {
 	Text      string `json:"text,omitempty"` // visible label, truncated
 	Name      string `json:"name,omitempty"` // form control name/label/placeholder
 	HREF      string `json:"href,omitempty"` // links only, path-only
+	Selector  string `json:"-"`              // optional backend-provided unique selector
 	BackendID int    `json:"-"`              // CDP DOM node backend ID
+}
+
+// UnmarshalJSON accepts an execution selector from the extension snapshot
+// without returning that DOM detail in public snapshot responses.
+func (e *Element) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Ref      int    `json:"ref"`
+		Tag      string `json:"tag"`
+		Role     string `json:"role,omitempty"`
+		Text     string `json:"text,omitempty"`
+		Name     string `json:"name,omitempty"`
+		HREF     string `json:"href,omitempty"`
+		Selector string `json:"selector,omitempty"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*e = Element{Ref: raw.Ref, Tag: raw.Tag, Role: raw.Role, Text: raw.Text, Name: raw.Name, HREF: raw.HREF, Selector: raw.Selector}
+	return nil
 }
 
 // Snapshot is the compact page representation sent to the planner.
@@ -140,11 +160,12 @@ func TakeSnapshot(ctx context.Context, maxElements int) (*Snapshot, error) {
 	}
 
 	var raws []struct {
-		Tag  string `json:"tag"`
-		Role string `json:"role"`
-		Name string `json:"name"`
-		Text string `json:"text"`
-		HREF string `json:"href"`
+		Tag      string `json:"tag"`
+		Role     string `json:"role"`
+		Name     string `json:"name"`
+		Text     string `json:"text"`
+		HREF     string `json:"href"`
+		Selector string `json:"selector"`
 	}
 	if err := json.Unmarshal([]byte(rawJSON), &raws); err != nil {
 		return nil, fmt.Errorf("snapshot decode: %w", err)
@@ -157,12 +178,13 @@ func TakeSnapshot(ctx context.Context, maxElements int) (*Snapshot, error) {
 			break
 		}
 		snap.Elements = append(snap.Elements, Element{
-			Ref:  i + 1, // 1-based; 0 means "unset" for validation
-			Tag:  r.Tag,
-			Role: r.Role,
-			Name: r.Name,
-			Text: r.Text,
-			HREF: r.HREF,
+			Ref:      i + 1, // 1-based; 0 means "unset" for validation
+			Tag:      r.Tag,
+			Role:     r.Role,
+			Name:     r.Name,
+			Text:     r.Text,
+			HREF:     r.HREF,
+			Selector: r.Selector,
 		})
 	}
 	return snap, nil

@@ -130,6 +130,9 @@ func firstField(s string) string {
 // deliberately routed through the repair path rather than over-engineered
 // now (see repair.go and the RFC discussion).
 func buildSelector(e Element) string {
+	if e.Selector != "" {
+		return e.Selector
+	}
 	if e.HREF != "" && e.Tag == "a" {
 		return fmt.Sprintf(`a[href^="%s"]`, cssEscape(e.HREF))
 	}

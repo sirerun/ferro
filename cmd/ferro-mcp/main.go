@@ -135,8 +135,8 @@ func serve(daemon bool) error {
 			select {
 			case <-finished:
 			case <-ctx.Done():
+				return nil
 			}
-			return nil
 		}
 	} else if !leader.IsOwner() {
 		return fmt.Errorf("a Ferro owner is already running; use ferro-mcp status")

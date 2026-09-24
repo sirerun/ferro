@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"sync"
@@ -201,8 +202,19 @@ func relayCall(ctx context.Context, sockPath, tool string, args json.RawMessage)
 	if dl, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(dl)
 	}
-	if err := json.NewEncoder(conn).Encode(relayRequest{Tool: tool, Args: args, Client: clientIdentity(ctx)}); err != nil {
-		return "", false, fmt.Errorf("send relay request: %w", err)
+	request, err := json.Marshal(relayRequest{Tool: tool, Args: args, Client: clientIdentity(ctx)})
+	if err != nil {
+		return "", false, fmt.Errorf("encode relay request: %w", err)
+	}
+	for len(request) > 0 {
+		n, writeErr := conn.Write(request)
+		if writeErr != nil {
+			return "", false, fmt.Errorf("send relay request: %w", writeErr)
+		}
+		if n == 0 {
+			return "", false, fmt.Errorf("send relay request: %w", io.ErrShortWrite)
+		}
+		request = request[n:]
 	}
 	var resp relayResponse
 	if err := json.NewDecoder(conn).Decode(&resp); err != nil {

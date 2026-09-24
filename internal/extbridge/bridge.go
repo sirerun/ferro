@@ -146,6 +146,18 @@ func (b *Bridge) PairedTab() string {
 func (b *Bridge) pair(tabID string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	// Chrome clears storage.session when it restarts or reloads an extension.
+	// The server can therefore retain a pairing whose long poll has gone stale.
+	// Let the next authenticated tab replace it instead of requiring a service
+	// restart, and invalidate any refs/actions tied to the previous generation.
+	if b.pairedTab != "" && time.Since(b.lastSeen) >= 45*time.Second {
+		b.pairedTab = ""
+		b.generation++
+		for id, ch := range b.waiting {
+			ch <- Reply{Code: "disconnected", Error: "extension disconnected; inspect the page before retrying"}
+			delete(b.waiting, id)
+		}
+	}
 	if b.pairedTab == "" {
 		b.pairedTab = tabID
 		b.lastSeen = time.Now()

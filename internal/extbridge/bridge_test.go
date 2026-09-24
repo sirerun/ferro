@@ -57,6 +57,34 @@ func TestPair_SecondDifferentTabRejected(t *testing.T) {
 	}
 }
 
+func TestPair_ReplacesStalePairing(t *testing.T) {
+	b, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.pair("old-tab"); err != nil {
+		t.Fatal(err)
+	}
+	ch := make(chan Reply, 1)
+	b.mu.Lock()
+	b.waiting["pending"] = ch
+	b.lastSeen = time.Now().Add(-46 * time.Second)
+	oldGeneration := b.generation
+	b.mu.Unlock()
+	if err := b.pair("new-tab"); err != nil {
+		t.Fatalf("replace stale pairing: %v", err)
+	}
+	if got := b.PairedTab(); got != "new-tab" {
+		t.Fatalf("paired tab = %q, want new-tab", got)
+	}
+	if b.generation != oldGeneration+1 {
+		t.Fatalf("generation = %d, want %d", b.generation, oldGeneration+1)
+	}
+	if got := <-ch; got.Code != "disconnected" {
+		t.Fatalf("pending call reply = %+v, want disconnected", got)
+	}
+}
+
 func TestEnqueueDeliver_MatchesByID(t *testing.T) {
 	b, err := New()
 	if err != nil {

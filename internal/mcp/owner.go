@@ -134,8 +134,7 @@ func NewOwner(ctx context.Context, cfg Config) (*Owner, error) {
 		err = o.driver.Navigate(runCtx, cfg.StartURL)
 		cancel()
 		if err != nil {
-			_ = o.Close()
-			return nil, err
+			log.Printf("initial navigation to %q failed; service will continue: %v", cfg.StartURL, err)
 		}
 	}
 	if cfg.Remote {
@@ -262,6 +261,9 @@ func (o *Owner) serveConn(ctx context.Context, conn net.Conn) {
 		callCtx, cancel := context.WithCancel(context.WithValue(ctx, clientKey{}, req.Client))
 		defer cancel()
 		// Each relay connection carries one request; EOF means client cancellation.
+		// relayCall writes a single JSON value without a trailing newline. The
+		// next byte therefore means the client closed its connection to cancel;
+		// the response path remains independent in the opposite direction.
 		go func() { var buf [1]byte; _, _ = conn.Read(buf[:]); cancel() }()
 		text, isError, err := o.Call(callCtx, req.Tool, req.Args)
 		if err != nil {

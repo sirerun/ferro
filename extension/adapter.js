@@ -65,7 +65,26 @@
   // takeSnapshot: faithful port of internal/core/snapshot.go's snapshotJS
   // (the DOM walk) plus TakeSnapshot's Go-side ref-numbering/truncation.
   // ---------------------------------------------------------------------
-  function takeSnapshot(maxElements) {
+  function uniqueSelector(el) {
+    const parts = [];
+    for (let node = el; node && node.nodeType === Node.ELEMENT_NODE; node = node.parentElement) {
+      let part = node.localName;
+      const parent = node.parentElement;
+      if (parent) {
+        const sameTag = Array.from(parent.children).filter((sibling) => sibling.localName === node.localName);
+        if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(node) + 1})`;
+      }
+      parts.unshift(part);
+      if (node.id) {
+        const id = `#${CSS.escape(node.id)}`;
+        if (document.querySelectorAll(id).length === 1) return [id, ...parts.slice(1)].join(' > ');
+      }
+      if (node === document.body) break;
+    }
+    return parts.join(' > ');
+  }
+
+  function takeSnapshot(maxElements, includeSelectors = false) {
     if (!maxElements || maxElements <= 0) maxElements = 200;
 
     // --- verbatim port of snapshot.go's `snapshotJS` DOM walk ---
@@ -112,13 +131,15 @@
         href = new URL(el.getAttribute('href'), location.href).pathname;
       }
 
-      raw.push({
+      const item = {
         tag: tag.toLowerCase(),
         role: role,
         name: name.slice(0, 80),
         text: text,
         href: href,
-      });
+      };
+      if (includeSelectors) item.selector = uniqueSelector(el);
+      raw.push(item);
     }
     // --- end verbatim port ---
 
@@ -136,6 +157,7 @@
       if (r.name) out.name = r.name;
       if (r.text) out.text = r.text;
       if (r.href) out.href = r.href;
+      if (includeSelectors) out.selector = r.selector;
       elements.push(out);
     }
     const snap = { url: location.href, title: document.title, elements: elements };
@@ -336,7 +358,7 @@
     // resuming later) sees what the block actually looks like. Every other
     // action short-circuits on a blocked page instead of acting into it.
     if (action.op === 'snapshot') {
-      const snapshot = takeSnapshot(action.maxElements);
+      const snapshot = takeSnapshot(action.maxElements, true);
       const reason = blocked();
       return reason ? { blocked: reason, code: reason.startsWith('A sign-in') ? 'login_required' : 'blocked' } : { snapshot };
     }
