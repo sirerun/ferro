@@ -1,6 +1,6 @@
 # Ferro hosted AWS pilot
 
-This Pulumi program provisions an isolated, scale-to-zero ECS Fargate service and a small authenticated wake endpoint behind an existing shared HTTPS Application Load Balancer. It does not create or modify the shared load balancer, its listener, DNS, or other services. No deployment or AWS preview has been run from this change; the configuration and steps below are an operator runbook for a later reviewed deployment.
+This Pulumi program provisions an isolated, scale-to-zero ECS Fargate service and a small authenticated wake endpoint behind an existing shared HTTPS Application Load Balancer. It does not create or modify the shared load balancer, its listener, DNS, or other services. The bootstrap repository and certificate have been created, and an activation preview passed without changes to existing resources. Activation remains blocked on DNS publication; see the [qualification record](../../docs/evidence/hosted-pilot/qualification.md) for exact evidence and outstanding live checks.
 
 ## Requirements
 

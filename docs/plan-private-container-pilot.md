@@ -1,6 +1,6 @@
 # Private container pilot
 
-Status: implementation in progress; not deployed or provider-qualified.
+Status: implementation and local checks complete; AWS image repository and certificate bootstrap created, activation preview passed. Hosted activation and live qualification remain pending. See [pilot evidence](evidence/hosted-pilot/qualification.md).
 
 ## Accepted product behavior
 
@@ -30,8 +30,9 @@ terminal receipt persistence. The effective model profile/revision records the
 execution cap. Long-lived MCP GET event streams do not keep compute awake.
 
 An authenticated wake Lambda requests desired count one for exactly this service.
-It returns requested/starting, never ready. The extension retries readiness and
-pairing within a bounded cold-start window. The runtime establishes ECS task
+It returns requested/starting, never ready. The extension polls readiness and
+reasserts the idempotent wake request every 15 seconds within a 180-second
+cold-start window. It never retries dispatched browser actions. The runtime establishes ECS task
 scale-in protection before readiness and renews it while serving; a delayed sleep
 request cannot terminate a newly protected active task. After atomic idle drain,
 new work is rejected, protection is removed and desired count becomes zero.
