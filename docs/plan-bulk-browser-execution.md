@@ -62,9 +62,9 @@ Owners below are logical lane names, not already-running agents or assignments t
 | B06 | validation-cache | Output validation and safe replay | B01 | new core validation/cache integration |
 | B07 | result-artifacts | Result envelopes, evidence storage and retrieval | B01 | new MCP result/artifact implementation |
 | B08 | MCP-integrator | Versioned tool wiring into the real runner | B02–B07 | tools_run_task, owner, runner, public exports |
-| B09 | Zatiti-integration | Durable sequential dispatch and report contract | B01; live gate B08 | Zatiti-owned adapter/worker integration |
-| B10 | qualification | Independent fixture suite and benchmark harness | B01; live gate B08/B09 | integration tests, fixture data, evidence |
-| B11 | release-owner | Matched package, migration and pilot release | B00, B08, B10 | packaging/docs; existing extension preserved |
+| B09 | Zatiti-integration | Durable sequential dispatch and report contract | B01 discovery; execution after G03 executor fixtures | Zatiti-owned adapter/worker integration |
+| B10 | qualification | Executor fixture suite and staged evidence matrix | B01 fixture authoring; G03 after B08 + L09/L10; later rows at G04/G05 | integration tests, fixture data, evidence |
+| B11 | release-owner | Matched package, migration and pilot release | B00, G03 executor fixtures, G04 Zatiti qualification | packaging/docs; existing extension preserved |
 | B12 | supervisor | Authorized 20-item live pilot and verdict | B09–B11 | pilot report and acceptance record |
 
 B-rows describe coverage; G/L IDs in the runbook are the executable assignments. The following waves are a summary, not a second dispatch graph:
@@ -73,10 +73,10 @@ Parallel waves:
 
 - Wave 0: B00, then B01. B10 may inventory test infrastructure without freezing new interfaces.
 - Wave 1: B02, B03, B04, B05, B06, B07, B09 contract work, and B10 fixture work proceed independently after G01 freezes the v2 contract.
-- Wave 2: B08 composes merged/reviewed dependencies; B09 runs the real adapter; B10 exercises the combined path. B11 prepares packaging from the qualified revision.
+- Wave 2: B08 composes reviewed dependencies. G03 qualifies the executor using L09 fixtures and L10 documentation. Then B09/G04 verifies the real Zatiti adapter and restart recovery. B11 may prepare packaging after G03; installation waits for G04.
 - Wave 3: B11 installs the matching build; B12 conducts authorized live qualification.
 
-Critical path: B00 → B01 → longest of B02–B07 → B08 → B09/B10 → B11 → B12.
+Critical path: G00 → G01 → L01–L08 integration (G02) plus L09/L10 → executor fixtures (G03) → Zatiti qualification (G04) → package and pilot (G05). G04 discovery can overlap implementation after G01.
 
 Shared-file rule: B08 alone edits `internal/mcp/tools_run_task.go`, owner dispatch and the final runner wiring during parallel execution. Other lanes provide implementations and focused tests in separate files. B01 owns shared contract types; subsequent contract changes require its review, consumer updates and an explicit version decision. Never resolve collisions by restoring another lane's files.
 
@@ -91,7 +91,7 @@ Required request semantics:
 | Field | Contract |
 |---|---|
 | schema | Literal version identifier, e.g. ferro.task/v1 |
-| task_id | Caller correlation ID; never a claim of exactly-once browser execution |
+| task_id | Durable caller key scoped to the authenticated owner; supports recovery before execution_id is received; never an exactly-once browser-effect claim |
 | goal | Nonempty bounded text; reject oversized input before any model call |
 | start_url | Optional explicit URL; omission binds to the currently paired tab |
 | model_profile | Name resolved from service-owned configuration; no arbitrary key/base URL in task arguments |
@@ -215,8 +215,8 @@ Use existing storage facilities where available; otherwise a minimal private app
 - Store bounded detailed action traces, provider receipts and final outputs. Record metadata by default, not whole authenticated pages or secrets.
 - Opaque artifact identifiers, digest, media type, size; authenticated retrieval with ownership checks and bounded ranges. Prevent path traversal and cross-session unauthorized reads.
 - Explicit retention/size limit and operator-triggered cleanup; active/unreconciled receipts cannot disappear silently. No background lifecycle service added for cleanup.
-- Retrieval supports interrupted-call reconciliation using execution_id. A caller task_id is correlation only. Do not label retry as exactly once.
-- If deduplication is supported, persist a request digest and reject task_id reuse with changed input. After restart, an in-flight record becomes outcome_uncertain unless authoritative completion exists; never replay it automatically.
+- Retrieval supports interrupted-call reconciliation using execution_id or the authenticated owner plus caller task_id, including loss of the first response. Neither key confers authority. Freeze bounded lookup and unknown/not-found semantics in G01; a missing response never proves nonexecution.
+- Atomically persist owner/task_id and canonical request digest before dispatch. Concurrent same-key/same-request calls return the existing state without executing again; changed input conflicts. Preserve a key reservation/tombstone for the frozen recovery window even if large artifacts are cleaned up; define expiry behavior explicitly. After restart, an in-flight record becomes outcome_uncertain unless authoritative completion exists; never replay it automatically. This is request admission deduplication, not exactly-once website effects.
 - Preserve metrics and partial evidence on provider errors, cancellation, browser failure and validation failure.
 
 Tests: failed task retains spend, broken MCP connection preserves receipt, restart with in-flight record, duplicate request mismatch, bounded retrieval, access denial, redaction, oversized artifact, disk full, interrupted atomic write. Disk failure must not yield a success receipt with nonexistent artifacts.
@@ -261,7 +261,7 @@ If current Zatiti cannot provide this durable path, report the exact missing ope
 
 Use controlled local web fixtures first; real account pages are not deterministic test fixtures. Include stable pages, changed layouts, redirects, login/blocked pages, injected instructions, malformed model output, schema mismatch, disconnect, slow responses and uncertain action completion. Test doubles only in tests; no synthetic production success.
 
-Required evidence matrix:
+Required evidence matrix, collected in stages: G03 covers executor fixtures and legacy compatibility; G04 covers Zatiti integration/restart; G05 covers installed packaging and the authorized pilot. G03 must not wait on G04 or G05 evidence. B10 is the umbrella for evidence, not a separate all-at-once prerequisite.
 
 | Area | Must demonstrate |
 |---|---|
@@ -273,8 +273,8 @@ Required evidence matrix:
 | Recovery | Lost transport/restart does not duplicate uncertain work |
 | Isolation | Lease, pairing, artifact ownership and cache boundaries hold |
 | Compatibility | Legacy direct tools/chat/owner-shim behavior remains |
-| Integration | Zatiti terminal verification and artifacts match actual result |
-| Packaging | Installed service and extension hashes match tested release |
+| Integration (G04) | Zatiti terminal verification and artifacts match actual result |
+| Packaging (G05) | Installed service and extension hashes match tested release |
 
 Benchmarks compare on the same fixed fixtures and output criteria: direct frontier supervision, cheap-model tasks, and warm deterministic replay. Record all task attempts, not only successes. Live baseline runs require their own spending authorization. Report total spend divided by accepted outputs, acceptance rate, p50/p95 latency, model requests, repairs, unknown-cost count and supervisor interventions. Record frontier interaction/token data only when observable; do not manufacture a conversion to subscription dollars or exact quota savings.
 
