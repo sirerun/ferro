@@ -116,6 +116,8 @@ func (c *ecsIdleController) Protect(ctx context.Context, enabled bool) error {
 // Sleep is intentionally incapable of selecting a caller-supplied target or
 // changing task definitions. IAM additionally restricts it to this service.
 func (c *ecsIdleController) Sleep(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
 	result, err := c.client.UpdateService(ctx, &ecs.UpdateServiceInput{Cluster: aws.String(c.cluster), Service: aws.String(c.service), DesiredCount: aws.Int32(0)})
 	if err != nil {
 		return fmt.Errorf("request idle ECS service stop: %w", err)

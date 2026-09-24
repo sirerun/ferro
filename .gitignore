@@ -1,3 +1,8 @@
 chrome-profile/
 paystubs.pdf
 .claude/scratch/
+
+# Private deployment configuration and generated Lambda artifacts.
+deploy/cloud/Pulumi.*.yaml
+deploy/cloud/bootstrap
+deploy/cloud/wake.zip
