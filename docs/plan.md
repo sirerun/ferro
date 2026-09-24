@@ -1,6 +1,6 @@
 # Work plan: ferro remote/extension execution backend (E12)
 
-Current planned work: [shared execution roadmap](execution-roadmap.md), [bounded bulk execution](plan-bulk-browser-execution.md), and [hosted launch through AMSL](launch/README.md). These remain planned; E12 history below is unchanged.
+Current planned work: [shared execution roadmap](execution-roadmap.md), [bounded bulk execution](plan-bulk-browser-execution.md), [Zatiti browser integration companion](plan-zatiti-browser-integration.md), and [hosted launch through AMSL](launch/README.md). These remain planned; E12 history below is unchanged.
 
 ## Current implementation — 2026-09-22
 

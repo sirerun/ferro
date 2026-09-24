@@ -4,6 +4,8 @@ Cross-track authority: [shared execution roadmap](../../execution-roadmap.md). I
 
 This runbook makes the parent [plan](../../plan-bulk-browser-execution.md) executable by Luna or cheaper Codex sessions. It does not launch sessions. The coordinator must complete the frontier gates before handing bounded work to implementation lanes. Where the parent plan uses broad B-rows, this directory supplies the executable decomposition; the gate and file-ownership rules here take precedence for dispatch.
 
+See the [Zatiti browser integration companion](../../plan-zatiti-browser-integration.md) for additional direct-action and user-flow coverage. It is a requirements crosswalk, not a dispatch manifest: ZB rows remain unassigned until the coordinator incorporates them into owned packets. Bulk G03 is Ferro read-only fixture qualification; G04 is Zatiti read-only dispatch/recovery; G05 is matching installation and authorized pilot. The sequence G03 → G04 → G05 does not require governed direct mutations. ZB02/ZB03 cover direct-action receipts and preconditions, and ZB07 covers a separate mutation proposal; those do not gate the read-only lifecycle or pilot. G03 does not claim G04 dispatch, and G04 does not claim G05 installation/live evidence.
+
 ## 1. Assignment matrix
 
 | Packet | Tier | Prerequisite | Parent coverage | Parallel window |
@@ -174,6 +176,20 @@ Own integration tests in new `integration/bulk_v2_*` files and existing harness 
 Run formatting, vet/lint as required, package suite, the single authorized broad race suite, extension tests and real-Chrome fixture path using current repo commands. Publish `docs/evidence/bulk-v2/fixture-verdict.md` with exact tested revision and failures. Fixture pass permits packaging, not real account or spend claims.
 
 ## 9. G04 Zatiti and G05 release/pilot
+
+### Zatiti companion coverage and gate crosswalk
+
+The companion's ZB packets add coverage as follows; this table does not assign an owner or report execution:
+
+| Companion coverage | Bulk relationship | Gate boundary |
+|---|---|---|
+| ZB01 compatibility inventory and schema reconciliation | G01 contract preparation | G01 records compatibility decisions before affected contracts freeze; no companion wire names are accepted APIs by themselves |
+| ZB02 durable direct-action receipts and lookup | B07/L07 execution-level receipt foundation | Action-level semantics require a reviewed extension; bounded read-only G03/G04 may use execution receipts without ZB02 being complete |
+| ZB03 session binding and dispatch preconditions | B05/G02 policy and ownership integration | Direct mutation dispatch requires reviewed preconditions; read-only qualification remains independently gated |
+| ZB04–ZB06 connection/adapter, UX/API and independent qualification | G04 lifecycle, with G05 installation evidence kept distinct | G04 proves Zatiti read-only dispatch/recovery; G05 proves matching package and authorized pilot |
+| ZB07 governed autonomous mutations | No prerequisite edge to G03, read-only G04, or G05 pilot | Separate proposal, accepted contract and mutation-specific qualification before enabling mutations |
+
+Companion requirements are coverage prompts only. They do not establish that ZB work is assigned, implemented, or accepted, and they do not move any G gate to complete.
 
 G04 is intentionally not a cheap discovery task. Verify the current Zatiti API and in-flight adapter work, choose its existing dispatch extension seam, then issue separate bounded owning-repository packets with actual paths, API schemas, version handling and restart tests. Do not hand Luna a generic instruction to “integrate Zatiti.” No generic scheduler is added in Ferro.
 

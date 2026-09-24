@@ -7,9 +7,12 @@ Status: plans reconciled on 2026-09-24; implementation gates remain open.
 | Track | Outcome | Authoritative documents | First gate |
 |---|---|---|---|
 | Local bounded execution | Inexpensive, bounded MCP tasks and a recoverable sequential Zatiti pilot | [Bulk design](plan-bulk-browser-execution.md), [dispatch runbook](tasks/bulk-browser/RUNBOOK.md), L01–L10 packets | bulk.G00 baseline, then bulk.G01 compiling contracts |
+| Zatiti direct-action companion | Governed connection, direct-action receipts/preconditions and user flow requirements | [Zatiti browser integration plan](plan-zatiti-browser-integration.md) | Compatibility mapping in bulk.G01; separate ZB packets and acceptance |
 | Hosted paid service | Account signup, paid access, cloud coordination and public extension distribution, with verified AMSL adoption | [Launch overview](launch/README.md), [architecture](launch/architecture.md), [task manifest](launch/tasks.json), [readiness](launch/readiness.md) | launch.D01–D07 baseline, provenance, contracts and owner decisions |
 
 The local track can deliver useful work before hosting is ready. Its Zatiti pilot is not a public-launch prerequisite. The hosted launch excludes unattended scheduling and public remote MCP OAuth; local MCP and external Zatiti dispatch do not silently expand that scope. Both preserve existing local mode.
+
+The companion plan is requirements and coverage mapping; it does not dispatch work or mark a ZB packet complete. Bulk.G03 qualifies Ferro's read-only executor fixtures, G04 qualifies Zatiti dispatch/recovery, and G05 qualifies the matching package and authorized pilot. G04's read-only lifecycle and G05's pilot are not gated on governed direct mutations (ZB02/ZB03/ZB07); mutation enablement requires its own accepted contract and evidence. See the [runbook gate crosswalk](tasks/bulk-browser/RUNBOOK.md#zatiti-companion-coverage-and-gate-crosswalk).
 
 ## Authority and dependency rules
 
