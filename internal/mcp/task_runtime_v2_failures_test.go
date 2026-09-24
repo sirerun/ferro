@@ -16,3 +16,14 @@ func TestRuntimeV2_PartialExtractionCannotHideBudgetExhaustion(t *testing.T) {
 		t.Fatalf("budget exhaustion hidden: %+v driver=%v provider=%d", result, d.calls, calls.Load())
 	}
 }
+
+func TestRuntimeV2_InputTokenCeilingIsBudgetExhaustion(t *testing.T) {
+	o, _, calls := runtimeFixtureV2(t, runtimePlanV2)
+	in := runtimeRequestV2("input-ceiling")
+	one := int64(1)
+	in.Limits.MaxInputTokens = &one
+	result := callRuntimeV2(t, o, in)
+	if result.Status != TaskBudgetExhaustedV2 || calls.Load() != 0 || result.Budget.Requests != 0 {
+		t.Fatalf("wrong input ceiling outcome: %+v calls=%d", result, calls.Load())
+	}
+}

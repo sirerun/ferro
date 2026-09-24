@@ -77,8 +77,11 @@ func (b *taskBudgetV2) Admit(ctx context.Context, kind string, estimatedInput, m
 	if !validBudgetKindV2(kind) {
 		return ReservationV2{}, fmt.Errorf("invalid model request kind %q", kind)
 	}
-	if estimatedInput < 0 || estimatedInput > b.limits.MaxInputTokens {
-		return ReservationV2{}, fmt.Errorf("estimated input tokens outside [0,%d]", b.limits.MaxInputTokens)
+	if estimatedInput < 0 {
+		return ReservationV2{}, fmt.Errorf("estimated input tokens cannot be negative")
+	}
+	if estimatedInput > b.limits.MaxInputTokens {
+		return ReservationV2{}, fmt.Errorf("%w: estimated input exceeds the per-request token ceiling", ErrBudgetExhaustedV2)
 	}
 	if maxOutput <= 0 || maxOutput > b.limits.MaxOutputTokens {
 		return ReservationV2{}, fmt.Errorf("maximum output tokens outside [1,%d]", b.limits.MaxOutputTokens)
