@@ -3,6 +3,8 @@ const $ = id => document.getElementById(id);
 let connection = null;
 let session = '';
 let messages = [];
+let chats = [];
+let activeChatId = '';
 let running = false;
 let request = null;
 let clock = null;
@@ -11,10 +13,45 @@ let saveQueue = Promise.resolve();
 function notice(text) { $('notice').textContent = text; }
 function settings(open) { $('settings').hidden = !open; document.body.classList.toggle('settings-open', open); }
 function saveChat() {
+  const chat = chats.find(item => item.id === activeChatId);
+  if (chat) {
+    chat.messages = messages.slice(-100);
+    chat.updatedAt = new Date().toISOString();
+    chat.unfinished = running;
+  }
+  chats.sort((a,b) => b.updatedAt.localeCompare(a.updatedAt));
+  chats = chats.slice(0,30);
+  const recent=[chats.find(item=>item.id===activeChatId),...chats.filter(item=>item.id!==activeChatId)].filter(Boolean);
+  const stored=[];
+  for (const chat of recent) {
+    for (const limit of [100,50,20,5]) {
+      const candidate={...chat,messages:chat.messages.slice(-limit)};
+      const next=[...stored,candidate];
+      if (new TextEncoder().encode(JSON.stringify({activeId:activeChatId,chats:next})).length<=7*1024*1024) {
+        stored.push(candidate);
+        break;
+      }
+    }
+  }
   // Serial writes prevent an older snapshot overwriting a completed result.
-  const value = {messages: messages.slice(-100), unfinished: running};
-  saveQueue = saveQueue.catch(() => {}).then(() => chrome.storage.local.set({ferroChat: value}));
+  const value = {activeId:activeChatId,chats:stored};
+  saveQueue = saveQueue.catch(() => {}).then(() => chrome.storage.local.set({ferroChats:value}));
   return saveQueue;
+}
+function titleFor(text) { return text.replace(/\s+/g,' ').trim().slice(0,48) || 'New chat'; }
+function renderChatPicker() {
+  const picker=$('chat-picker');
+  picker.replaceChildren();
+  for (const chat of chats) {
+    const option=document.createElement('option');
+    option.value=chat.id; option.textContent=chat.title || 'New chat'; picker.append(option);
+  }
+  picker.value=activeChatId;
+}
+function renderMessages() {
+  $('messages').replaceChildren();
+  for (const m of messages) bubble(m.role,m.text,m.detail);
+  $('history-toggle').disabled=messages.length===0;
 }
 function bubble(role, text, detail) {
   const article = document.createElement('article');
@@ -36,6 +73,11 @@ function add(role, text, detail) {
   const entry = {role, text: String(text).slice(0, 16000), time: new Date().toISOString()};
   if (detail) entry.detail = JSON.stringify(detail).slice(0, 16000);
   messages.push(entry); messages = messages.slice(-100);
+  const chat=chats.find(item=>item.id===activeChatId);
+  if (chat && role==='user' && !chat.messages.some(item=>item.role==='user')) {
+    chat.title=titleFor(text);
+    renderChatPicker();
+  }
   bubble(role, entry.text, entry.detail);
   return saveChat();
 }
@@ -44,6 +86,8 @@ function setRunning(value) {
   $('send').disabled = value;
   $('message').disabled = value;
   $('interactions').disabled = value;
+  $('chat-picker').disabled = value;
+  $('new-chat').disabled = value;
   $('stop').hidden = !value;
   $('stop').disabled = false;
 }
@@ -134,12 +178,27 @@ $('history-toggle').onclick = () => {
   $('history-toggle').setAttribute('aria-pressed',String(open));
   $('history-toggle').textContent=open?'Fade history':'Full history';
 };
+$('chat-picker').onchange = async () => {
+  if (running) return;
+  const chat=chats.find(item=>item.id===$('chat-picker').value);
+  if (!chat) return;
+  activeChatId=chat.id; messages=chat.messages.slice(-100);
+  renderMessages(); await saveChat();
+  if (chat.unfinished) { chat.unfinished=false; await add('assistant','The panel closed before the previous result was saved. Inspect the page before retrying; the task has not been restarted.'); }
+  notice('');
+};
+$('new-chat').onclick = async () => {
+  if (running) { notice('Stop the task before starting a new chat.'); return; }
+  const chat={id:crypto.randomUUID(),title:'New chat',messages:[],updatedAt:new Date().toISOString(),unfinished:false};
+  chats.unshift(chat); activeChatId=chat.id; messages=[];
+  renderChatPicker(); renderMessages(); await saveChat(); notice('');
+};
 $('clear').onclick = async () => {
   if (running) { notice('Stop the task before clearing chat.'); return; }
-  messages=[]; $('messages').replaceChildren(); await saveChat(); notice('Chat cleared from this device.');
+  messages=[]; renderMessages(); await saveChat(); notice('Chat cleared from this device.');
 };
 $('export').onclick = () => {
-  const body=messages.map(m=>`## ${m.role === 'user' ? 'You' : 'Ferro'} · ${m.time}\n\n${m.text}`).join('\n\n');
+  const body=messages.map(m=>`## ${m.role === 'user' ? 'You' : 'Ferro'} · ${m.time}\n\n${m.text}${m.detail ? '\n\nRun details:\n\n```json\n'+m.detail+'\n```' : ''}`).join('\n\n');
   const url=URL.createObjectURL(new Blob([body],{type:'text/markdown'}));
   const a=document.createElement('a'); a.href=url; a.download='ferro-chat.md'; a.click(); setTimeout(()=>URL.revokeObjectURL(url),1000);
 };
@@ -184,11 +243,27 @@ $('composer').onsubmit = async event => {
   connection=state.connection || null;
   session=state.ferroChatSession || crypto.randomUUID();
   await chrome.storage.session.set({ferroChatSession:session});
-  const local=await chrome.storage.local.get(['ferroChat','ferroFrame']);
+  const local=await chrome.storage.local.get(['ferroChat','ferroChats','ferroFrame']);
   theme(local.ferroFrame);
-  messages=(local.ferroChat?.messages || []).slice(-100);
-  for (const m of messages) bubble(m.role,m.text,m.detail);
-  if (local.ferroChat?.unfinished) await add('assistant','The panel closed before the previous result was saved. Inspect the page before retrying; the task has not been restarted.');
+  const archive=local.ferroChats;
+  if (archive?.chats?.length) {
+    chats=archive.chats.filter(chat=>chat && typeof chat.id==='string' && Array.isArray(chat.messages)).slice(0,30);
+    activeChatId=chats.some(chat=>chat.id===archive.activeId)?archive.activeId:(chats[0]?.id || '');
+  } else if (local.ferroChat?.messages?.length) {
+    activeChatId=crypto.randomUUID();
+    chats=[{id:activeChatId,title:titleFor(local.ferroChat.messages.find(m=>m.role==='user')?.text || 'Previous chat'),messages:local.ferroChat.messages.slice(-100),updatedAt:new Date().toISOString(),unfinished:!!local.ferroChat.unfinished}];
+  }
+  if (!chats.length) {
+    activeChatId=crypto.randomUUID();
+    chats=[{id:activeChatId,title:'New chat',messages:[],updatedAt:new Date().toISOString(),unfinished:false}];
+  }
+  messages=chats.find(chat=>chat.id===activeChatId).messages.slice(-100);
+  const current=chats.find(chat=>chat.id===activeChatId);
+  const unfinished=!!current.unfinished;
+  current.unfinished=false;
+  renderChatPicker(); renderMessages();
+  await saveChat();
+  if (unfinished) await add('assistant','The panel closed before the previous result was saved. Inspect the page before retrying; the task has not been restarted.');
   if (!messages.length) bubble('assistant','A little help with the tab in front of you.\n\nConnect a tab in Settings, then ask me to read a request, pull out the requirements, or draft a response here.');
   if (connection) { $('base').value=connection.base; await refresh(); }
   else { settings(true); await refresh(); }

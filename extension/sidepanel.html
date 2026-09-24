@@ -7,11 +7,12 @@
 </head>
 <body>
 <header><span class="brand-mark" aria-label="Ferro"><img src="icons/ferro-mark.svg" alt=""></span><strong>Ferro</strong><span id="connection-state">Not connected</span><button id="settings-toggle" class="quiet" aria-label="Open settings" title="Settings">⚙</button></header>
+<nav class="conversation-nav" aria-label="Chat history"><select id="chat-picker" aria-label="Choose a conversation"></select><button id="new-chat" type="button" title="New chat" aria-label="New chat">+</button></nav>
 <section id="settings" hidden aria-label="Settings">
  <div class="settings-title"><h2>Make yourself at home</h2><button id="settings-close" class="quiet" aria-label="Close settings">×</button></div>
  <form id="connection-form">
   <h3>Your Chrome tab</h3>
-  <label for="base">Local service</label><input id="base" value="http://127.0.0.1:4173" required>
+  <label for="base">Local service</label><input id="base" value="http://127.0.0.1:4175" required>
   <label for="token">Pairing token</label><input id="token" type="password" autocomplete="off" placeholder="Paste from bridge-token">
   <p class="hint">Start ferro-mcp with the extension backend. Copy the token from ~/.ferro-mcp/bridge-token. It stays in Chrome's session memory.</p>
   <div class="actions"><button type="submit">Connect current tab</button><button id="disconnect" type="button">Disconnect</button></div>

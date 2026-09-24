@@ -340,7 +340,9 @@ profile, not just configuration.
 Use Ferro directly from a Chrome side panel: connect a tab, configure your model
 provider, and describe the work. The floating Glass Chat interface runs against
 the local Go service, with saved chat/export, cancellation and default read-only
-execution. No Claude Code or Codex session is required.
+execution. Switch among saved conversations in the panel; they stay in this
+Chrome profile. Ferro operates on one explicitly paired tab at a time. No Claude
+Code or Codex session is required.
 
 See [Standalone Chrome chat](docs/local-chat.md) for installation and a first
 research-to-draft session. This is a local prototype, not the hosted multi-user
@@ -370,11 +372,12 @@ Open `chrome://extensions` in the Chrome profile you use, enable Developer mode,
 and choose **Load unpacked**, selecting this checkout's `extension/` directory.
 Ferro checks and attaches its page receiver when you pair, including tabs opened
 before installation. If Chrome denies attachment, click Ferro on that website
-tab and reconnect, or refresh the tab. Open the
-Ferro extension popup on that tab, enter `http://127.0.0.1:4173` and the token from
-`~/.ferro-mcp/bridge-token`, and choose **Connect this tab**. The service writes
-that token to a private file; it never prints it. Keep Chrome and the tab open.
-Disconnect before pairing a different tab. Chrome restart requires pairing again.
+tab and reconnect, or refresh the tab. Open the side panel's Settings on the
+website tab you want to use, enter the service URL and the token from
+`~/.ferro-mcp/bridge-token`, and choose **Connect current tab**. Connecting a
+different tab releases the prior pairing first; only one tab is controlled at a
+time. The token stays in Chrome's session storage, so pair again after Chrome
+restarts. The service writes the token to a private file and never prints it.
 
 Configure a local MCP client to run the same binary with
 `FERRO_MCP_BACKEND=extension` and the same `FERRO_MCP_HOME`. It will relay to the

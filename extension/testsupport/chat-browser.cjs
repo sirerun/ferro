@@ -46,9 +46,15 @@ const {launchChrome}=require('./cdp.cjs');
   await until('!running && messages.some(m=>m.role==="assistant" && m.text==="from sidepanel")');
   assert.equal(await browser.evaluate(`document.getElementById('api-key').value`),'');
   assert.equal(await browser.evaluate(`document.body.innerHTML.includes('fixture-key')`),false);
-  const count=await browser.evaluate('messages.length');
+  const firstChat=await browser.evaluate('activeChatId');
+  await browser.evaluate(`document.getElementById('new-chat').click()`);
+  await browser.evaluate(`(async()=>{await add('user','Second conversation');await add('assistant','Saved response')})()`);
+  await until(`chats.length===2 && chats.some(chat=>chat.messages.some(m=>m.text==='Saved response'))`);
+  await browser.evaluate(`(()=>{const picker=document.getElementById('chat-picker');picker.value=${JSON.stringify(firstChat)};picker.dispatchEvent(new Event('change'))})()`);
+  await until(`activeChatId===${JSON.stringify(firstChat)} && messages.some(m=>m.text==='from sidepanel')`);
+  await browser.evaluate('(async()=>await saveQueue)()');
   await browser.navigate(`chrome-extension://${id}/sidepanel.html`);
-  await until(`messages.length===${count} && !!connection`);
+  await until(`activeChatId===${JSON.stringify(firstChat)} && messages.some(m=>m.text==='from sidepanel') && !!connection`);
   assert.equal(await browser.evaluate('running'),false);
   // Model-provided markup remains text, never executable HTML.
   await browser.evaluate(`bubble('assistant','<img src=x onerror="window.injected=true">')`);

@@ -73,6 +73,56 @@ test('pairing refuses an inaccessible page before claiming connection',async()=>
   assert.equal(paired,0);
 });
 
+test('switching tabs releases the old pairing before pairing the new tab',async()=>{
+  const previous={base:'http://127.0.0.1:4173',token:'old-token',tabId:41};
+  let stored=previous;
+  const requests=[];
+  const {context,listeners}=worker({fetch:async(url,options)=>{
+    requests.push({url,method:options.method,tab:options.headers['X-Ferro-Tab-Id']});
+    return {ok:true,status:200};
+  }});
+  context.chrome.storage.session.get=async()=>({connection:stored});
+  context.chrome.storage.session.set=async value=>{stored=value.connection};
+  context.ensureContentReady=async()=>{};
+  let stopped=0,started=0;
+  context.stopPolling=()=>{stopped++};
+  context.startPolling=()=>{started++};
+  const response=await new Promise(resolve=>listeners[0]({type:'ferro-connect',connection:{...previous,tabId:42}},{id:'test-extension',url:'chrome-extension://test-extension/sidepanel.html'},resolve));
+  assert.equal(response.ok,true);
+  assert.deepEqual(requests.map(r=>[new URL(r.url).pathname,r.method,r.tab]),[
+    ['/disconnect','POST','41'],['/pair','POST','42'],
+  ]);
+  assert.equal(stored.tabId,42);
+  assert.equal(stopped,1);
+  assert.equal(started,1);
+});
+
+test('failed tab switch restores the previous pairing and resumes polling',async()=>{
+  const previous={base:'http://127.0.0.1:4173',token:'old-token',tabId:41};
+  let stored=previous;
+  const requests=[];
+  const {context,listeners}=worker({fetch:async(url,options)=>{
+    const tab=options.headers['X-Ferro-Tab-Id'];
+    requests.push({url,method:options.method,tab});
+    if (new URL(url).pathname==='/pair' && tab==='42') return {ok:false,status:403};
+    return {ok:true,status:200};
+  }});
+  context.chrome.storage.session.get=async()=>({connection:stored});
+  context.chrome.storage.session.set=async value=>{stored=value.connection};
+  context.ensureContentReady=async()=>{};
+  let stopped=0,started=0;
+  context.stopPolling=()=>{stopped++};
+  context.startPolling=()=>{started++};
+  const response=await new Promise(resolve=>listeners[0]({type:'ferro-connect',connection:{...previous,tabId:42}},{id:'test-extension',url:'chrome-extension://test-extension/sidepanel.html'},resolve));
+  assert.match(response.error,/Pairing failed: HTTP 403/);
+  assert.deepEqual(requests.map(r=>[new URL(r.url).pathname,r.method,r.tab]),[
+    ['/disconnect','POST','41'],['/pair','POST','42'],['/pair','POST','41'],
+  ]);
+  assert.equal(stored.tabId,41);
+  assert.equal(stopped,1);
+  assert.equal(started,1);
+});
+
 test('concurrent readiness checks share one attachment',async()=>{
   const {context}=worker();
   let ready=false,injections=0;

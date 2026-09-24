@@ -30,6 +30,12 @@ Chat text is bounded and retained in storage.local; clear/export are explicit.
 Settings and transcripts are never stored in the repository. There is no cloud
 identity or multi-user security claim. The local OS account is the administrator.
 
+The panel retains a bounded local conversation archive (up to 30 chats and 100
+messages per chat). It pairs one tab at a time; a user can switch by connecting
+the current tab in Settings. The extension releases the previous pairing before
+requesting the new one and attempts to restore the old pairing if the new pairing
+is rejected.
+
 The frame-colored background uses light/dark approximations plus an optional
 custom color. Chrome owns the actual outer frame. Floating glass bubbles reuse
 the supplied design without a JS UI framework or bundled HTMX. No idle model

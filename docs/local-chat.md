@@ -10,7 +10,7 @@ Build the checkout you intend to run (Go 1.25+, Chrome 116+):
 
 ```sh
 GOWORK=off go build -o ferro-mcp ./cmd/ferro-mcp
-FERRO_MCP_BACKEND=extension ./ferro-mcp serve
+FERRO_MCP_BACKEND=extension FERRO_MCP_BRIDGE_ADDR=127.0.0.1:4175 ./ferro-mcp serve
 ```
 
 The foreground process remains running. In Chrome, open `chrome://extensions`,
@@ -23,7 +23,7 @@ icon on that website tab and reconnect, or refresh the website.
 
 In Settings:
 
-1. Keep the service URL `http://127.0.0.1:4173`. Paste the token from
+1. Keep the service URL `http://127.0.0.1:4175`. Paste the token from
    `~/.ferro-mcp/bridge-token`, then **Connect current tab**. On macOS,
    `pbcopy < ~/.ferro-mcp/bridge-token` copies it without printing it.
 2. Set your provider's API base URL, model ID and API key. For OpenRouter the
@@ -36,7 +36,16 @@ In Settings:
 API keys live in a mode-0600 `chat-model.json` file under `FERRO_MCP_HOME`
 (default `~/.ferro-mcp`), never in the repository or Chrome's persistent storage.
 The pairing token lives in Chrome's session storage and must be entered again
-after a browser restart. Disconnect before pairing another tab.
+after a browser restart. Ferro controls one tab at a time. To switch, open
+Settings on the tab you want and choose **Connect current tab**; Ferro releases
+the previous tab before pairing the new one. If the new pairing fails, the
+extension attempts to restore the previous pairing.
+
+Use the conversation picker at the top of the panel to reopen an earlier chat or
+start a new one. Ferro keeps up to 30 conversations and 100 messages per chat in
+this Chrome profile's local extension storage. The history is not synced to the
+service or another device. **Clear chat** removes the current conversation;
+**Export chat** saves it as Markdown.
 
 To stop the service, use `./ferro-mcp stop` with the same `FERRO_MCP_HOME`.
 

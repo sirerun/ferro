@@ -331,6 +331,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'ferro-connect') {
     (async () => {
+      let previous = null;
+      let restartPreviousPoll = false;
       try {
         // Pairing may only be requested by our own popup or panel, never page content.
         if (sender.id !== chrome.runtime.id || ![chrome.runtime.getURL('popup.html'), chrome.runtime.getURL('sidepanel.html')].includes(sender.url)) throw new Error('pair using the extension popup or side panel');
@@ -338,12 +340,43 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!/^http:\/\/(127\.0\.0\.1|localhost):[0-9]+$/.test(c.base)) throw new Error('use a local bridge URL');
         if (!Number.isInteger(c.tabId) || c.tabId < 0) throw new Error('Choose a website tab to connect.');
         await ensureContentReady(c.tabId);
+        previous = await getConnection();
+        if (previous && previous.tabId !== c.tabId) {
+          if (activeAction) throw new Error('A browser action is still running. Stop it before switching tabs.');
+          stopPolling();
+          restartPreviousPoll = true;
+          const disconnected = await fetch(`${previous.base}/disconnect`, {
+            method:'POST',
+            headers:{Authorization:`Bearer ${previous.token}`,'X-Ferro-Tab-Id':String(previous.tabId)},
+            signal:AbortSignal.timeout(5000),
+          });
+          if (!disconnected.ok) {
+            throw new Error(`Could not release the previous tab: HTTP ${disconnected.status}`);
+          }
+        }
         const response = await fetch(`${c.base}/pair`, { method: 'POST', headers: { Authorization: `Bearer ${c.token}`, 'X-Ferro-Tab-Id': String(c.tabId) }, signal: AbortSignal.timeout(5000) });
         if (!response.ok) throw new Error(`Pairing failed: HTTP ${response.status}`);
         await chrome.storage.session.set({ connection: c });
+        restartPreviousPoll = false;
         startPolling();
         sendResponse({ ok: true });
-      } catch (error) { sendResponse({ error: error.message }); }
+      } catch (error) {
+        let message = error.message;
+        if (restartPreviousPoll) {
+          try {
+            const restored = await fetch(`${previous.base}/pair`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${previous.token}`, 'X-Ferro-Tab-Id': String(previous.tabId) },
+              signal: AbortSignal.timeout(5000),
+            });
+            if (!restored.ok) message += ` The previous tab could not be restored (HTTP ${restored.status}).`;
+          } catch (restoreError) {
+            message += ` The previous tab could not be restored: ${restoreError.message}.`;
+          }
+          startPolling();
+        }
+        sendResponse({ error: message });
+      }
     })();
     return true;
   }
