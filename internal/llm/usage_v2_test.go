@@ -1,0 +1,203 @@
+package llm
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/dndungu/ferro/internal/core"
+)
+
+func TestUsageV2_Reported(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("x-request-id", "hdr-id")
+		fmt.Fprint(w, `{"id":"resp-id","model":"m2","choices":[{"message":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15,"prompt_tokens_details":{"cached_tokens":2,"cache_write_tokens":1},"completion_tokens_details":{"reasoning_tokens":1},"cost":0.0000001}}`)
+	}))
+	defer srv.Close()
+	got, err := (&OpenAICompatible{BaseURL: srv.URL, Model: "m1", UsageCostCurrency: "USD"}).CompleteWithUsage(context.Background(), "s", "u")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Text != "ok" || got.Model != "m2" || got.ProviderRequestID != "resp-id" || got.FinishReason != "stop" || got.Transmission != core.TransmissionResponseReceivedV2 {
+		t.Fatalf("metadata: %+v", got)
+	}
+	for name, pair := range map[string][2]*int64{"in": {got.Usage.InputTokens, int64Ptr(12)}, "out": {got.Usage.OutputTokens, int64Ptr(3)}, "total": {got.Usage.TotalTokens, int64Ptr(15)}, "reasoning": {got.Usage.ReasoningTokens, int64Ptr(1)}, "cached": {got.Usage.CacheReadTokens, int64Ptr(2)}, "cachewrite": {got.Usage.CacheWriteTokens, int64Ptr(1)}, "cost": {got.Usage.BilledMicroUSD, int64Ptr(1)}} {
+		if !sameInt(pair[0], pair[1]) {
+			t.Errorf("%s = %v, want %v", name, pair[0], pair[1])
+		}
+	}
+}
+
+func TestUsageV2_Missing(t *testing.T) {
+	for _, tc := range []struct {
+		body  string
+		input *int64
+	}{{`{"choices":[{"message":{"content":"x"}}]}`, nil}, {`{"choices":[{"message":{"content":"x"}}],"usage":{"prompt_tokens":0}}`, int64Ptr(0)}} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, tc.body) }))
+		got, err := (&OpenAICompatible{BaseURL: srv.URL}).CompleteWithUsage(context.Background(), "s", "u")
+		srv.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !sameInt(got.Usage.InputTokens, tc.input) || got.Usage.OutputTokens != nil {
+			t.Fatalf("explicit zero/missing distinction lost: %+v", got.Usage)
+		}
+	}
+}
+
+func TestUsageV2_HTTPFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(429)
+		fmt.Fprint(w, `{"error":{"message":"secret body"},"usage":{"prompt_tokens":7}}`)
+	}))
+	defer srv.Close()
+	got, err := (&OpenAICompatible{BaseURL: srv.URL, APIKey: "credential"}).CompleteWithUsage(context.Background(), "s", "u")
+	if err == nil || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "credential") {
+		t.Fatalf("diagnostic not safely redacted: %v", err)
+	}
+	if got.Transmission != core.TransmissionResponseReceivedV2 || got.Usage.InputTokens == nil || *got.Usage.InputTokens != 7 {
+		t.Fatalf("failure metadata lost: %+v", got)
+	}
+}
+
+func TestUsageV2_SchemaFormatRejectionSingleAttempt(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":{"message":"response_format json_object rejected"},"usage":{"prompt_tokens":5}}`)
+	}))
+	defer srv.Close()
+	got, err := (&OpenAICompatible{BaseURL: srv.URL, UseJSONSchema: true}).CompleteWithUsage(context.Background(), "s", "u")
+	if err == nil || calls != 1 || got.Usage.InputTokens == nil || *got.Usage.InputTokens != 5 {
+		t.Fatalf("got %+v, err %v, calls %d", got, err, calls)
+	}
+}
+
+func TestUsageV2_UsageSurvivesChoiceFailure(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"usage":{"prompt_tokens":9}}`)
+	}))
+	defer srv.Close()
+	got, err := (&OpenAICompatible{BaseURL: srv.URL}).CompleteWithUsage(context.Background(), "s", "u")
+	if err == nil || got.Usage.InputTokens == nil || *got.Usage.InputTokens != 9 {
+		t.Fatalf("usage not retained: %+v, err %v", got, err)
+	}
+}
+
+func TestUsageV2_TimeoutAfterSend(t *testing.T) {
+	received := make(chan struct{})
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { close(received); <-release }))
+	got, err := (&OpenAICompatible{BaseURL: srv.URL, Timeout: 30 * time.Millisecond}).CompleteWithUsage(context.Background(), "s", "u")
+	<-received
+	close(release)
+	srv.Close()
+	if err == nil || got.Transmission != core.TransmissionSentUnknownV2 {
+		t.Fatalf("got %+v, err %v", got, err)
+	}
+}
+
+func TestUsageV2_ResponseLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, strings.Repeat("x", metadataBodyLimit+1)) }))
+	defer srv.Close()
+	got, err := (&OpenAICompatible{BaseURL: srv.URL}).CompleteWithUsage(context.Background(), "s", "u")
+	if err == nil || got.Transmission != core.TransmissionResponseReceivedV2 {
+		t.Fatalf("got %+v, err %v", got, err)
+	}
+}
+
+func TestUsageV2_LegacySingleRequest(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusBadRequest)
+		fmt.Fprint(w, `{"error":{"message":"response_format rejected"}}`)
+	}))
+	defer srv.Close()
+	_, err := (&OpenAICompatible{BaseURL: srv.URL, UseJSONSchema: true}).CompleteSchema(context.Background(), "s", "u", []byte(`{"type":"object"}`))
+	if err == nil || calls != 2 {
+		t.Fatalf("legacy fallback calls=%d err=%v", calls, err)
+	}
+}
+
+func TestUsageV2_RedirectSingleHit(t *testing.T) {
+	second := 0
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		second++
+		fmt.Fprint(w, `{"choices":[{"message":{"content":"unexpected"}}]}`)
+	}))
+	defer target.Close()
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { http.Redirect(w, r, target.URL, http.StatusFound) }))
+	defer first.Close()
+	got, err := (&OpenAICompatible{BaseURL: first.URL}).CompleteWithUsage(context.Background(), "s", "u")
+	if err == nil || second != 0 || got.Transmission != core.TransmissionResponseReceivedV2 {
+		t.Fatalf("got %+v, err %v, redirect hits=%d", got, err, second)
+	}
+}
+
+func TestUsageV2_BadUsageAndBody(t *testing.T) {
+	for _, tc := range []struct{ name, body string }{
+		{"negative token", `{"usage":{"prompt_tokens":-1},"choices":[{"message":{"content":"x"}}]}`},
+		{"fractional token", `{"usage":{"prompt_tokens":1.5},"choices":[{"message":{"content":"x"}}]}`},
+		{"malformed", `{"usage":{"prompt_tokens":4}`},
+		{"huge error body", `"` + strings.Repeat("z", metadataErrorBodyLimit+1) + `"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			status := http.StatusOK
+			if tc.name == "huge error body" {
+				status = 500
+			}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(status); fmt.Fprint(w, tc.body) }))
+			defer srv.Close()
+			got, err := (&OpenAICompatible{BaseURL: srv.URL}).CompleteWithUsage(context.Background(), "s", "u")
+			if err == nil || got.Transmission != core.TransmissionResponseReceivedV2 {
+				t.Fatalf("got %+v err %v", got, err)
+			}
+		})
+	}
+}
+
+func TestUsageV2_CostRoundingAndOverflow(t *testing.T) {
+	cases := []struct {
+		cost string
+		want int64
+		ok   bool
+	}{{"0.000001", 1, true}, {"0.0000001", 1, true}, {"1.0000001", 1000001, true}, {"-1", 0, false}, {"9223372036854.775808", 0, false}}
+	for _, tc := range cases {
+		t.Run(tc.cost, func(t *testing.T) {
+			usage := core.RequestUsageV2{}
+			err := decodeMetadataUsage(&usage, &metadataUsage{Cost: numberPtr(tc.cost)}, true)
+			if (err == nil) != tc.ok {
+				t.Fatalf("err=%v", err)
+			}
+			if tc.ok && (usage.BilledMicroUSD == nil || *usage.BilledMicroUSD != tc.want) {
+				t.Fatalf("cost=%v want %d", usage.BilledMicroUSD, tc.want)
+			}
+		})
+	}
+}
+
+func TestUsageV2_CurrencyRejectedBeforeSend(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++ }))
+	defer srv.Close()
+	got, err := (&OpenAICompatible{BaseURL: srv.URL, UsageCostCurrency: "EUR"}).CompleteWithUsage(context.Background(), "s", "u")
+	if err == nil || calls != 0 || got.Transmission != core.TransmissionNotSentV2 {
+		t.Fatalf("got %+v err=%v calls=%d", got, err, calls)
+	}
+}
+
+func int64Ptr(v int64) *int64 { return &v }
+func sameInt(a, b *int64) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+func numberPtr(s string) *json.Number { n := json.Number(s); return &n }
