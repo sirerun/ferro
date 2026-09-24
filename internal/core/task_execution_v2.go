@@ -59,9 +59,21 @@ func (c *budgetedClientV2) Complete(ctx context.Context, system, user string) (s
 	completion, providerErr := c.client.CompleteWithUsage(ctx, system, user)
 	reconcileErr := c.budget.Reconcile(reservation.ID, completion)
 	if reconcileErr != nil {
+		if contextErr := ctx.Err(); contextErr != nil {
+			return "", &budgetRequestErrorV2{err: errors.Join(contextErr, reconcileErr)}
+		}
 		return "", &budgetRequestErrorV2{err: reconcileErr}
 	}
+	if contextErr := ctx.Err(); contextErr != nil {
+		return "", contextErr
+	}
 	if providerErr != nil {
+		if errors.Is(providerErr, context.Canceled) {
+			return "", context.Canceled
+		}
+		if errors.Is(providerErr, context.DeadlineExceeded) {
+			return "", context.DeadlineExceeded
+		}
 		return "", &StopError{Code: "provider_error", Message: "model provider request failed"}
 	}
 	return completion.Text, nil

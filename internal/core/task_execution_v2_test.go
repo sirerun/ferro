@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -100,6 +101,82 @@ func TestBudgetedClientV2RejectsBeforeProviderAndReconcilesUnknown(t *testing.T)
 	}
 	if len(budget.reconciled) != 1 || budget.reconciled[0].Transmission != TransmissionSentUnknownV2 {
 		t.Fatalf("reconcile=%+v", budget.reconciled)
+	}
+}
+
+type blockedMetadataClientV2 struct {
+	started chan struct{}
+	release chan struct{}
+	usage   RequestUsageV2
+	err     error
+}
+
+func (c *blockedMetadataClientV2) CompleteWithUsage(ctx context.Context, _, _ string) (CompletionV2, error) {
+	close(c.started)
+	providerErr := c.err
+	if providerErr == nil {
+		<-ctx.Done()
+		providerErr = ctx.Err()
+	} else {
+		<-c.release
+	}
+	return CompletionV2{
+		Usage: c.usage, Transmission: TransmissionSentUnknownV2,
+	}, fmt.Errorf("provider-secret-do-not-leak: %w", providerErr)
+}
+
+func TestBudgetedClientV2PropagatesCancellationAfterReconcile(t *testing.T) {
+	tests := []struct {
+		name          string
+		providerErr   error
+		cancelContext bool
+		want          error
+	}{
+		{
+			name:          "caller cancellation",
+			cancelContext: true,
+			want:          context.Canceled,
+		},
+		{
+			name:        "provider deadline exceeded",
+			providerErr: context.DeadlineExceeded,
+			want:        context.DeadlineExceeded,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			input, billed := int64(27), int64(0)
+			provider := &blockedMetadataClientV2{started: make(chan struct{}), release: make(chan struct{}), usage: RequestUsageV2{InputTokens: &input, BilledMicroUSD: &billed}, err: tc.providerErr}
+			budget := &budgetSpyV2{}
+			client, err := NewBudgetedClientV2(provider, budget, DefaultLimitsV2())
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := make(chan error, 1)
+			go func() {
+				_, callErr := client.Complete(ctx, "system", "user")
+				result <- callErr
+			}()
+			<-provider.started
+			if tc.cancelContext {
+				cancel()
+			} else {
+				close(provider.release)
+			}
+			err = <-result
+			if !errors.Is(err, tc.want) || strings.Contains(fmt.Sprint(err), "provider-secret-do-not-leak") {
+				t.Fatalf("cancellation classification/error disclosure: err=%v", err)
+			}
+			if len(budget.reconciled) != 1 {
+				t.Fatalf("reconciliations=%d, want exactly one", len(budget.reconciled))
+			}
+			usage := budget.reconciled[0].Usage
+			if usage.InputTokens == nil || *usage.InputTokens != 27 || usage.BilledMicroUSD == nil || *usage.BilledMicroUSD != 0 || budget.reconciled[0].Transmission != TransmissionSentUnknownV2 {
+				t.Fatalf("cancellation usage was lost: %+v", budget.reconciled[0])
+			}
+		})
 	}
 }
 
