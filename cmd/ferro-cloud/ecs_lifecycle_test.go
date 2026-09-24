@@ -37,6 +37,7 @@ func TestProtectionRequiresAcknowledgedUnexpiredState(t *testing.T) {
 	}{
 		{"protected", true, 200, `{"protection":{"ProtectionEnabled":true,"ExpirationDate":"` + time.Now().Add(5*time.Minute).UTC().Format(time.RFC3339) + `","TaskArn":"task"}}`, true},
 		{"released", false, 200, `{"protection":{"ProtectionEnabled":false,"ExpirationDate":null,"TaskArn":"task"}}`, true},
+		{"missing state", false, 200, `{"protection":{"TaskArn":"task"}}`, false},
 		{"wrong state", true, 200, `{"protection":{"ProtectionEnabled":false,"TaskArn":"task"}}`, false},
 		{"expired", true, 200, `{"protection":{"ProtectionEnabled":true,"ExpirationDate":"2020-01-01T00:00:00Z","TaskArn":"task"}}`, false},
 		{"error envelope", true, 200, `{"error":{"Code":"AccessDenied"}}`, false},

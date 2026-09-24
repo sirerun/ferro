@@ -1,6 +1,6 @@
 # The Go builder is pinned to the official golang:1.25.5-alpine multi-platform
 # image index digest verified on Docker Hub on 2026-09-24.
-FROM --platform=$BUILDPLATFORM golang:1.25.5-alpine@sha256:ac09a5f469f307e5da71e766b0bd59c9c49ea460a528cc3e6686513d64a6f1fb AS build
+FROM golang:1.25.5-alpine@sha256:ac09a5f469f307e5da71e766b0bd59c9c49ea460a528cc3e6686513d64a6f1fb AS build
 
 ARG TARGETOS
 ARG TARGETARCH

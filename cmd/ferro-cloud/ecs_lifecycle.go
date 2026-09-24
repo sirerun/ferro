@@ -90,7 +90,7 @@ func (c *ecsIdleController) Protect(ctx context.Context, enabled bool) error {
 	}
 	var result struct {
 		Protection *struct {
-			Enabled    bool      `json:"ProtectionEnabled"`
+			Enabled    *bool     `json:"ProtectionEnabled"`
 			Expiration time.Time `json:"ExpirationDate"`
 			TaskARN    string    `json:"TaskArn"`
 		} `json:"protection"`
@@ -104,7 +104,7 @@ func (c *ecsIdleController) Protect(ctx context.Context, enabled bool) error {
 	if len(data) > 16384 || json.Unmarshal(data, &result) != nil {
 		return errors.New("invalid task protection response")
 	}
-	if result.Protection == nil || len(result.Failure) > 0 || len(result.Error) > 0 || result.Protection.Enabled != enabled || result.Protection.TaskARN == "" {
+	if result.Protection == nil || len(result.Failure) > 0 || len(result.Error) > 0 || (result.Protection.Enabled == nil || *result.Protection.Enabled != enabled) || result.Protection.TaskARN == "" {
 		return errors.New("task protection was not acknowledged")
 	}
 	if enabled && !result.Protection.Expiration.After(time.Now().Add(time.Minute)) {
