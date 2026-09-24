@@ -169,8 +169,8 @@ func validateInputs(in inputs) error {
 	if in.wakeZipPath == "" {
 		return errors.New("activate stage requires a built Go custom-runtime Lambda zip path")
 	}
-	if in.wakeRulePriority < 1 || in.wakeRulePriority > 50000 || in.appRulePriority < 1 || in.appRulePriority > 50000 || in.wakeRulePriority == in.appRulePriority {
-		return errors.New("listener rule priorities must be distinct values between 1 and 50000")
+	if in.wakeRulePriority < 1 || in.wakeRulePriority > 50000 || in.appRulePriority < 1 || in.appRulePriority > 50000 || in.wakeRulePriority >= in.appRulePriority {
+		return errors.New("wakeRulePriority must be lower than appRulePriority and both must be between 1 and 50000")
 	}
 	if len(in.proxyCIDRs) == 0 {
 		return errors.New("activate stage requires explicit trustedProxyCIDRs for the ALB subnets")
@@ -349,17 +349,24 @@ func activateHostedPilot(ctx *pulumi.Context, in inputs, repository *ecr.Reposit
 	if err != nil {
 		return err
 	}
+	var mountTargets []pulumi.Resource
 	for i, subnetID := range in.publicSubnetIDs {
-		if _, err := efs.NewMountTarget(ctx, fmt.Sprintf("ferro-hosted-efs-mount-%d", i+1), &efs.MountTargetArgs{
+		mountTarget, err := efs.NewMountTarget(ctx, fmt.Sprintf("ferro-hosted-efs-mount-%d", i+1), &efs.MountTargetArgs{
 			FileSystemId:   fileSystem.ID(),
 			SubnetId:       pulumi.String(subnetID),
 			SecurityGroups: pulumi.StringArray{efsSG.ID()},
-		}); err != nil {
+		})
+		if err != nil {
 			return fmt.Errorf("create EFS mount target for subnet %d: %w", i+1, err)
 		}
+		mountTargets = append(mountTargets, mountTarget)
 	}
 
 	taskRole, executionRole, err := newTaskRoles(ctx, in, repository, logGroup, mcpSecret, bridgeSecret, fileSystem, accessPoint)
+	if err != nil {
+		return err
+	}
+	efsPolicy, err := newFileSystemPolicy(ctx, fileSystem, accessPoint, taskRole)
 	if err != nil {
 		return err
 	}
@@ -382,19 +389,20 @@ func activateHostedPilot(ctx *pulumi.Context, in inputs, repository *ecr.Reposit
 	if err != nil {
 		return fmt.Errorf("create ALB Lambda target group: %w", err)
 	}
-	if _, err := lambda.NewPermission(ctx, "ferro-hosted-wake-alb-invoke", &lambda.PermissionArgs{
+	wakePermission, err := lambda.NewPermission(ctx, "ferro-hosted-wake-alb-invoke", &lambda.PermissionArgs{
 		Action:        pulumi.String("lambda:InvokeFunction"),
 		Function:      wake.Name,
 		Principal:     pulumi.String("elasticloadbalancing.amazonaws.com"),
 		SourceArn:     wakeTarget.Arn,
 		SourceAccount: pulumi.String(in.accountID),
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("grant the supplied ALB target group invoke access: %w", err)
 	}
 	if _, err := lb.NewTargetGroupAttachment(ctx, "ferro-hosted-wake-target-attachment", &lb.TargetGroupAttachmentArgs{
 		TargetGroupArn: wakeTarget.Arn,
 		TargetId:       wake.Arn,
-	}); err != nil {
+	}, pulumi.DependsOn([]pulumi.Resource{wakePermission})); err != nil {
 		return fmt.Errorf("register the wake function in its ALB target group: %w", err)
 	}
 	if _, err := lb.NewListenerRule(ctx, "ferro-hosted-wake-rule", &lb.ListenerRuleArgs{
@@ -425,12 +433,13 @@ func activateHostedPilot(ctx *pulumi.Context, in inputs, repository *ecr.Reposit
 	if err != nil {
 		return fmt.Errorf("create private service target group: %w", err)
 	}
-	if _, err := lb.NewListenerRule(ctx, "ferro-hosted-app-rule", &lb.ListenerRuleArgs{
+	appRule, err := lb.NewListenerRule(ctx, "ferro-hosted-app-rule", &lb.ListenerRuleArgs{
 		ListenerArn: pulumi.String(in.albListenerARN),
 		Priority:    pulumi.Int(in.appRulePriority),
 		Conditions:  lb.ListenerRuleConditionArray{&lb.ListenerRuleConditionArgs{HostHeader: &lb.ListenerRuleConditionHostHeaderArgs{Values: pulumi.StringArray{pulumi.String(in.publicDomain)}}}},
 		Actions:     lb.ListenerRuleActionArray{&lb.ListenerRuleActionArgs{Type: pulumi.String("forward"), TargetGroupArn: appTarget.Arn}},
-	}); err != nil {
+	})
+	if err != nil {
 		return fmt.Errorf("create exact-host service route: %w", err)
 	}
 
@@ -464,7 +473,7 @@ func activateHostedPilot(ctx *pulumi.Context, in inputs, repository *ecr.Reposit
 		LoadBalancers:            ecs.ServiceLoadBalancerArray{&ecs.ServiceLoadBalancerArgs{TargetGroupArn: appTarget.Arn, ContainerName: pulumi.String(containerName), ContainerPort: pulumi.Int(listenerPort)}},
 		DeploymentCircuitBreaker: &ecs.ServiceDeploymentCircuitBreakerArgs{Enable: pulumi.Bool(true), Rollback: pulumi.Bool(true)},
 		Tags:                     pulumi.StringMap{"Service": pulumi.String(stackPrefix)},
-	}, pulumi.IgnoreChanges([]string{"desiredCount"}), pulumi.Protect(true))
+	}, pulumi.IgnoreChanges([]string{"desiredCount"}), pulumi.Protect(true), pulumi.DependsOn(append(mountTargets, appRule, efsPolicy)))
 	if err != nil {
 		return fmt.Errorf("create zero-desired single-task ECS service: %w", err)
 	}
@@ -573,32 +582,78 @@ func arn(region, account, service, resource string) string {
 	return fmt.Sprintf("arn:aws:%s:%s:%s:%s", service, region, account, resource)
 }
 
-func trustPolicy(servicePrincipal, region, account, resourcePrefix string) (string, error) {
-	return marshalIAM(map[string]any{
-		"Version": "2012-10-17",
-		"Statement": []any{map[string]any{
-			"Effect": "Allow", "Principal": map[string]string{"Service": servicePrincipal}, "Action": "sts:AssumeRole",
-			"Condition": map[string]any{
-				"StringEquals": map[string]string{"aws:SourceAccount": account},
-				"ArnLike":      map[string]string{"aws:SourceArn": fmt.Sprintf("arn:aws:%s:%s:%s:%s", servicePrefix(servicePrincipal), region, account, resourcePrefix)},
-			},
-		}},
+func efsClientPolicy(fileSystemARN, accessPointARN string) (string, error) {
+	if fileSystemARN == "" || accessPointARN == "" {
+		return "", errors.New("EFS filesystem and access point ARNs are required")
+	}
+	return policyJSON(policyStatement{
+		Effect:   "Allow",
+		Action:   []string{"elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"},
+		Resource: []string{fileSystemARN},
+		Condition: map[string]map[string]string{
+			"StringEquals": {"elasticfilesystem:AccessPointArn": accessPointARN},
+			"Bool":         {"aws:SecureTransport": "true"},
+		},
 	})
 }
 
-func servicePrefix(principal string) string {
-	switch principal {
-	case "ecs-tasks.amazonaws.com":
-		return "ecs"
-	case "lambda.amazonaws.com":
-		return "lambda"
-	default:
-		return ""
+func efsFileSystemPolicy(fileSystemARN, accessPointARN, taskRoleARN string) (string, error) {
+	if fileSystemARN == "" || accessPointARN == "" || taskRoleARN == "" {
+		return "", errors.New("EFS filesystem, access point, and task role ARNs are required")
 	}
+	resource := []string{fileSystemARN}
+	clientActions := []string{"elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite", "elasticfilesystem:ClientRootAccess"}
+	return marshalIAM(map[string]any{
+		"Version": "2012-10-17",
+		"Statement": []any{
+			map[string]any{"Sid": "DenyInsecureTransport", "Effect": "Deny", "Principal": "*", "Action": clientActions, "Resource": resource, "Condition": map[string]any{"Bool": map[string]string{"aws:SecureTransport": "false"}}},
+			map[string]any{"Sid": "DenyUnexpectedAccessPoint", "Effect": "Deny", "Principal": "*", "Action": clientActions, "Resource": resource, "Condition": map[string]any{"StringNotEquals": map[string]string{"elasticfilesystem:AccessPointArn": accessPointARN}}},
+			map[string]any{"Sid": "DenyUnexpectedPrincipal", "Effect": "Deny", "NotPrincipal": map[string]string{"AWS": taskRoleARN}, "Action": clientActions, "Resource": resource},
+			map[string]any{"Sid": "AllowTaskRoleViaAccessPointTLS", "Effect": "Allow", "Principal": map[string]string{"AWS": taskRoleARN}, "Action": []string{"elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"}, "Resource": resource, "Condition": map[string]any{"StringEquals": map[string]string{"elasticfilesystem:AccessPointArn": accessPointARN}, "Bool": map[string]string{"aws:SecureTransport": "true"}}},
+		},
+	})
+}
+
+func newFileSystemPolicy(ctx *pulumi.Context, fileSystem *efs.FileSystem, accessPoint *efs.AccessPoint, taskRole *iam.Role) (*efs.FileSystemPolicy, error) {
+	policy := pulumi.All(fileSystem.Arn, accessPoint.Arn, taskRole.Arn).ApplyT(func(values []any) (string, error) {
+		fileSystemARN, fsOK := values[0].(string)
+		accessPointARN, apOK := values[1].(string)
+		taskRoleARN, roleOK := values[2].(string)
+		if !fsOK || !apOK || !roleOK {
+			return "", errors.New("EFS policy inputs have invalid types")
+		}
+		return efsFileSystemPolicy(fileSystemARN, accessPointARN, taskRoleARN)
+	}).(pulumi.StringOutput)
+	resource, err := efs.NewFileSystemPolicy(ctx, "ferro-hosted-private-home-policy", &efs.FileSystemPolicyArgs{
+		FileSystemId: fileSystem.ID(), Policy: policy, BypassPolicyLockoutSafetyCheck: pulumi.Bool(true),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("enforce private-home EFS role, access point, and TLS policy: %w", err)
+	}
+	return resource, nil
+}
+
+func trustPolicy(servicePrincipal, region, account string) (string, error) {
+	statement := map[string]any{
+		"Effect": "Allow", "Principal": map[string]string{"Service": servicePrincipal}, "Action": "sts:AssumeRole",
+	}
+	switch servicePrincipal {
+	case "ecs-tasks.amazonaws.com":
+		statement["Condition"] = map[string]any{
+			"StringEquals": map[string]string{"aws:SourceAccount": account},
+			"ArnLike":      map[string]string{"aws:SourceArn": fmt.Sprintf("arn:aws:ecs:%s:%s:*", region, account)},
+		}
+	case "lambda.amazonaws.com":
+		// Lambda assumes execution roles without aws:SourceArn or aws:SourceAccount
+		// in the request context; these are not valid trust-policy conditions here.
+	default:
+		return "", fmt.Errorf("unsupported service principal %q", servicePrincipal)
+	}
+	return marshalIAM(map[string]any{"Version": "2012-10-17", "Statement": []any{statement}})
 }
 
 func newTaskRoles(ctx *pulumi.Context, in inputs, repository *ecr.Repository, logGroup *cloudwatch.LogGroup, mcpSecret, bridgeSecret *secretsmanager.Secret, fileSystem *efs.FileSystem, accessPoint *efs.AccessPoint) (*iam.Role, *iam.Role, error) {
-	trust, err := trustPolicy("ecs-tasks.amazonaws.com", in.region, in.accountID, "task/"+clusterName+"/*")
+	trust, err := trustPolicy("ecs-tasks.amazonaws.com", in.region, in.accountID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("encode ECS task trust: %w", err)
 	}
@@ -624,7 +679,7 @@ func newTaskRoles(ctx *pulumi.Context, in inputs, repository *ecr.Repository, lo
 		if !ok || accessPointARN == "" {
 			return "", errors.New("EFS access point ARN is missing")
 		}
-		return policyJSON(policyStatement{Effect: "Allow", Action: []string{"elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"}, Resource: []string{filesystemARN}, Condition: map[string]map[string]string{"StringEquals": {"elasticfilesystem:AccessPointArn": accessPointARN, "elasticfilesystem:EncryptedInTransit": "true"}}})
+		return efsClientPolicy(filesystemARN, accessPointARN)
 	}).(pulumi.StringOutput)
 	taskPolicy, err := policyJSON(
 		policyStatement{Sid: "SleepExactService", Effect: "Allow", Action: []string{"ecs:UpdateService"}, Resource: []string{serviceARN}},
@@ -671,7 +726,7 @@ func combinePolicies(left, right string) (string, error) {
 }
 
 func newWakeRole(ctx *pulumi.Context, in inputs, logGroup *cloudwatch.LogGroup) (*iam.Role, error) {
-	trust, err := trustPolicy("lambda.amazonaws.com", in.region, in.accountID, "function:"+wakeFunctionName)
+	trust, err := trustPolicy("lambda.amazonaws.com", in.region, in.accountID)
 	if err != nil {
 		return nil, fmt.Errorf("encode Lambda trust: %w", err)
 	}
@@ -694,7 +749,7 @@ func newWakeFunction(ctx *pulumi.Context, in inputs, role *iam.Role, bridgeToken
 	function, err := lambda.NewFunction(ctx, "ferro-hosted-wake-function", &lambda.FunctionArgs{
 		Name: pulumi.String(wakeFunctionName), Runtime: pulumi.String("provided.al2023"), Handler: pulumi.String("bootstrap"),
 		Architectures: pulumi.StringArray{pulumi.String("arm64")}, Code: pulumi.NewFileArchive(in.wakeZipPath), Role: role.Arn,
-		Timeout: pulumi.Int(8), MemorySize: pulumi.Int(128), ReservedConcurrentExecutions: pulumi.Int(4),
+		Timeout: pulumi.Int(12), MemorySize: pulumi.Int(128), ReservedConcurrentExecutions: pulumi.Int(4),
 		Environment: &lambda.FunctionEnvironmentArgs{Variables: pulumi.StringMap{"BRIDGE_TOKEN": bridgeToken, "SERVICE_ARN": pulumi.String(arn(in.region, in.accountID, "ecs", "service/"+clusterName+"/"+serviceName)), "PUBLIC_HOST": pulumi.String(in.publicDomain)}},
 	})
 	if err != nil {

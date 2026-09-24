@@ -33,6 +33,7 @@ func TestValidateInputsFailsClosed(t *testing.T) {
 			in.albListenerARN = "arn:aws:elasticloadbalancing:us-west-2:999999999999:listener/app/shared/abc/def"
 		}},
 		{"duplicate priorities", func(in *inputs) { in.appRulePriority = in.wakeRulePriority }},
+		{"app rule shadows wake path", func(in *inputs) { in.wakeRulePriority, in.appRulePriority = 43001, 43000 }},
 		{"uppercase public host", func(in *inputs) { in.publicDomain = "Ferro.example.test" }},
 		{"missing ALB DNS name", func(in *inputs) { in.albDNSName = "" }},
 	}
@@ -82,6 +83,85 @@ func TestPolicyScopeAndTaskDefinition(t *testing.T) {
 	}
 	if len(containers[0].Secrets) != 2 || containers[0].Secrets[0]["valueFrom"] != "mcp-secret-arn" || len(containers[0].MountPoints) != 2 {
 		t.Fatalf("container secret injection or writable mounts missing: %#v", containers[0])
+	}
+}
+
+func TestAWSConditionKeysAndTrustBoundaries(t *testing.T) {
+	efs, err := efsClientPolicy("arn:aws:elasticfilesystem:us-west-2:123456789012:file-system/fs-123", "arn:aws:elasticfilesystem:us-west-2:123456789012:access-point/fsap-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var efsPolicy struct {
+		Statement []policyStatement
+	}
+	if err := json.Unmarshal([]byte(efs), &efsPolicy); err != nil {
+		t.Fatal(err)
+	}
+	condition := efsPolicy.Statement[0].Condition
+	if condition["Bool"]["aws:SecureTransport"] != "true" || condition["StringEquals"]["elasticfilesystem:AccessPointArn"] == "" {
+		t.Fatalf("EFS policy missing supported TLS/access-point conditions: %#v", condition)
+	}
+	if _, exists := condition["StringEquals"]["elasticfilesystem:EncryptedInTransit"]; exists {
+		t.Fatal("EFS policy contains unsupported EncryptedInTransit condition key")
+	}
+
+	ecsTrust, err := trustPolicy("ecs-tasks.amazonaws.com", "us-west-2", "123456789012")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var trust struct {
+		Statement []struct {
+			Condition map[string]map[string]string
+		}
+	}
+	if err := json.Unmarshal([]byte(ecsTrust), &trust); err != nil {
+		t.Fatal(err)
+	}
+	if trust.Statement[0].Condition["ArnLike"]["aws:SourceArn"] != "arn:aws:ecs:us-west-2:123456789012:*" {
+		t.Fatalf("ECS trust has unsupported or overnarrow SourceArn: %#v", trust.Statement[0].Condition)
+	}
+	lambdaTrust, err := trustPolicy("lambda.amazonaws.com", "us-west-2", "123456789012")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trust = struct {
+		Statement []struct {
+			Condition map[string]map[string]string
+		}
+	}{}
+	if err := json.Unmarshal([]byte(lambdaTrust), &trust); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := trust.Statement[0].Condition["ArnLike"]; exists {
+		t.Fatalf("Lambda execution-role trust must not require SourceArn: %#v", trust.Statement[0].Condition)
+	}
+}
+
+func TestEFSResourcePolicyEnforcesOnlyTaskRoleAccess(t *testing.T) {
+	policyJSON, err := efsFileSystemPolicy("fs-arn", "ap-arn", "task-role-arn")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var policy struct {
+		Statement []map[string]any
+	}
+	if err := json.Unmarshal([]byte(policyJSON), &policy); err != nil {
+		t.Fatal(err)
+	}
+	bySid := make(map[string]map[string]any)
+	for _, statement := range policy.Statement {
+		bySid[statement["Sid"].(string)] = statement
+	}
+	for _, sid := range []string{"DenyInsecureTransport", "DenyUnexpectedAccessPoint", "DenyUnexpectedPrincipal", "AllowTaskRoleViaAccessPointTLS"} {
+		if bySid[sid] == nil {
+			t.Fatalf("missing filesystem policy statement %q: %#v", sid, policy.Statement)
+		}
+	}
+	if bySid["DenyUnexpectedPrincipal"]["NotPrincipal"].(map[string]any)["AWS"] != "task-role-arn" {
+		t.Fatalf("filesystem policy does not deny other principals: %#v", bySid["DenyUnexpectedPrincipal"])
+	}
+	if bySid["AllowTaskRoleViaAccessPointTLS"]["Principal"].(map[string]any)["AWS"] != "task-role-arn" {
+		t.Fatalf("filesystem policy allow is not scoped to task role: %#v", bySid["AllowTaskRoleViaAccessPointTLS"])
 	}
 }
 

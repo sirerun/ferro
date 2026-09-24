@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -24,7 +25,8 @@ func NewHandler(token, serviceARN, publicHost string, updater ServiceUpdater) (H
 	if len(token) < 32 {
 		return nil, fmt.Errorf("wake bearer token must contain at least 32 bytes")
 	}
-	if !strings.HasPrefix(serviceARN, "arn:aws:ecs:") || strings.ContainsAny(serviceARN, "*?\r\n") || publicHost == "" || strings.ContainsAny(publicHost, "/:@*?\r\n ") || updater == nil {
+	cluster, err := clusterFromServiceARN(serviceARN)
+	if err != nil || publicHost == "" || strings.ContainsAny(publicHost, "/:@*?\r\n ") || updater == nil {
 		return nil, fmt.Errorf("exact ECS service ARN, host, and updater are required")
 	}
 	return func(ctx context.Context, request events.ALBTargetGroupRequest) (events.ALBTargetGroupResponse, error) {
@@ -51,12 +53,34 @@ func NewHandler(token, serviceARN, publicHost string, updater ServiceUpdater) (H
 		if !authorizationOK || !ok || subtle.ConstantTimeCompare([]byte(provided), []byte(token)) != 1 {
 			return response(401, `{"error":"unauthorized"}`), nil
 		}
-		_, err := updater.UpdateService(ctx, &ecs.UpdateServiceInput{Service: aws.String(serviceARN), DesiredCount: aws.Int32(1)})
+		callCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		defer cancel()
+		_, err := updater.UpdateService(callCtx, &ecs.UpdateServiceInput{Cluster: aws.String(cluster), Service: aws.String(serviceARN), DesiredCount: aws.Int32(1)})
 		if err != nil {
 			return response(502, `{"error":"wake request failed"}`), nil
 		}
 		return response(202, `{"status":"requested"}`), nil
 	}, nil
+}
+
+func clusterFromServiceARN(serviceARN string) (string, error) {
+	if strings.ContainsAny(serviceARN, "*?\\\r\n") {
+		return "", fmt.Errorf("service ARN cannot contain wildcard or control characters")
+	}
+	parts := strings.Split(serviceARN, ":")
+	if len(parts) != 6 || parts[0] != "arn" || parts[1] == "" || parts[2] != "ecs" || parts[3] == "" || len(parts[4]) != 12 {
+		return "", fmt.Errorf("service ARN must identify an ECS service in an account and region")
+	}
+	for _, digit := range parts[4] {
+		if digit < '0' || digit > '9' {
+			return "", fmt.Errorf("service ARN account must contain 12 digits")
+		}
+	}
+	resource := strings.Split(parts[5], "/")
+	if len(resource) != 3 || resource[0] != "service" || resource[1] == "" || resource[2] == "" {
+		return "", fmt.Errorf("service ARN must include one cluster and service name")
+	}
+	return resource[1], nil
 }
 
 func singleHeader(headers map[string]string, name string) (string, bool) {

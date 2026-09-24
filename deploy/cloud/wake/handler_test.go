@@ -4,32 +4,40 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
 )
 
 type updateRecorder struct {
-	calls   int
-	service string
-	desired int32
-	err     error
+	calls       int
+	cluster     string
+	service     string
+	desired     int32
+	err         error
+	deadline    time.Time
+	hasDeadline bool
 }
 
-func (r *updateRecorder) UpdateService(_ context.Context, input *ecs.UpdateServiceInput, _ ...func(*ecs.Options)) (*ecs.UpdateServiceOutput, error) {
+func (r *updateRecorder) UpdateService(ctx context.Context, input *ecs.UpdateServiceInput, _ ...func(*ecs.Options)) (*ecs.UpdateServiceOutput, error) {
 	r.calls++
+	if input.Cluster != nil {
+		r.cluster = *input.Cluster
+	}
 	if input.Service != nil {
 		r.service = *input.Service
 	}
 	if input.DesiredCount != nil {
 		r.desired = *input.DesiredCount
 	}
+	r.deadline, r.hasDeadline = ctx.Deadline()
 	return &ecs.UpdateServiceOutput{}, r.err
 }
 
 func TestWakeHandlerAuthenticatesAndTargetsOnlyConfiguredService(t *testing.T) {
 	const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	const serviceARN = "arn:aws:ecs:us-west-2:123456789012:service/cluster/service"
+	const serviceARN = "arn:aws:ecs:us-west-2:123456789012:service/ferro-hosted/ferro-hosted"
 	updater := &updateRecorder{}
 	handler, err := NewHandler(token, serviceARN, "ferro.example", updater)
 	if err != nil {
@@ -43,8 +51,28 @@ func TestWakeHandlerAuthenticatesAndTargetsOnlyConfiguredService(t *testing.T) {
 	if response.StatusCode != 202 || response.Body != `{"status":"requested"}` {
 		t.Fatalf("response=%+v", response)
 	}
-	if updater.calls != 1 || updater.service != serviceARN || updater.desired != 1 {
-		t.Fatalf("update calls=%d service=%q desired=%d", updater.calls, updater.service, updater.desired)
+	if updater.calls != 1 || updater.cluster != "ferro-hosted" || updater.service != serviceARN || updater.desired != 1 {
+		t.Fatalf("update calls=%d cluster=%q service=%q desired=%d", updater.calls, updater.cluster, updater.service, updater.desired)
+	}
+	if !updater.hasDeadline {
+		t.Fatal("UpdateService context has no bounded deadline")
+	}
+	if remaining := time.Until(updater.deadline); remaining <= 9*time.Second || remaining > 10*time.Second {
+		t.Fatalf("UpdateService deadline remaining=%s, want at most 10s and near the full budget", remaining)
+	}
+}
+
+func TestNewHandlerRejectsMalformedServiceARN(t *testing.T) {
+	const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	for _, arn := range []string{
+		"arn:aws:ecs:us-west-2:123456789012:service/ferro-hosted",
+		"arn:aws:ecs:us-west-2:123456789012:service//ferro-hosted",
+		"arn:aws:ecs:us-west-2:123456789012:service/ferro-hosted/name/extra",
+		"arn:aws:ecs:us-west-2:123456789012:service/ferro-hosted/*",
+	} {
+		if _, err := NewHandler(token, arn, "ferro.example", &updateRecorder{}); err == nil {
+			t.Errorf("NewHandler accepted malformed service ARN %q", arn)
+		}
 	}
 }
 
