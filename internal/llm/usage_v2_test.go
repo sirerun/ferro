@@ -2,7 +2,6 @@ package llm
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -200,7 +199,7 @@ func TestUsageV2_CostRoundingAndOverflow(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.cost, func(t *testing.T) {
 			usage := core.RequestUsageV2{}
-			err := decodeMetadataUsage(&usage, &metadataUsage{Cost: numberPtr(tc.cost)}, true)
+			err := decodeMetadataUsage(&usage, &metadataUsage{Cost: []byte(tc.cost)}, true)
 			if (err == nil) != tc.ok {
 				t.Fatalf("err=%v", err)
 			}
@@ -208,6 +207,32 @@ func TestUsageV2_CostRoundingAndOverflow(t *testing.T) {
 				t.Fatalf("cost=%v want %d", usage.BilledMicroUSD, tc.want)
 			}
 		})
+	}
+}
+
+func TestUsageV2_CostOptOutIgnoresCostShape(t *testing.T) {
+	for _, cost := range []string{`{"amount":0.02,"currency":"credits"}`, `"not-a-decimal"`} {
+		t.Run(cost, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, `{"choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":7,"completion_tokens":2,"cost":%s}}`, cost)
+			}))
+			defer srv.Close()
+			got, err := (&OpenAICompatible{BaseURL: srv.URL}).CompleteWithUsage(context.Background(), "s", "u")
+			if err != nil || got.Text != "ok" || got.Usage.InputTokens == nil || *got.Usage.InputTokens != 7 || got.Usage.OutputTokens == nil || *got.Usage.OutputTokens != 2 || got.Usage.BilledMicroUSD != nil {
+				t.Fatalf("cost opt-out did not preserve token completion: %+v err=%v", got, err)
+			}
+		})
+	}
+}
+
+func TestUsageV2_InvalidOptInCostRetainsTokens(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"id":"resp","model":"m","choices":[{"message":{"content":"ok"}}],"usage":{"prompt_tokens":7,"completion_tokens":2,"cost":{"amount":0.02,"currency":"credits"}}}`)
+	}))
+	defer srv.Close()
+	got, err := (&OpenAICompatible{BaseURL: srv.URL, UsageCostCurrency: "USD"}).CompleteWithUsage(context.Background(), "s", "u")
+	if err == nil || got.Text != "" || got.Usage.InputTokens == nil || *got.Usage.InputTokens != 7 || got.Usage.OutputTokens == nil || *got.Usage.OutputTokens != 2 {
+		t.Fatalf("invalid opted-in cost did not fail with valid tokens retained: %+v err=%v", got, err)
 	}
 }
 
@@ -228,4 +253,3 @@ func sameInt(a, b *int64) bool {
 	}
 	return *a == *b
 }
-func numberPtr(s string) *json.Number { n := json.Number(s); return &n }

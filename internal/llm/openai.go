@@ -79,7 +79,7 @@ type metadataUsage struct {
 	CompletionDetails *struct {
 		ReasoningTokens *json.Number `json:"reasoning_tokens"`
 	} `json:"completion_tokens_details"`
-	Cost *json.Number `json:"cost"`
+	Cost json.RawMessage `json:"cost"`
 }
 
 // CompleteWithUsage makes one metadata-bearing provider attempt. Unlike the
@@ -235,10 +235,14 @@ func decodeMetadataUsage(dst *core.RequestUsageV2, u *metadataUsage, parseCost b
 		copy := v
 		*f.dst = &copy
 	}
-	if !parseCost || u.Cost == nil {
+	if !parseCost || len(u.Cost) == 0 || bytes.Equal(bytes.TrimSpace(u.Cost), []byte("null")) {
 		return nil
 	}
-	r, ok := boundedDecimalRat(u.Cost.String())
+	var cost json.Number
+	if err := json.Unmarshal(u.Cost, &cost); err != nil {
+		return fmt.Errorf("llm: invalid provider usage cost")
+	}
+	r, ok := boundedDecimalRat(cost.String())
 	if !ok || r.Sign() < 0 {
 		return fmt.Errorf("llm: invalid provider usage cost")
 	}
