@@ -1,0 +1,15 @@
+# Allow only build inputs. Private scratch, IaC state and local configuration
+# must never enter an image layer or the builder context.
+**
+!go.mod
+!go.sum
+!*.go
+!internal/
+!internal/**
+!cmd/
+!cmd/ferro-cloud/
+!cmd/ferro-cloud/**
+!deploy/
+!deploy/container/
+!deploy/container/Dockerfile
+**/*_test.go

@@ -149,9 +149,11 @@ $('connection-form').onsubmit = async event => {
     const token = $('token').value.trim() || connection?.token;
     if (!token) throw new Error('Paste the pairing token provided for this bridge endpoint.');
     const next = {base, token, tabId:tab.id};
+    notice(base === HOSTED_BRIDGE_BASE ? 'Starting hosted service, then connecting this tab…' : 'Connecting this tab…');
     let reply = await chrome.runtime.sendMessage({type:'ferro-connect', connection:next});
     if (reply?.requiresConfirmation) {
       if (!confirm(reply.remote ? 'This pairing belongs to another browser. Continue only if you intend to connect after its owner disconnects.' : 'Disconnect the current tab and connect this one?')) { notice('Connection unchanged.'); return; }
+      notice(base === HOSTED_BRIDGE_BASE ? 'Starting hosted service, then switching tabs…' : 'Switching tabs…');
       reply = await chrome.runtime.sendMessage({type:'ferro-connect', connection:next, confirmDisconnectTab:reply.pairedTab});
       if (reply?.requiresConfirmation) throw new Error('The paired tab changed. Click Connect current tab again.');
     }
@@ -215,6 +217,7 @@ $('export').onclick = () => {
 $('stop').onclick = async () => {
   $('stop').disabled=true;
   notice('Stopping. An action already dispatched may have completed.');
+  await chrome.runtime.sendMessage({type:'ferro-cancel-connection'}).catch(()=>{});
   try { await api('cancel'); } catch (_) { /* abort the request even when transport is down */ }
   request?.abort();
 };

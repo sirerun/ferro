@@ -244,9 +244,11 @@ and direct browser tools retain their interfaces. One tab executes at a time.
 `cmd/ferro-cloud` adds a private single-owner HTTPS deployment option for
 `ferro.sire.run`, with separate MCP and extension credentials. The Chrome
 extension supports its `/bridge` endpoint as well as localhost. See the
-[private pilot deployment guide](deploy/private-pilot/README.md). Deployment
-requires provisioned infrastructure and DNS; this is not a public signup,
-billing or multi-tenant service.
+[AWS container deployment guide](deploy/cloud/README.md) and
+[qualification plan](docs/plan-private-container-pilot.md). Connect wakes the
+service; it sleeps after the last tab disconnects and active work drains. The
+private pilot is still undergoing live deployment qualification. It does not
+provide public signup, billing or multi-tenant access.
 
 ## MCP server
 
