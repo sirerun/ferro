@@ -89,7 +89,11 @@ func TestRequestV2CanonicalOriginsAndStartURL(t *testing.T) {
 	if len(r.Policy.Origins) != 1 || r.Policy.Origins[0] != "https://[2001:db8::1]" {
 		t.Fatalf("unexpected canonical origins: %#v", r.Policy.Origins)
 	}
-	raw = strings.Replace(raw, `"2001:DB8::1]:443/path`, `"2001:DB8::2]:443/path`, 1)
+	mutated := strings.Replace(raw, `"start_url":"https://[2001:DB8::1]:443/path?q=1"`, `"start_url":"https://[::1]:443/path?q=1"`, 1)
+	if mutated == raw {
+		t.Fatal("failed to mutate start_url")
+	}
+	raw = mutated
 	if _, err = ValidateTaskRequestV2([]byte(raw)); err == nil {
 		t.Fatal("origin mismatch accepted")
 	}
