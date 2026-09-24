@@ -3,7 +3,9 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"sync"
@@ -27,9 +29,11 @@ type Leader struct {
 	// the moment that one call's context ended.
 	rootCtx context.Context
 
-	mu       sync.Mutex
-	lockFile *os.File // held only while this process is the owner
-	owner    *Owner   // non-nil only while this process is the owner
+	mu            sync.Mutex
+	lockFile      *os.File // held only while this process is the owner
+	owner         *Owner   // non-nil only while this process is the owner
+	stopRequested chan struct{}
+	stopOnce      sync.Once
 }
 
 // NewLeader attempts to become the owner by flocking cfg.LockPath(); if the
@@ -39,7 +43,7 @@ func NewLeader(ctx context.Context, cfg Config) (*Leader, error) {
 	if err := os.MkdirAll(cfg.Home, 0o700); err != nil {
 		return nil, fmt.Errorf("create %s: %w", cfg.Home, err)
 	}
-	l := &Leader{cfg: cfg, rootCtx: ctx}
+	l := &Leader{cfg: cfg, rootCtx: ctx, stopRequested: make(chan struct{})}
 	if _, _, err := l.tryBecomeOwner(); err != nil {
 		return nil, err
 	}
@@ -55,6 +59,10 @@ func (l *Leader) Owner() *Owner {
 	defer l.mu.Unlock()
 	return l.owner
 }
+
+// StopRequested forwards an explicit stop request from whichever Owner this
+// process currently holds, including one acquired later through promotion.
+func (l *Leader) StopRequested() <-chan struct{} { return l.stopRequested }
 
 // tryBecomeOwner attempts the exclusive flock; on success it constructs a
 // real Owner (launching Chrome) and starts serving the socket for future
@@ -97,7 +105,15 @@ func (l *Leader) tryBecomeOwner() (*Owner, bool, error) {
 	l.lockFile = f
 	l.owner = o
 	l.mu.Unlock()
+	l.watchOwner(o)
 	return o, true, nil
+}
+
+func (l *Leader) watchOwner(o *Owner) {
+	go func() {
+		<-o.StopRequested()
+		l.stopOnce.Do(func() { close(l.stopRequested) })
+	}()
 }
 
 // Call implements caller: it dispatches directly if this process is the
@@ -115,6 +131,13 @@ func (l *Leader) Call(ctx context.Context, tool string, args json.RawMessage) (s
 		return text, isError, nil
 	}
 
+	if ctx.Err() != nil {
+		return "", false, ctx.Err()
+	}
+	var op *net.OpError
+	if !errors.As(err, &op) || op.Op != "dial" {
+		return "", false, fmt.Errorf("owner connection lost; action outcome uncertain, inspect before retrying: %w", err)
+	}
 	o, promoted, perr := l.tryBecomeOwner()
 	if perr != nil {
 		return "", false, fmt.Errorf("relay to owner failed (%v) and could not take over (%v)", err, perr)
@@ -142,7 +165,7 @@ func (l *Leader) Close() error {
 	err := o.Close()
 	_ = os.Remove(l.cfg.SocketPath())
 	_ = releaseLock(f)
-	_ = os.Remove(l.cfg.LockPath())
+	// Keep the lock inode: unlinking it lets a racing owner lock a different file.
 	return err
 }
 
@@ -183,16 +206,29 @@ func writePID(f *os.File) error {
 // response. Used both by Leader.Call (shim relay) and by the status/stop
 // CLI commands (T11.7), which never attempt promotion.
 func relayCall(ctx context.Context, sockPath, tool string, args json.RawMessage) (string, bool, error) {
-	conn, err := net.Dial("unix", sockPath)
+	conn, err := (&net.Dialer{}).DialContext(ctx, "unix", sockPath)
 	if err != nil {
 		return "", false, fmt.Errorf("dial owner socket %s: %w", sockPath, err)
 	}
 	defer func() { _ = conn.Close() }()
+	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
+	defer stop()
 	if dl, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(dl)
 	}
-	if err := json.NewEncoder(conn).Encode(relayRequest{Tool: tool, Args: args}); err != nil {
-		return "", false, fmt.Errorf("send relay request: %w", err)
+	request, err := json.Marshal(relayRequest{Tool: tool, Args: args, Client: clientIdentity(ctx)})
+	if err != nil {
+		return "", false, fmt.Errorf("encode relay request: %w", err)
+	}
+	for len(request) > 0 {
+		n, writeErr := conn.Write(request)
+		if writeErr != nil {
+			return "", false, fmt.Errorf("send relay request: %w", writeErr)
+		}
+		if n == 0 {
+			return "", false, fmt.Errorf("send relay request: %w", io.ErrShortWrite)
+		}
+		request = request[n:]
 	}
 	var resp relayResponse
 	if err := json.NewDecoder(conn).Decode(&resp); err != nil {

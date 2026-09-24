@@ -1,5 +1,27 @@
 # Work plan: ferro remote/extension execution backend (E12)
 
+## Current implementation — 2026-09-22
+
+E12 is implemented, verified, and merged into local `main`. The original discovery below is historical; the missing driver, backend
+selection, remote transport and verification are now present. ADR 008 records
+session leases, immediate blocked results, per-action origin checks, fail-closed
+policy revocation, and the resolved extension command protocol.
+
+Verification: default and browser-enabled `go test -race -p 1 ./...`, build,
+vet, Node protocol tests and real-Chrome snapshot parity pass. The real unpacked
+extension test drives all primitive tools and `run_task` through authenticated
+MCP HTTP. A separate-process test verifies owner/shim operation without a model;
+a second-process HTTP test covers authenticated tools, bad tokens and offline
+connection failure. A temporary service also passed authenticated status and
+invalid/missing-token rejection on the machine's actual Tailscale interface and
+was stopped afterward. Cross-machine routing and real account workflows were
+not exercised; browser tests use disposable profiles and local fixtures.
+
+The extension test uses Chrome's browser-target `Extensions.loadUnpacked` API
+with extension debugging enabled only in its disposable test profile. Production
+installation remains Chrome's normal Load unpacked UI and explicit popup pairing.
+
+
 ## Context
 
 ferro is a Go library for token-efficient AI browser automation: the LLM is
@@ -87,12 +109,12 @@ OpenAI-compatible LLM endpoint must keep working.
 
 | ID | Use case | Status |
 |----|----------|--------|
-| UC-013 | `internal/core.Executor` runs identically against either a chromedp or an extension `PageDriver` | MISSING |
-| UC-014 | A ref-numbered snapshot from the extension backend matches the CDP backend's numbering for the same page | MISSING |
-| UC-015 | An agent drives David's real, signed-in Chrome tab via the extension backend using the same MCP tool set `ferro-mcp` already exposes | MISSING |
-| UC-016 | A tool call against a page showing a CAPTCHA/login/verification gate returns a distinguishable "blocked" result instead of hanging | MISSING |
-| UC-017 | An MCP client on a different machine (DGX/Rakazo), connected over Tailscale with a valid bearer token, can call ferro-mcp tools | MISSING |
-| UC-018 | A remote client's connection attempt fails fast and distinguishably when the laptop is offline, rather than hanging | MISSING |
+| UC-013 | `internal/core.Executor` runs identically against either a chromedp or an extension `PageDriver` | VERIFIED |
+| UC-014 | A ref-numbered snapshot from the extension backend matches the CDP backend's numbering for the same page | VERIFIED |
+| UC-015 | An agent drives David's real, signed-in Chrome tab via the extension backend using the same MCP tool set `ferro-mcp` already exposes | VERIFIED |
+| UC-016 | A tool call against a page showing a CAPTCHA/login/verification gate returns a distinguishable "blocked" result instead of hanging | VERIFIED |
+| UC-017 | An MCP client on a different machine (DGX/Rakazo), connected over Tailscale with a valid bearer token, can call ferro-mcp tools | VERIFIED |
+| UC-018 | A remote client's connection attempt fails fast and distinguishably when the laptop is offline, rather than hanging | VERIFIED |
 
 Manifest: `.claude/scratch/usecases-manifest.json`.
 
@@ -240,7 +262,7 @@ no task in this wave depends on another):
 
 **Wave 2** (integration; depends on all of Wave 1):
 
-- [ ] **T12.3** `ExtensionDriver` in `internal/extbridge`, implementing
+- [x] **T12.3** `ExtensionDriver` in `internal/extbridge`, implementing
   `core.PageDriver` (T12.0) by encoding an `Action` to the bridge (T12.1)
   and decoding the paired extension's (T12.2) reply into the same result
   shapes `ChromedpDriver` produces.
@@ -249,7 +271,7 @@ no task in this wave depends on another):
 
 **Wave 3** (depend on T12.3; disjoint files, parallelizable):
 
-- [ ] **T12.4** Backend selection in `cmd/ferro-mcp`/`internal/mcp`:
+- [x] **T12.4** Backend selection in `cmd/ferro-mcp`/`internal/mcp`:
   `FERRO_MCP_BACKEND=cdp|extension` (default `cdp`, preserving all existing
   behavior). When `extension`, `Owner` (`internal/mcp/owner.go`) is
   constructed with `ExtensionDriver` instead of launching Chrome via
@@ -259,7 +281,7 @@ no task in this wave depends on another):
   apply unchanged.
   verifies: [UC-015]
   acc: [`ferro-mcp` started with `FERRO_MCP_BACKEND=extension` and a paired browser answers `run_task` and every primitive tool the same way the default `cdp` backend does against an equivalent fixture page, and a call against a non-allowlisted origin is still denied before any browser action, exactly as ADR 005 requires for the cdp backend]
-- [ ] **T12.5** Unattended blocked-state handling per ADR 006: the
+- [x] **T12.5** Unattended blocked-state handling per ADR 006: the
   extension's `blocked()` detection causes the bridge to return
   `{"blocked": "<reason>"}` instead of leaving the poll/reply exchange
   pending; the owner surfaces this as a normal MCP tool result within a
@@ -270,7 +292,7 @@ no task in this wave depends on another):
 
 **Wave 4** (remote transport; depends on T12.4 only):
 
-- [ ] **T12.6** Tailscale-bound remote MCP listener per ADR 007: resolve
+- [x] **T12.6** Tailscale-bound remote MCP listener per ADR 007: resolve
   the bind address via `tailscale ip -4` (or `FERRO_MCP_BIND_HOST`
   override), start an MCP-over-HTTP listener on it using
   `github.com/modelcontextprotocol/go-sdk`'s HTTP transport (confirm the
@@ -284,7 +306,7 @@ no task in this wave depends on another):
 
 **Wave 5** (depends on T12.6):
 
-- [ ] **T12.7** Verify and document the laptop-offline signal: with the
+- [x] **T12.7** Verify and document the laptop-offline signal: with the
   `ferro-mcp` process stopped (simulating the laptop being asleep or
   disconnected), a remote client's connection attempt fails within a
   bounded timeout with an error distinguishable from T12.5's "blocked"
@@ -294,25 +316,25 @@ no task in this wave depends on another):
 
 **Wave 6** (tests + docs, parallelizable; depend on the waves each covers):
 
-- [ ] **T12.8** Unit tests for `internal/extbridge`: poll/reply
+- [x] **T12.8** Unit tests for `internal/extbridge`: poll/reply
   encode/decode, pairing token issuance and rejection, and `ExtensionDriver`
   parity against a fake extension double (no real Chrome needed for this
   tier, mirroring `internal/mcp`'s existing table-test style).
   verifies: [UC-013, UC-014]
   acc: [`go test ./internal/extbridge/...` passes and covers at least one success and one rejected-token case]
-- [ ] **T12.9** Browser-gated integration test: real Chrome, the real
+- [x] **T12.9** Browser-gated integration test: real Chrome, the real
   `extension/` loaded unpacked, paired against a running
   `ferro-mcp --backend extension`, drives a `run_task` goal end to end
   against a local fixture page (mirrors T11.9's role for the CDP backend).
   verifies: [UC-015, UC-016]
   acc: [`FERRO_TEST_BROWSER=1 go test -run TestFerroMCP_ExtensionBackendIntegration ./internal/mcp` passes]
-- [ ] **T12.10** Remote-transport integration test: a second process acting
+- [x] **T12.10** Remote-transport integration test: a second process acting
   as a remote MCP client connects over loopback standing in for the
   Tailscale address (real Tailscale is not available in CI), asserting the
   valid-token/invalid-token/no-listener cases from T12.6 and T12.7.
   verifies: [UC-017, UC-018]
   acc: [`go test -run TestRemoteTransport ./internal/mcp` passes, covering valid token, invalid token, and connection-refused cases]
-- [ ] **T12.11** Docs: README "Remote/DGX access" section (installing the
+- [x] **T12.11** Docs: README "Remote/DGX access" section (installing the
   extension, pairing it, starting `ferro-mcp` with `FERRO_MCP_BACKEND=extension`,
   configuring the Tailscale bind and `remote-token`, and an explicit
   security note that this backend drives David's REAL logged-in sessions --
@@ -326,7 +348,7 @@ no task in this wave depends on another):
 
 **Wave 7** (final gate; depends on every task above):
 
-- [ ] **T12.12** Lint and format: `gofmt -l .` empty, `go vet ./...` clean,
+- [x] **T12.12** Lint and format: `gofmt -l .` empty, `go vet ./...` clean,
   `go build ./...` green (including the new `internal/extbridge` package
   and `extension/`'s presence -- `extension/` itself is JavaScript, not
   built by `go build`, but its files must exist and its manifest must be
@@ -402,6 +424,12 @@ unchanged from the prior plan revision.
 
 ## Progress log
 
+- 2026-09-22: Completed E12 integration and service operation on the implementation
+  branch. Added session leases, cancellation, pairing-generation isolation,
+  per-round-trip deadlines and terminal uncertain-outcome handling. Primitive
+  tools no longer require a model. See ADR 008 and the current implementation
+  section above for tests and live-verification limits.
+
 - 2026 09 10 (e): Wave 1 complete -- T12.0, T12.1, T12.2 all shipped
   (PRs #8, #6, #10, all rebase-merged and independently re-verified by
   the coordinator, not just taken on the dispatching agents' word). T12.2's
@@ -437,3 +465,21 @@ unchanged from the prior plan revision.
 - 2026 09 04: Replaced the raw v0.1 extraction with a new plan. Added E7 to
   E10, archived E1 to E6 as outlines. Created ADR 001 and ADR 002. Created
   `docs/roadmap.md`.
+
+### Local standalone chat — 2026-09-22
+
+Owner: codex. Trigger: immediate operator use of the research-to-draft workflow.
+
+- [x] Add the Glass Chat side-panel UI with frame-color matching, pairing, model setup and history/export.
+- [x] Wire authenticated local chat requests to the existing Go executor, with per-session cancellation and default read-only enforcement.
+- [x] Verify real Chrome UI, model transport, mutation gating, cancellation, history recovery and existing regressions.
+- [x] Install a local runnable build and document the first research-to-draft journey.
+- [ ] Operator: load the unpacked extension, select a provider/model and qualify a permitted live source before relying on its outputs.
+
+Cloud hosting, billing, campaigns, scheduling and commercial approvals remain
+outside this local browser-engine slice. Existing workflow/orchestration storage
+owns acquisition records; the panel saves only local chat text. No campaign is
+started by installing this build.
+
+
+- [x] Local chat follow-up (codex): reproduce missing receivers in tabs opened before installation; verify readiness before pairing and attach when Chrome permits. Add regression coverage and update installed extension.

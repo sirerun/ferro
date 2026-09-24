@@ -54,9 +54,30 @@ type Task struct {
 // Run executes the task, returning the result plus RunMetrics describing
 // what it cost (LLM calls, repairs, replans, estimated tokens).
 func (r *Runner) Run(ctx context.Context, execCtx BrowserContext, t Task) (result any, m RunMetrics, err error) {
+	// Bridge caller cancellation into the CDP context after Acquire has
+	// already launched the tab (see BrowserContext.CDP).
+	runCtx, cancel := context.WithCancel(execCtx.CDP())
+	defer cancel()
+	stop := context.AfterFunc(ctx, cancel)
+	defer stop()
+	return r.run(ctx, runCtx, execCtx.SnapshotMaxElements(), t, nil)
+}
+
+// RunDriver executes against a non-CDP driver using the caller lifetime.
+func (r *Runner) RunDriver(ctx context.Context, driver PageDriver, maxElements int, t Task) (any, RunMetrics, error) {
+	if driver == nil {
+		return nil, RunMetrics{}, fmt.Errorf("page driver is required")
+	}
+	return r.run(ctx, ctx, maxElements, t, driver)
+}
+
+func (r *Runner) run(ctx, runCtx context.Context, maxElements int, t Task, driver PageDriver) (result any, m RunMetrics, err error) {
 	r.init.Do(r.defaults)
 	// Keep all execution state local; only the synchronized cache is shared.
 	local := &Runner{LLM: r.LLM, MaxRepairs: r.MaxRepairs, Executor: NewExecutor(r.Executor.wait).WithCache(r.Executor.cache).WithDriver(r.Executor.driver)}
+	if driver != nil {
+		local.Executor.WithDriver(driver)
+	}
 	local.Executor.metrics = &m
 	start := time.Now()
 	cache := local.Executor.cache
@@ -96,12 +117,6 @@ func (r *Runner) Run(ctx context.Context, execCtx BrowserContext, t Task) (resul
 	if err = ctx.Err(); err != nil {
 		return nil, m, err
 	}
-	// Bridge caller cancellation into the CDP context after Acquire has
-	// already launched the tab (see BrowserContext.CDP).
-	runCtx, cancel := context.WithCancel(execCtx.CDP())
-	defer cancel()
-	stop := context.AfterFunc(ctx, cancel)
-	defer stop()
 	if t.StartURL != "" {
 		if err = func() error {
 			_, e := local.Executor.executeAction(runCtx, Action{Kind: KindGoto, URL: t.StartURL}, nil)
@@ -111,7 +126,7 @@ func (r *Runner) Run(ctx context.Context, execCtx BrowserContext, t Task) (resul
 		}
 	}
 	for {
-		snap, snapErr := TakeSnapshot(runCtx, execCtx.SnapshotMaxElements())
+		snap, snapErr := local.Executor.driver.Snapshot(runCtx, maxElements)
 		if snapErr != nil {
 			return nil, m, snapErr
 		}
@@ -134,7 +149,7 @@ func (r *Runner) Run(ctx context.Context, execCtx BrowserContext, t Task) (resul
 				return nil, m, fmt.Errorf("planning: %w", err)
 			}
 		}
-		result, ex, rerr := local.executeWithRepairs(ctx, runCtx, plan, snap, execCtx.SnapshotMaxElements(), &m)
+		result, ex, rerr := local.executeWithRepairs(ctx, runCtx, plan, snap, maxElements, &m)
 		if rerr == nil {
 			result, err = shapeResult(result, ex)
 			if err == nil && len(t.Schema) > 0 {
@@ -296,6 +311,11 @@ func (r *Runner) executeWithRepairs(ctx context.Context, cdpCtx context.Context,
 			return nil, extracted, rerr
 		}
 
+		var stopped *StopError
+		if errors.As(rerr, &stopped) || ctx.Err() != nil {
+			return nil, extracted, rerr
+		}
+
 		if r.MaxRepairs < 0 || repairs[rerr.StepIndex] >= r.MaxRepairs {
 			return nil, extracted, rerr
 		}
@@ -306,10 +326,10 @@ func (r *Runner) executeWithRepairs(ctx context.Context, cdpCtx context.Context,
 
 		// Fresh snapshot for the repair decision: cdpCtx again, not the
 		// plain caller ctx (see BrowserContext.CDP).
-		fresh, err := TakeSnapshot(cdpCtx, maxElements)
+		fresh, err := r.Executor.driver.Snapshot(cdpCtx, maxElements)
 		if err != nil {
 			return nil, extracted, &RunError{StepIndex: rerr.StepIndex, Action: rerr.Action,
-				Err: fmt.Errorf("repair snapshot: %v (orig: %v)", err, rerr.Err)}
+				Err: fmt.Errorf("repair snapshot: %w (orig: %v)", err, rerr.Err)}
 		}
 
 		patched, ok, err := r.repairStep(ctx, rerr, snap, fresh, m)

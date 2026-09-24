@@ -167,3 +167,20 @@ func (r *Runner) RunOn(ctx context.Context, bctx BrowserContext, t Task) (any, R
 func RunOn(ctx context.Context, bctx BrowserContext, client LLMClient, t Task, opts ...Option) (any, RunMetrics, error) {
 	return NewRunner(client, opts...).RunOn(ctx, bctx, t)
 }
+
+// PageDriver supplies browser operations without requiring a CDP context.
+type PageDriver = core.PageDriver
+
+// RunDriver runs a task against a caller-owned driver (for example a Chrome extension).
+func (r *Runner) RunDriver(ctx context.Context, driver PageDriver, maxElements int, t Task) (any, RunMetrics, error) {
+	return r.inner.RunDriver(ctx, driver, maxElements, t)
+}
+
+// Snapshot is the numbered page representation returned by a PageDriver.
+type Snapshot = core.Snapshot
+
+// Element is one visible item in a Snapshot.
+type Element = core.Element
+
+// StopError indicates an action that must not be automatically repaired/repeated.
+type StopError = core.StopError

@@ -13,10 +13,10 @@ import (
 	"github.com/dndungu/ferro/internal/core"
 )
 
-// nextResponse is GET /next's 200 body: {"id": "...", "action": <core.Action JSON>}.
+// nextResponse is GET /next's 200 body: {"id": "...", "action": <Command JSON>}.
 type nextResponse struct {
-	ID     string      `json:"id"`
-	Action core.Action `json:"action"`
+	ID     string  `json:"id"`
+	Action Command `json:"action"`
 }
 
 // replyRequest is POST /reply's expected body, per ADR 006 decision #2.
@@ -25,6 +25,8 @@ type replyRequest struct {
 	Snapshot *core.Snapshot `json:"snapshot,omitempty"`
 	Result   any            `json:"result,omitempty"`
 	Error    string         `json:"error,omitempty"`
+	Code     string         `json:"code,omitempty"`
+	Blocked  string         `json:"blocked,omitempty"`
 }
 
 // Start binds addr (e.g. "127.0.0.1:0" for an OS-assigned ephemeral port —
@@ -33,6 +35,10 @@ type replyRequest struct {
 // listener is bound, so a caller that immediately hands the bridge's Addr
 // to another process won't race the accept loop starting up.
 func (b *Bridge) Start(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
+		return fmt.Errorf("extension bridge must bind a loopback IP")
+	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", addr, err)
@@ -40,9 +46,22 @@ func (b *Bridge) Start(addr string) error {
 	b.ln = ln
 
 	mux := http.NewServeMux()
+	if b.chat != nil {
+		mux.Handle("/chat/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			origin := r.Header.Get("Origin")
+			if r.Host != ln.Addr().String() || (origin != "" && !strings.HasPrefix(origin, "chrome-extension://")) || !b.authorized(r) {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			b.chat.ServeHTTP(w, r)
+		}))
+	}
 	mux.HandleFunc("/next", b.handleNext)
 	mux.HandleFunc("/reply", b.handleReply)
-	b.srv = &http.Server{Handler: mux}
+	mux.HandleFunc("/pair", b.handlePair)
+	mux.HandleFunc("/disconnect", b.handleDisconnect)
+	b.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second}
 
 	go func() {
 		_ = b.srv.Serve(ln) // http.ErrServerClosed on a clean Stop; nothing else to do with it
@@ -66,7 +85,11 @@ func (b *Bridge) Stop(ctx context.Context) error {
 	if b.srv == nil {
 		return nil
 	}
-	return b.srv.Shutdown(ctx)
+	err := b.srv.Shutdown(ctx)
+	if err != nil {
+		return b.srv.Close()
+	}
+	return nil
 }
 
 // handleNext serves GET /next: long-polls up to PollTimeout for a queued
@@ -89,19 +112,70 @@ func (b *Bridge) handleNext(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, TabIDHeader+" header is required", http.StatusBadRequest)
 		return
 	}
-	if err := b.pair(tabID); err != nil {
+	b.mu.Lock()
+	if err := b.pairLocked(tabID); err != nil {
+		b.mu.Unlock()
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-
-	select {
-	case pa := <-b.queue:
-		writeJSON(w, http.StatusOK, nextResponse{ID: pa.id, Action: pa.action})
-	case <-time.After(b.pollTimeout):
-		w.WriteHeader(http.StatusNoContent)
-	case <-r.Context().Done():
-		// Client disconnected (or the request's own context expired) while
-		// long-polling: nothing to write back to a gone connection.
+	generation := b.generation
+	b.activePolls[tabID]++
+	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		b.activePolls[tabID]--
+		if b.activePolls[tabID] <= 0 {
+			delete(b.activePolls, tabID)
+		}
+		b.mu.Unlock()
+	}()
+	timer := time.NewTimer(b.pollTimeout)
+	defer timer.Stop()
+	for {
+		select {
+		case pa := <-b.queue:
+			b.mu.Lock()
+			if generation != b.generation || b.pairedTab != tabID {
+				// A long poll from the previous tab may still be unwinding after
+				// disconnect. Preserve commands queued for the new generation.
+				requeued := false
+				if pa.generation == b.generation && b.pairedTab != "" {
+					select {
+					case b.queue <- pa:
+						requeued = true
+					default:
+					}
+				}
+				b.mu.Unlock()
+				if !requeued {
+					b.deliver(pa.id, Reply{Code: "pairing_changed", Error: "pairing changed before dispatch"})
+				}
+				http.Error(w, "pairing changed", 409)
+				return
+			}
+			if pa.generation != generation {
+				b.mu.Unlock()
+				b.deliver(pa.id, Reply{Code: "pairing_changed", Error: "pairing changed before dispatch"})
+				continue
+			}
+			_, waiting := b.waiting[pa.id]
+			live := waiting && pa.ctx.Err() == nil
+			if live {
+				pa.delivered = true
+				b.dispatched[pa.id] = true
+			}
+			b.mu.Unlock()
+			if !live {
+				continue
+			}
+			writeJSON(w, http.StatusOK, nextResponse{ID: pa.id, Action: pa.action})
+			return
+		case <-timer.C:
+			w.WriteHeader(http.StatusNoContent)
+			return
+		case <-r.Context().Done():
+			return
+		}
 	}
 }
 
@@ -121,7 +195,7 @@ func (b *Bridge) handleReply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body replyRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&body); err != nil {
 		http.Error(w, "invalid JSON body", http.StatusBadRequest)
 		return
 	}
@@ -130,7 +204,7 @@ func (b *Bridge) handleReply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reply := Reply{Snapshot: body.Snapshot, Result: body.Result, Error: body.Error}
+	reply := Reply{Snapshot: body.Snapshot, Result: body.Result, Error: body.Error, Code: body.Code, Blocked: body.Blocked}
 	if !b.deliver(body.ID, reply) {
 		http.Error(w, fmt.Sprintf("unknown or already-replied id %q", body.ID), http.StatusNotFound)
 		return
@@ -154,4 +228,53 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func (b *Bridge) handlePair(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	if !b.authorized(r) {
+		http.Error(w, "unauthorized", 401)
+		return
+	}
+	id := r.Header.Get(TabIDHeader)
+	if id == "" {
+		http.Error(w, "missing tab id", 400)
+		return
+	}
+	if err := b.pairExplicit(id); err != nil {
+		http.Error(w, err.Error(), 409)
+		return
+	}
+	w.WriteHeader(204)
+}
+func (b *Bridge) handleDisconnect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", 405)
+		return
+	}
+	if !b.authorized(r) {
+		http.Error(w, "unauthorized", 401)
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if id := r.Header.Get(TabIDHeader); id == "" || id != b.pairedTab {
+		http.Error(w, "wrong pairing", 409)
+		return
+	}
+	if b.hasDispatchedLocked() {
+		http.Error(w, "an action reply is still pending", http.StatusConflict)
+		return
+	}
+	b.pairedTab = ""
+	b.generation++
+	for id, ch := range b.waiting {
+		ch <- Reply{Code: "disconnected", Error: "extension disconnected; inspect the page before retrying"}
+		delete(b.waiting, id)
+		delete(b.dispatched, id)
+	}
+	w.WriteHeader(204)
 }

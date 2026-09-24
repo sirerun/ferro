@@ -173,3 +173,21 @@ just happens to be its first caller.
 See `docs/adr/004-mcp-server-shared-browser-daemon.md` (leader election, one
 shared tab serialized through a mutex, Unix-socket relay) and
 `docs/adr/005-mcp-origin-allowlist.md` (the deny-by-default per-origin gate).
+
+
+## Existing-profile browser service (2026-09-22)
+
+`Runner.RunDriver` routes both planning/repair snapshots and action execution
+through `core.PageDriver`. `internal/extbridge.ExtensionDriver` translates
+resolved driver operations into the extension's `op` protocol; the original CDP
+path remains supported. The extension service owner never launches a browser.
+`internal/mcp` retains the same tools across backends, adds per-session tab leases,
+and exposes authenticated Streamable HTTP on a verified local Tailscale IP.
+The extension poll/reply bridge stays loopback-only and has a separate credential.
+
+See `docs/adr/006-extension-execution-backend.md`,
+`docs/adr/007-tailscale-remote-transport.md`, and
+`docs/adr/008-browser-service-sessions.md` for protocol, ownership, cancellation,
+and the revised content-read authorization policy. Page data remains untrusted
+input. An allowlist is not a browser-network firewall or a substitute for agent
+instructions about authorized account actions.

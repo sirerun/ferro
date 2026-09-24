@@ -4,7 +4,22 @@ See `docs/devlog.md` for the pre-2026-09-10 investigation history (the
 original "Runtime hardening" claim and its correction) -- superseded here by
 the Shipped entries below, which reflect independently re-verified reality.
 
-## Shipped (E12, in progress)
+## Shipped — Chrome session service (2026-09-22)
+
+E12 is complete: extension driver, agent session
+leases, backend selection, authenticated Tailscale MCP HTTP, explicit blocked and
+disconnected results, cancellation, and setup documentation. Build/vet, both
+race suites, real-Chrome extension execution and snapshot parity pass. A live
+Tailscale-interface smoke test accepted authenticated MCP status calls and
+rejected missing/invalid tokens; its temporary service was stopped.
+
+Browser verification uses fixture pages in disposable profiles, not real accounts.
+Cross-machine Tailscale routing remains deployment-specific. Ignitionphase and
+its publishing workflow are unchanged; file-transfer/multi-tab browser APIs remain
+outside this change. See ADR 008 and README's setup sections.
+
+
+## Earlier E12 milestones
 - E12 T12.1 `internal/extbridge` poll/reply HTTP server: PR #6, merged
   2026-09-10 (rebase). Independently re-verified against merged `main`
   (build/vet/gofmt clean, 13 named tests plus the full suite green). One
@@ -71,18 +86,12 @@ the Shipped entries below, which reflect independently re-verified reality.
   `FERRO_MCP_MAX_ELEMENTS`) is reachable from `main`.
 
 ## In progress
-- (none -- E12 Wave 1 complete, see Shipped above)
+- (none)
 
 ## In flight
 - (none)
 
 ## Planned
-- E12 Wave 2 (T12.3, `ExtensionDriver` implementing `core.PageDriver`):
-  the integration bottleneck -- depends on all of Wave 1, now unblocked.
-  Not yet claimed/dispatched.
-- E12 Waves 3-7 (T12.4-T12.12): backend selection, blocked-state handling,
-  the Tailscale remote listener, tests, docs, and the final lint/build/test
-  gate -- blocked on Wave 2. See `docs/plan.md` E12 and ADR 006/007.
 - E9's T9.6 (trim redundant planner-prompt prose) still open, small and
   unclaimed -- see `docs/plan.md`.
 - E2, E4, E5, E6 from the v0.1 plan: outline only, expand when picked up.

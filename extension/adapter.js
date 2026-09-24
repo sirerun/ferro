@@ -61,11 +61,66 @@
   const visible = (el) =>
     !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
 
+  function toWellFormed(value) {
+    const text = String(value);
+    if (typeof text.toWellFormed === 'function') return text.toWellFormed();
+    let result = '';
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      if (code >= 0xd800 && code <= 0xdbff) {
+        const next = text.charCodeAt(i + 1);
+        if (next >= 0xdc00 && next <= 0xdfff) result += text[i] + text[++i];
+        else result += '\ufffd';
+      } else if (code >= 0xdc00 && code <= 0xdfff) result += '\ufffd';
+      else result += text[i];
+    }
+    return result;
+  }
+
+  function truncateSnapshotText(value, ellipsis = false) {
+    let text = toWellFormed(value);
+    if (text.length > 80) text = text.slice(0, 80) + (ellipsis ? '…' : '');
+    return toWellFormed(text);
+  }
+
+  function snapshotName(el) {
+    let name = el.getAttribute('aria-label') || el.getAttribute('placeholder') || '';
+    if (!name && ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName) && el.id) {
+      const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      if (label) name = label.innerText.trim();
+    }
+    return truncateSnapshotText(name);
+  }
+
+  function snapshotText(el) {
+    const heading = /^H[1-4]$/.test(el.tagName);
+    return truncateSnapshotText(heading ? el.innerText : (el.innerText || '').trim(), true);
+  }
+
   // ---------------------------------------------------------------------
   // takeSnapshot: faithful port of internal/core/snapshot.go's snapshotJS
   // (the DOM walk) plus TakeSnapshot's Go-side ref-numbering/truncation.
   // ---------------------------------------------------------------------
-  function takeSnapshot(maxElements) {
+  function uniqueSelector(el) {
+    const parts = [];
+    for (let node = el; node && node.nodeType === Node.ELEMENT_NODE; node = node.parentElement) {
+      let part = node.localName;
+      const parent = node.parentElement;
+      if (parent) {
+        const sameTag = Array.from(parent.children).filter((sibling) => sibling.localName === node.localName);
+        if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(node) + 1})`;
+      }
+      parts.unshift(part);
+      if (node.id) {
+        const id = `#${CSS.escape(node.id)}`;
+        if (document.querySelectorAll(id).length === 1) return [id, ...parts.slice(1)].join(' > ');
+      }
+      if (node === document.body) break;
+    }
+    return parts.join(' > ');
+  }
+
+  function takeSnapshot(maxElements, includeSelectors = false) {
     if (!maxElements || maxElements <= 0) maxElements = 200;
 
     // --- verbatim port of snapshot.go's `snapshotJS` DOM walk ---
@@ -94,17 +149,10 @@
       // sticky headers).
       if (rect.bottom < -50 || rect.top > innerHeight + 50) continue;
 
-      // accessible name: label[for], aria-label, placeholder, innerText --
-      // first hit wins.
-      let name = el.getAttribute('aria-label') || el.getAttribute('placeholder') || '';
-      if (!name && (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA')) {
-        if (el.id) {
-          const lbl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
-          if (lbl) name = lbl.innerText.trim();
-        }
-      }
-      let text = isHeading ? el.innerText : (el.innerText || '').trim();
-      if (text.length > 80) text = text.slice(0, 80) + '…';
+      // accessible name and compact text use the same normalization as the
+      // execution-time signature check in mustFind().
+      const name = snapshotName(el);
+      const text = snapshotText(el);
       if (!name && !text && !el.getAttribute('aria-labelledby')) continue; // unlabeled, skip
 
       let href = '';
@@ -112,13 +160,15 @@
         href = new URL(el.getAttribute('href'), location.href).pathname;
       }
 
-      raw.push({
+      const item = {
         tag: tag.toLowerCase(),
         role: role,
-        name: name.slice(0, 80),
+        name: name,
         text: text,
         href: href,
-      });
+      };
+      if (includeSelectors) item.selector = uniqueSelector(el);
+      raw.push(item);
     }
     // --- end verbatim port ---
 
@@ -136,6 +186,7 @@
       if (r.name) out.name = r.name;
       if (r.text) out.text = r.text;
       if (r.href) out.href = r.href;
+      if (includeSelectors) out.selector = r.selector;
       elements.push(out);
     }
     const snap = { url: location.href, title: document.title, elements: elements };
@@ -195,7 +246,7 @@
 
     // A visible password or email input, with no action of ours having
     // asked for one, implies a login gate is blocking the paired tab.
-    if (Array.from(document.querySelectorAll('input[type="password"], input[type="email"]')).some(visible)) {
+    if (Array.from(document.querySelectorAll('input[type="password"]')).some(visible)) {
       return 'A sign-in form is visible on this tab. Sign in manually, then resume.';
     }
 
@@ -206,6 +257,18 @@
   // Action execution.
   // ---------------------------------------------------------------------
   function mustFind(selector) {
+    let expected = null;
+    if (selector.startsWith('ferro-target:')) {
+      try {
+        let payload = selector.slice('ferro-target:'.length).replace(/-/g, '+').replace(/_/g, '/');
+        payload += '='.repeat((4 - payload.length % 4) % 4);
+        const bytes = Uint8Array.from(atob(payload), (char) => char.charCodeAt(0));
+        expected = JSON.parse(new TextDecoder().decode(bytes));
+        selector = expected.selector;
+      } catch (_) {
+        throw new Error('invalid snapshot target');
+      }
+    }
     let el;
     try {
       el = document.querySelector(selector);
@@ -213,6 +276,18 @@
       throw new Error(`invalid selector ${JSON.stringify(selector)}: ${error.message}`);
     }
     if (!el) throw new Error(`no element matches ${JSON.stringify(selector)}`);
+    if (document.querySelectorAll(selector).length !== 1) throw new Error('ambiguous selector; refusing to choose an arbitrary element');
+    if (expected) {
+      const name = snapshotName(el);
+      const text = snapshotText(el);
+      const href = el.tagName === 'A' && el.getAttribute('href') ? new URL(el.getAttribute('href'), location.href).pathname : '';
+      if (el.tagName.toLowerCase() !== expected.tag ||
+          (el.getAttribute('role') || '') !== (expected.role || '') ||
+          name !== (expected.name || '') || text !== (expected.text || '') ||
+          href !== (expected.href || '')) {
+        throw new Error('stale ref: the target no longer matches the latest snapshot');
+      }
+    }
     return el;
   }
 
@@ -235,6 +310,7 @@
   }
 
   function fill(el, text) {
+    el.focus();
     if ('value' in el) {
       setNativeValue(el, text);
       el.dispatchEvent(new Event('input', { bubbles: true }));
@@ -271,7 +347,8 @@
       const failures = {};
       for (const field of keys) {
         try {
-          const el = document.querySelector(fields[field]);
+          const selector = fields[field];
+          const el = selector.startsWith('ferro-target:') ? mustFind(selector) : document.querySelector(selector);
           if (!el) throw new Error('no matching element');
           out[field] = String(el.value ?? el.innerText ?? '').trim();
         } catch (error) {
@@ -300,6 +377,17 @@
     }
   }
 
+  async function settle(budgetMs) {
+    await new Promise((resolve) => {
+      let quiet;
+      const finish = () => { clearTimeout(quiet); clearTimeout(limit); observer.disconnect(); resolve(); };
+      const observer = new MutationObserver(() => { clearTimeout(quiet); quiet = setTimeout(finish, 250); });
+      const limit = setTimeout(finish, Math.max(1, budgetMs || 5000));
+      quiet = setTimeout(finish, 250);
+      observer.observe(document, {subtree:true, childList:true, attributes:true, characterData:true});
+    });
+  }
+
   async function trustedInput(kind, payload) {
     const response = await chrome.runtime.sendMessage({ type: 'ferro-trusted-input', kind, ...payload });
     if (response && response.error) throw new Error(response.error);
@@ -314,28 +402,35 @@
   // resolved CSS selector (ChromedpDriver's callers already resolve
   // ref -> selector Go-side before reaching the driver interface).
   async function perform(action) {
+    const guard = () => {
+      if (action.origin !== location.origin) throw new Error('origin changed before action');
+      if (Date.now() >= action.deadlineMs) throw new Error('action expired before execution');
+    };
+    guard();
     // snapshot always runs, blocked or not -- it's how a caller (or a human
     // resuming later) sees what the block actually looks like. Every other
     // action short-circuits on a blocked page instead of acting into it.
     if (action.op === 'snapshot') {
-      const snapshot = takeSnapshot(action.maxElements);
+      const snapshot = takeSnapshot(action.maxElements, true);
       const reason = blocked();
-      return reason ? { snapshot, blocked: reason } : { snapshot };
+      return reason ? { blocked: reason, code: reason.startsWith('A sign-in') ? 'login_required' : 'blocked' } : { snapshot };
     }
     const reason = blocked();
-    if (reason) return { blocked: reason };
+    if (reason) return { blocked: reason, code: reason.startsWith('A sign-in') ? 'login_required' : 'blocked' };
 
     switch (action.op) {
       case 'click': {
         const el = mustFind(action.selector);
         await scrollIntoViewIfNeeded(el);
+        guard();
         const rect = el.getBoundingClientRect();
-        await trustedInput('click', { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 });
+        await trustedInput('click', { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, commandID:action.commandID });
         return {};
       }
       case 'fill': {
         const el = mustFind(action.selector);
         await scrollIntoViewIfNeeded(el);
+        guard();
         fill(el, action.text || '');
         return {};
       }
@@ -345,13 +440,17 @@
         return {};
       }
       case 'key': {
-        await trustedInput('key', { text: action.text || '' });
+        await trustedInput('key', { text: action.text || '', commandID:action.commandID });
         return {};
       }
       case 'scroll': {
         if (action.to === 'top') window.scrollTo(0, 0);
         else if (action.to === 'bottom') window.scrollTo(0, document.body.scrollHeight);
         else throw new Error(`scroll to ${JSON.stringify(action.to)}: ref-scroll not wired; use top|bottom`);
+        return {};
+      }
+      case 'settle': {
+        await settle(action.budgetMs);
         return {};
       }
       case 'wait_visible': {

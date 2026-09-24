@@ -82,6 +82,70 @@ test('extension takeSnapshot() matches internal/core/snapshot.go golden (T12.2 p
       'extension snapshot does not match internal/core/snapshot.go golden -- ' +
         'ref numbering or element selection has drifted between the Go and JS ports'
     );
+
+    const selectors = await chrome.evaluate(`FerroAdapter.takeSnapshot(${MAX_ELEMENTS}, true).elements.map((el) => ({
+      selector: el.selector,
+      count: document.querySelectorAll(el.selector).length,
+    }))`);
+    assert.ok(selectors.length > 0);
+    assert.ok(selectors.every((entry) => entry.selector && entry.count === 1),
+      `execution snapshots must provide a unique live selector for every ref: ${JSON.stringify(selectors.filter((entry) => !entry.selector || entry.count !== 1).slice(0, 3))}`);
+
+    const executionSnapshot = await chrome.evaluate(`FerroAdapter.takeSnapshot(${MAX_ELEMENTS}, true)`);
+    const signIn = executionSnapshot.elements.find((element) => element.tag === 'button' && element.text === 'Sign in');
+    assert.ok(signIn, 'fixture sign-in button should be present');
+    const encodeTarget = (element) => Buffer.from(JSON.stringify({
+      selector: element.selector,
+      tag: element.tag,
+      role: element.role,
+      name: element.name,
+      text: element.text,
+      href: element.href,
+    })).toString('base64url');
+
+    const longLabel = `${'x'.repeat(79)}😀`;
+    const longText = `${'z'.repeat(79)}😀`;
+    await chrome.evaluate(`(() => {
+      globalThis.chrome = {runtime:{sendMessage:async()=>({})}};
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.setAttribute('aria-label', ${JSON.stringify(longLabel)});
+      document.body.append(input);
+      const button = document.createElement('button');
+      button.innerText = ${JSON.stringify(longText)};
+      document.body.append(button);
+    })()`);
+    const specialSnapshot = await chrome.evaluate(`FerroAdapter.takeSnapshot(${MAX_ELEMENTS}, true)`);
+    const longInput = specialSnapshot.elements.find((element) => element.tag === 'input' && element.name.startsWith('x'.repeat(79)));
+    assert.equal(longInput.name, `${'x'.repeat(79)}�`, 'long names must compare using the same 80-unit snapshot value');
+    const fillResult = await chrome.evaluate(`(async () => {
+      try {
+        return await FerroAdapter.perform({op:'fill', selector:'ferro-target:${encodeTarget(longInput)}', text:'test', origin:location.origin, deadlineMs:Date.now()+5000});
+      } catch (error) { return {error:error.message}; }
+    })()`);
+    assert.deepEqual(fillResult, {}, 'an unchanged long-label target should remain usable');
+    const astralButton = specialSnapshot.elements.find((element) => element.tag === 'button' && element.text?.startsWith('z'.repeat(79)));
+    assert.ok(astralButton, 'astral text button should be present in the snapshot');
+    const clickResult = await chrome.evaluate(`(async () => {
+      try {
+        return await FerroAdapter.perform({op:'click', selector:'ferro-target:${encodeTarget(astralButton)}', origin:location.origin, deadlineMs:Date.now()+5000});
+      } catch (error) { return {error:error.message}; }
+    })()`);
+    assert.deepEqual(clickResult, {}, 'text truncated across an astral character should still match the same target');
+
+    const target = encodeTarget(signIn);
+    await chrome.evaluate(`(() => {
+      const section = document.createElement('section');
+      section.innerHTML = '<button>Inserted before the old target</button>';
+      document.body.insertBefore(section, document.querySelector('section'));
+    })()`);
+    const staleResult = await chrome.evaluate(`(async () => {
+      try {
+        await FerroAdapter.perform({op:'fill', selector:'ferro-target:${target}', text:'x', origin:location.origin, deadlineMs:Date.now()+5000});
+        return 'allowed';
+      } catch (error) { return error.message; }
+    })()`);
+    assert.match(staleResult, /stale ref/, 'a DOM change must reject a path that now points at a different element');
   } finally {
     await chrome.close();
   }

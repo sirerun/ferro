@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"sync"
-	"time"
 )
 
 // Allowlist is the deny-by-default per-origin gate ADR 005 requires: a flat
@@ -19,7 +18,6 @@ type Allowlist struct {
 
 	mu      sync.RWMutex
 	origins map[string]struct{}
-	modTime time.Time
 }
 
 // NewAllowlist loads path (or starts empty if it doesn't exist yet).
@@ -51,40 +49,21 @@ func (a *Allowlist) load() error {
 		set[o] = struct{}{}
 	}
 
-	var mtime time.Time
-	if fi, err := os.Stat(a.path); err == nil {
-		mtime = fi.ModTime()
-	}
-
 	a.mu.Lock()
 	a.origins = set
-	a.modTime = mtime
 	a.mu.Unlock()
 	return nil
-}
-
-// reloadIfChanged re-reads the file when its mtime has advanced, so the
-// operator can extend the allowlist without restarting the daemon (ADR
-// 005). A file that has been deleted or is unreadable keeps the
-// last-known-good set rather than falling back to empty.
-func (a *Allowlist) reloadIfChanged() {
-	fi, err := os.Stat(a.path)
-	if err != nil {
-		return
-	}
-	a.mu.RLock()
-	changed := fi.ModTime().After(a.modTime)
-	a.mu.RUnlock()
-	if changed {
-		_ = a.load()
-	}
 }
 
 // Check returns nil if origin is allowlisted, or an error naming the
 // blocked origin and the file to edit to permit it (ADR 005: "a normal MCP
 // tool error... naming the blocked origin and the exact line to add").
 func (a *Allowlist) Check(origin string) error {
-	a.reloadIfChanged()
+	// Re-read this small policy file on every check. Removal, truncation, or
+	// malformed edits must revoke access, never preserve stale permissions.
+	if err := a.load(); err != nil {
+		return err
+	}
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	if _, ok := a.origins[origin]; ok {

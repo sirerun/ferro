@@ -11,6 +11,7 @@ import (
 	"github.com/chromedp/chromedp"
 
 	"github.com/dndungu/ferro/internal/core"
+	"github.com/dndungu/ferro/internal/extbridge"
 )
 
 // Primitive tool argument shapes. Each maps 1:1 onto one core.ActionKind
@@ -57,7 +58,7 @@ type (
 func registerPrimitiveTools(server *sdk.Server, c caller) {
 	addRelayTool[snapshotArgs](server, &sdk.Tool{
 		Name:        "snapshot",
-		Description: "Take a fresh snapshot of the shared tab's current page: URL, title, and a numbered list of interactive elements (refs) for click/fill/select/extract to target. Not gated by the origin allowlist (ADR 005) -- an agent can always see what page it is on.",
+		Description: "Take a fresh snapshot of the shared tab's current page: URL, title, and a numbered list of interactive elements (refs) for click/fill/select/extract to target. Gated by the origin allowlist because snapshots contain authenticated page content.",
 	}, c)
 	addRelayTool[navigateArgs](server, &sdk.Tool{
 		Name:        "navigate",
@@ -85,7 +86,7 @@ func registerPrimitiveTools(server *sdk.Server, c caller) {
 	}, c)
 	addRelayTool[waitArgs](server, &sdk.Tool{
 		Name:        "wait",
-		Description: "Wait for dom_settle, a fixed duration (e.g. \"2s\"), or a CSS selector to become visible. Not gated by the origin allowlist (ADR 005) -- purely passive.",
+		Description: "Wait for dom_settle, a fixed duration (e.g. \"2s\"), or a CSS selector to become visible. DOM waits are gated by the origin allowlist.",
 	}, c)
 	addRelayTool[extractArgs](server, &sdk.Tool{
 		Name:        "extract",
@@ -94,13 +95,20 @@ func registerPrimitiveTools(server *sdk.Server, c caller) {
 }
 
 // currentOrigin returns the shared tab's current page origin
-// (scheme://host[:port]), used to gate every primitive tool except
-// snapshot/wait (ADR 005) and to gate navigate against its target instead.
+// (scheme://host[:port]). Driver actions gate content reads and effects;
+// navigation is checked against its target, and fixed sleeps read no content.
 func (o *Owner) currentOrigin(ctx context.Context) (string, error) {
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
 	var raw string
-	if err := chromedp.Run(runCtx, chromedp.Location(&raw)); err != nil {
+	if o.bridge != nil {
+		d := &extbridge.ExtensionDriver{Bridge: o.bridge}
+		var err error
+		raw, err = d.Location(runCtx)
+		if err != nil {
+			return "", err
+		}
+	} else if err := chromedp.Run(runCtx, chromedp.Location(&raw)); err != nil {
 		return "", fmt.Errorf("read current URL: %w", err)
 	}
 	return originOf(raw)
@@ -127,6 +135,9 @@ func originOf(raw string) (string, error) {
 // caller's cancellation on top via AfterFunc rather than by using the
 // caller's context as the base.
 func (o *Owner) actionCtx(ctx context.Context) (context.Context, context.CancelFunc) {
+	if o.tab == nil {
+		return context.WithCancel(ctx)
+	}
 	runCtx, cancel := context.WithCancel(o.tab.CDP())
 	stop := context.AfterFunc(ctx, cancel)
 	return runCtx, func() {
@@ -158,11 +169,20 @@ func (o *Owner) checkOrigin(ctx context.Context, target string) error {
 func (o *Owner) snapshot(ctx context.Context, _ json.RawMessage) (any, error) {
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
-	snap, err := core.TakeSnapshot(runCtx, o.tab.SnapshotMaxElements())
+	generation := uint64(0)
+	if o.bridge != nil {
+		generation = o.bridge.Generation()
+		runCtx = o.bridge.PinGeneration(runCtx, generation)
+	}
+	snap, err := o.driver.Snapshot(runCtx, o.cfg.MaxElements)
 	if err != nil {
 		return nil, err
 	}
+	if o.bridge != nil && generation != o.bridge.Generation() {
+		return nil, &core.StopError{Code: "pairing_changed", Message: "tab pairing changed during the snapshot; take a fresh snapshot"}
+	}
 	o.snap = snap
+	o.snapGeneration = generation
 	return snap, nil
 }
 
@@ -174,9 +194,6 @@ func (o *Owner) navigate(ctx context.Context, args json.RawMessage) (any, error)
 	if in.URL == "" {
 		return nil, fmt.Errorf("url is required")
 	}
-	if err := o.checkOrigin(ctx, in.URL); err != nil {
-		return nil, err
-	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
 	res, err := o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindGoto, URL: in.URL}, o.extracted)
@@ -186,6 +203,7 @@ func (o *Owner) navigate(ctx context.Context, args json.RawMessage) (any, error)
 	// Refs are page-specific; force the client to snapshot again before
 	// targeting one on the new page.
 	o.snap = nil
+	o.snapGeneration = 0
 	return res, nil
 }
 
@@ -194,14 +212,15 @@ func (o *Owner) click(ctx context.Context, args json.RawMessage) (any, error) {
 	if err := json.Unmarshal(args, &in); err != nil {
 		return nil, fmt.Errorf("decode click args: %w", err)
 	}
-	if err := o.checkOrigin(ctx, ""); err != nil {
-		return nil, err
-	}
 	if o.snap == nil {
 		return nil, fmt.Errorf("no snapshot yet; call snapshot before targeting a ref")
 	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
+	var err error
+	if runCtx, err = o.pinSnapshot(runCtx); err != nil {
+		return nil, err
+	}
 	return o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindClick, Ref: in.Ref}, o.extracted)
 }
 
@@ -210,14 +229,15 @@ func (o *Owner) fill(ctx context.Context, args json.RawMessage) (any, error) {
 	if err := json.Unmarshal(args, &in); err != nil {
 		return nil, fmt.Errorf("decode fill args: %w", err)
 	}
-	if err := o.checkOrigin(ctx, ""); err != nil {
-		return nil, err
-	}
 	if o.snap == nil {
 		return nil, fmt.Errorf("no snapshot yet; call snapshot before targeting a ref")
 	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
+	var err error
+	if runCtx, err = o.pinSnapshot(runCtx); err != nil {
+		return nil, err
+	}
 	return o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindFill, Ref: in.Ref, Text: in.Text, Secret: in.Secret}, o.extracted)
 }
 
@@ -226,14 +246,15 @@ func (o *Owner) selectOption(ctx context.Context, args json.RawMessage) (any, er
 	if err := json.Unmarshal(args, &in); err != nil {
 		return nil, fmt.Errorf("decode select args: %w", err)
 	}
-	if err := o.checkOrigin(ctx, ""); err != nil {
-		return nil, err
-	}
 	if o.snap == nil {
 		return nil, fmt.Errorf("no snapshot yet; call snapshot before targeting a ref")
 	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
+	var err error
+	if runCtx, err = o.pinSnapshot(runCtx); err != nil {
+		return nil, err
+	}
 	return o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindSelect, Ref: in.Ref, Value: in.Value}, o.extracted)
 }
 
@@ -242,11 +263,12 @@ func (o *Owner) key(ctx context.Context, args json.RawMessage) (any, error) {
 	if err := json.Unmarshal(args, &in); err != nil {
 		return nil, fmt.Errorf("decode key args: %w", err)
 	}
-	if err := o.checkOrigin(ctx, ""); err != nil {
-		return nil, err
-	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
+	var err error
+	if runCtx, err = o.pinSnapshot(runCtx); err != nil {
+		return nil, err
+	}
 	return o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindKey, Text: in.Text}, o.extracted)
 }
 
@@ -255,11 +277,12 @@ func (o *Owner) scroll(ctx context.Context, args json.RawMessage) (any, error) {
 	if err := json.Unmarshal(args, &in); err != nil {
 		return nil, fmt.Errorf("decode scroll args: %w", err)
 	}
-	if err := o.checkOrigin(ctx, ""); err != nil {
-		return nil, err
-	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
+	var err error
+	if runCtx, err = o.pinSnapshot(runCtx); err != nil {
+		return nil, err
+	}
 	return o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindScroll, To: in.To}, o.extracted)
 }
 
@@ -268,10 +291,13 @@ func (o *Owner) wait(ctx context.Context, args json.RawMessage) (any, error) {
 	if err := json.Unmarshal(args, &in); err != nil {
 		return nil, fmt.Errorf("decode wait args: %w", err)
 	}
-	// Not gated -- ADR 005: "snapshot and wait are ungated -- purely
-	// passive."
+	// Fixed sleeps read no page content. The driver gates DOM waits.
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
+	var err error
+	if runCtx, err = o.pinSnapshot(runCtx); err != nil {
+		return nil, err
+	}
 	return o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindWait, For: in.For}, o.extracted)
 }
 
@@ -283,10 +309,23 @@ func (o *Owner) extract(ctx context.Context, args json.RawMessage) (any, error) 
 	if len(in.Fields) == 0 {
 		return nil, fmt.Errorf("fields is required and must be non-empty; schema-based extraction needs an LLM call and is only available via run_task")
 	}
-	if err := o.checkOrigin(ctx, ""); err != nil {
-		return nil, err
-	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
+	var err error
+	if runCtx, err = o.pinSnapshot(runCtx); err != nil {
+		return nil, err
+	}
 	return o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindExtract, Fields: in.Fields}, o.extracted)
+}
+
+func (o *Owner) pinSnapshot(ctx context.Context) (context.Context, error) {
+	if o.bridge == nil || o.snap == nil {
+		return ctx, nil
+	}
+	if o.snapGeneration != o.bridge.Generation() {
+		o.snap = nil
+		o.snapGeneration = 0
+		return ctx, &core.StopError{Code: "pairing_changed", Message: "tab pairing changed; take a fresh snapshot before continuing"}
+	}
+	return o.bridge.PinGeneration(ctx, o.snapGeneration), nil
 }

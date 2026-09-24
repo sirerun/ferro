@@ -3,11 +3,16 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/dndungu/ferro/internal/extbridge"
 	"log"
 	"net"
+	"net/http"
 	"os"
+	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/dndungu/ferro"
 	"github.com/dndungu/ferro/internal/core"
@@ -24,7 +29,16 @@ type Owner struct {
 	runner  *ferro.Runner
 	allow   *Allowlist
 
-	mu sync.Mutex // serializes every tool call against the shared tab
+	mu           sync.Mutex    // protects lease and active-call state
+	gate         chan struct{} // cancelable serialization of browser calls
+	leaseOwner   string
+	leaseUntil   time.Time
+	activeOwner  string
+	activeCancel context.CancelFunc
+	driver       core.PageDriver
+	bridge       *extbridge.Bridge
+	remoteServer *http.Server
+	remoteAddr   string
 
 	// exec, snap, and extracted back the primitive tools (T11.4): exec runs
 	// one Action at a time via ExecuteOne; snap is the last snapshot taken
@@ -32,9 +46,10 @@ type Owner struct {
 	// are page-specific), and resolves refs for click/fill/select/extract;
 	// extracted persists {{extract.last...}} state across primitive calls,
 	// the same templating vocabulary run_task's plans use.
-	exec      *core.Executor
-	snap      *core.Snapshot
-	extracted map[string]any
+	exec           *core.Executor
+	snap           *core.Snapshot
+	snapGeneration uint64
+	extracted      map[string]any
 
 	listener net.Listener
 
@@ -47,67 +62,121 @@ type Owner struct {
 // short-lived per-call context) — chromedp ties the launched Chrome
 // process's lifetime to it.
 func NewOwner(ctx context.Context, cfg Config) (*Owner, error) {
-	b, err := ferro.NewBrowser(ferro.BrowserConfig{
-		Headless:         cfg.Headless,
-		UserDataDir:      cfg.UserDataDir,
-		ProfileDirectory: cfg.ProfileDirectory,
-		MaxElements:      cfg.MaxElements,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("start browser pool: %w", err)
+	if cfg.Backend == "" {
+		cfg.Backend = "cdp"
 	}
-
-	tab, err := b.Acquire(ctx)
-	if err != nil {
-		_ = b.Close()
-		return nil, fmt.Errorf(
-			"acquire tab against Chrome data dir %q: %w — either it's open in another running "+
-				"Chrome process (quit that Chrome, then retry), or it resolves to a real Chrome "+
-				"install's default profile location, which Chrome refuses to enable CDP against no "+
-				"matter what (point FERRO_MCP_CHROME_USER_DATA_DIR at a dedicated, non-default "+
-				"directory instead)",
-			cfg.UserDataDir, err,
-		)
+	if cfg.Backend != "cdp" && cfg.Backend != "extension" {
+		return nil, fmt.Errorf("invalid backend %q", cfg.Backend)
 	}
-
-	if cfg.StartURL != "" {
-		if err := tab.Navigate(cfg.StartURL); err != nil {
-			log.Printf("ferro-mcp: initial navigation to %s failed (continuing): %v", cfg.StartURL, err)
-		}
+	if cfg.BlockTimeout <= 0 {
+		cfg.BlockTimeout = 15 * time.Minute
 	}
-
+	if cfg.MaxElements <= 0 {
+		cfg.MaxElements = 200
+	}
+	if err := os.MkdirAll(cfg.Home, 0700); err != nil {
+		return nil, err
+	}
 	allow, err := NewAllowlist(cfg.AllowlistPath())
 	if err != nil {
-		tab.Release()
-		_ = b.Close()
-		return nil, fmt.Errorf("load allowlist: %w", err)
+		return nil, err
 	}
-
-	client := &ferro.OpenAICompatible{BaseURL: cfg.LLMBaseURL, Model: cfg.LLMModel, APIKey: cfg.LLMAPIKey}
+	o := &Owner{cfg: cfg, allow: allow, gate: make(chan struct{}, 1), extracted: map[string]any{}, stopCh: make(chan struct{})}
+	if cfg.Backend == "extension" {
+		token, err := loadToken(filepath.Join(cfg.Home, "bridge-token"))
+		if err != nil {
+			return nil, err
+		}
+		b, err := extbridge.New(extbridge.WithToken(token), extbridge.WithChatHandler(o.chatHandler()))
+		if err != nil {
+			return nil, err
+		}
+		addr := cfg.BridgeAddr
+		if addr == "" {
+			addr = "127.0.0.1:4173"
+		}
+		if err = b.Start(addr); err != nil {
+			return nil, err
+		}
+		o.bridge = b
+		o.driver = &extbridge.ExtensionDriver{Bridge: b, CheckURL: func(raw string) error { return o.checkOrigin(context.Background(), raw) }}
+		log.Printf("ferro-mcp: extension bridge http://%s; pairing token is in bridge-token under FERRO_MCP_HOME", b.Addr())
+	} else {
+		b, err := ferro.NewBrowser(ferro.BrowserConfig{Headless: cfg.Headless, UserDataDir: cfg.UserDataDir, ProfileDirectory: cfg.ProfileDirectory, MaxElements: cfg.MaxElements})
+		if err != nil {
+			return nil, err
+		}
+		tab, err := b.Acquire(ctx)
+		if err != nil {
+			_ = b.Close()
+			return nil, fmt.Errorf("acquire Chrome tab (use a dedicated non-default profile): %w", err)
+		}
+		o.browser = b
+		o.tab = tab
+		o.driver = core.NewChromedpDriver(core.WaitStrategy{})
+	}
+	// The extension authorizes the exact URL it sends with each command.
+	// CDP needs a decorator to apply the same policy to every driver action.
+	if cfg.Backend != "extension" {
+		o.driver = &guardedDriver{PageDriver: o.driver, owner: o}
+	}
+	o.exec = core.NewExecutor(core.WaitStrategy{}).WithDriver(o.driver)
+	var client ferro.LLMClient
+	if cfg.LLMBaseURL != "" && cfg.LLMModel != "" {
+		client = &ferro.OpenAICompatible{BaseURL: cfg.LLMBaseURL, Model: cfg.LLMModel, APIKey: cfg.LLMAPIKey}
+	}
 	opts := []ferro.Option{ferro.WithMaxRepairs(cfg.MaxRepairs)}
 	if cfg.CachePath != "" {
 		opts = append(opts, ferro.WithResolutionCache(cfg.CachePath))
 	}
-
-	return &Owner{
-		cfg:       cfg,
-		browser:   b,
-		tab:       tab,
-		runner:    ferro.NewRunner(client, opts...),
-		allow:     allow,
-		exec:      core.NewExecutor(core.WaitStrategy{}),
-		extracted: map[string]any{},
-		stopCh:    make(chan struct{}),
-	}, nil
+	o.runner = ferro.NewRunner(client, opts...)
+	if cfg.StartURL != "" && cfg.Backend == "cdp" {
+		runCtx, cancel := o.actionCtx(ctx)
+		err = o.driver.Navigate(runCtx, cfg.StartURL)
+		cancel()
+		if err != nil {
+			log.Printf("initial navigation to %q failed; service will continue: %v", cfg.StartURL, err)
+		}
+	}
+	if cfg.StartURL != "" && cfg.Backend == "extension" {
+		log.Printf("FERRO_MCP_START_URL is ignored with the extension backend; navigate explicitly after pairing")
+	}
+	if cfg.Remote {
+		if err := o.startRemote(ctx); err != nil {
+			_ = o.Close()
+			return nil, err
+		}
+	}
+	return o, nil
 }
 
 // Close releases the shared tab and tears down the browser pool.
 func (o *Owner) Close() error {
+	o.requestStop()
 	if o.listener != nil {
 		_ = o.listener.Close()
 	}
-	o.tab.Release()
-	return o.browser.Close()
+	o.mu.Lock()
+	if o.activeCancel != nil {
+		o.activeCancel()
+	}
+	o.mu.Unlock()
+	var errs []error
+	if o.remoteServer != nil {
+		errs = append(errs, o.remoteServer.Close())
+	}
+	if o.bridge != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		errs = append(errs, o.bridge.Stop(ctx))
+		cancel()
+	}
+	if o.tab != nil {
+		o.tab.Release()
+	}
+	if o.browser != nil {
+		errs = append(errs, o.browser.Close())
+	}
+	return errors.Join(errs...)
 }
 
 // StopRequested reports a signal that fires once an explicit shutdown was
@@ -151,7 +220,10 @@ func (o *Owner) ServeSocketBackground(ctx context.Context) error {
 	o.listener = l
 
 	go func() {
-		<-ctx.Done()
+		select {
+		case <-ctx.Done():
+		case <-o.stopCh:
+		}
 		_ = l.Close()
 	}()
 	go o.acceptLoop(ctx, l)
@@ -183,13 +255,21 @@ func (o *Owner) serveConn(ctx context.Context, conn net.Conn) {
 	var resp relayResponse
 	switch req.Tool {
 	case controlStatus:
-		resp = relayResponse{Text: fmt.Sprintf("owner pid=%d socket=%s", os.Getpid(), o.cfg.SocketPath())}
+		state, _, _ := o.control(ctx, "browser_status")
+		resp = relayResponse{Text: fmt.Sprintf("owner pid=%d socket=%s\n%s", os.Getpid(), o.cfg.SocketPath(), state)}
 		_ = json.NewEncoder(conn).Encode(resp)
 	case controlStop:
 		_ = json.NewEncoder(conn).Encode(relayResponse{Text: "stopping"})
 		o.requestStop()
 	default:
-		text, isError, err := o.Call(ctx, req.Tool, req.Args)
+		callCtx, cancel := context.WithCancel(context.WithValue(ctx, clientKey{}, req.Client))
+		defer cancel()
+		// Each relay connection carries one request; EOF means client cancellation.
+		// relayCall writes a single JSON value without a trailing newline. The
+		// next byte therefore means the client closed its connection to cancel;
+		// the response path remains independent in the opposite direction.
+		go func() { var buf [1]byte; _, _ = conn.Read(buf[:]); cancel() }()
+		text, isError, err := o.Call(callCtx, req.Tool, req.Args)
 		if err != nil {
 			resp = relayResponse{Text: err.Error(), IsError: true}
 		} else {
@@ -204,11 +284,57 @@ func (o *Owner) serveConn(ctx context.Context, conn net.Conn) {
 // either way it holds mu for the call's whole duration, serializing every
 // tool call against the one shared tab (ADR 004).
 func (o *Owner) Call(ctx context.Context, tool string, args json.RawMessage) (string, bool, error) {
+	select {
+	case <-o.stopCh:
+		return stopResult("disconnected", "service is stopping")
+	default:
+	}
+	if tool == "browser_status" || tool == "cancel_task" {
+		return o.control(ctx, tool)
+	}
+	select {
+	case o.gate <- struct{}{}:
+	case <-ctx.Done():
+		return "", false, ctx.Err()
+	}
+	defer func() { <-o.gate }()
+	if err := ctx.Err(); err != nil {
+		return "", false, err
+	}
+	who := clientIdentity(ctx)
+	if tool == "acquire_tab" || tool == "release_tab" {
+		return o.lease(who, tool, args)
+	}
 	o.mu.Lock()
-	defer o.mu.Unlock()
-
+	if o.leaseOwner != "" && time.Now().After(o.leaseUntil) {
+		o.leaseOwner = ""
+		o.snap = nil
+		o.snapGeneration = 0
+		o.extracted = map[string]any{}
+	}
+	if o.leaseOwner != "" && o.leaseOwner != who {
+		o.mu.Unlock()
+		return stopResult("tab_busy", "another agent owns this tab; retry after its lease expires")
+	}
+	if o.cfg.Backend == "extension" && tool != "run_task" && o.leaseOwner == "" {
+		o.mu.Unlock()
+		return stopResult("lease_required", "call acquire_tab before direct browser tools; release_tab when finished")
+	}
+	runCtx, cancel := context.WithTimeout(ctx, o.cfg.BlockTimeout)
+	o.activeOwner = who
+	o.activeCancel = cancel
+	o.mu.Unlock()
+	defer func() { cancel(); o.mu.Lock(); o.activeOwner = ""; o.activeCancel = nil; o.mu.Unlock() }()
+	ctx = runCtx
+	if o.bridge != nil {
+		ctx = o.bridge.Pin(ctx)
+	}
 	result, err := o.dispatch(ctx, tool, args)
 	if err != nil {
+		var stopped *core.StopError
+		if errors.As(err, &stopped) {
+			return stopResult(stopped.Code, stopped.Message)
+		}
 		return err.Error(), true, nil
 	}
 	body, err := json.MarshalIndent(result, "", "  ")

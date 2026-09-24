@@ -19,20 +19,21 @@ document.getElementById('connect').onclick = async () => {
     if (!/^https?:\/\/127\.0\.0\.1(:\d+)?$|^https?:\/\/localhost(:\d+)?$/.test(base)) {
       throw new Error('Bridge URL must be a loopback address (http://127.0.0.1:<port>).');
     }
-    if (!token) throw new Error('Enter the pairing token ferro-mcp printed on startup.');
+    if (!token) throw new Error('Enter the pairing token the local bridge-token file.');
 
     const response = await chrome.runtime.sendMessage({
       type: 'ferro-connect',
       connection: { base, token, tabId: tab.id },
     });
     if (!response || response.error) throw new Error(response?.error || 'connect failed');
-    status.textContent = `Connected to tab "${tab.title || tab.url}". Keep it open; a CAPTCHA or login page pauses the runner until you clear it.`;
+    status.textContent = `Connected to tab "${tab.title || tab.url}". Keep it open; a CAPTCHA or login page stops the task until you clear it and retry.`;
   } catch (error) {
     status.textContent = error.message;
   }
 };
 
 document.getElementById('disconnect').onclick = async () => {
-  await chrome.runtime.sendMessage({ type: 'ferro-disconnect' });
-  status.textContent = 'Disconnected.';
+  const response = await chrome.runtime.sendMessage({ type: 'ferro-disconnect' });
+  if (response?.error) { status.textContent = response.error; return; }
+  status.textContent = response?.warning ? `Disconnected locally. ${response.warning}` : 'Disconnected.';
 };
