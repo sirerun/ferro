@@ -321,7 +321,7 @@ func (x *Executor) doExtract(ctx context.Context, a Action, store extractStore) 
 			x.recordOutcome(key, sel, err)
 			if err != nil {
 				var stopped *StopError
-				if errors.As(err, &stopped) || ctx.Err() != nil {
+				if errors.As(err, &stopped) || ctx.Err() != nil || isContextTerminationV2(err) || isTaskV2BudgetFailure(err) {
 					return nil, err
 				}
 				out[field] = ""
