@@ -204,7 +204,11 @@ func canonicalRequestDigestV2(r RunTaskV2Request) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("encode request: %w", err)
 	}
-	validated, err := ValidateTaskRequestV2(b)
+	wireRequest, err := requestWireProjectionV2(b)
+	if err != nil {
+		return "", fmt.Errorf("project request wire form: %w", err)
+	}
+	validated, err := ValidateTaskRequestV2(wireRequest)
 	if err != nil {
 		return "", err
 	}
@@ -219,6 +223,23 @@ func canonicalRequestDigestV2(r RunTaskV2Request) (string, error) {
 	}
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:]), nil
+}
+
+// requestWireProjectionV2 removes only defaults added by ValidateTaskRequestV2
+// so revalidation checks the request's wire-size budget rather than charging
+// normalized semantic state against the original input limit.
+func requestWireProjectionV2(encoded []byte) ([]byte, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		return nil, err
+	}
+	if evidence := bytes.TrimSpace(fields["evidence"]); bytes.Equal(evidence, []byte(`"compact"`)) {
+		delete(fields, "evidence")
+	}
+	if limits := bytes.TrimSpace(fields["limits"]); bytes.Equal(limits, []byte(`{}`)) {
+		delete(fields, "limits")
+	}
+	return marshalJSONNoHTMLEscapeV2(fields)
 }
 
 func canonicalJSONBytesV2(raw []byte) ([]byte, error) {

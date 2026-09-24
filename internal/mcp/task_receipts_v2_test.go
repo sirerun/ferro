@@ -776,6 +776,74 @@ func TestReceiptsV2_UnicodeLineSeparatorDigestWithinWireBounds(t *testing.T) {
 	}
 }
 
+func TestReceiptsV2_DefaultsDoNotExpandWireSize(t *testing.T) {
+	goal := strings.Repeat("g", 16384)
+	schemaPrefix, schemaSuffix := `{"type":"object","description":"`, `"}`
+	requestPrefix := `{"schema":"ferro.task/v2","task_id":"task_default_cap","goal":"` + goal + `","start_url":"https://example.com/start","model_profile":"profile","policy":{"mode":"read_only","origins":["https://example.com"]},"output_schema":`
+	buildRaw := func(description string) []byte {
+		return []byte(requestPrefix + schemaPrefix + description + schemaSuffix + `}`)
+	}
+	description := strings.Repeat("d", 32018-len(schemaPrefix)-len(schemaSuffix))
+	raw := buildRaw(description)
+	padding := 65536 - len(raw) + len("https://example.com/start") - len("https://example.com/")
+	if padding <= 0 {
+		t.Fatalf("fixture base unexpectedly exceeds wire limit: %d", len(raw))
+	}
+	raw = bytes.Replace(raw, []byte("https://example.com/start"), []byte("https://example.com/"+strings.Repeat("x", padding)), 1)
+	if len(raw) != 65536 || len(goal) != 16384 || len(schemaPrefix)+len(description)+len(schemaSuffix) > 32768 {
+		t.Fatalf("bad boundary fixture: raw=%d goal=%d schema=%d", len(raw), len(goal), len(schemaPrefix)+len(description)+len(schemaSuffix))
+	}
+	validated, err := ValidateTaskRequestV2(raw)
+	if err != nil {
+		t.Fatalf("exact-limit request rejected: %v", err)
+	}
+	digest, err := canonicalRequestDigestV2(validated)
+	if err != nil {
+		t.Fatalf("normalizing valid exact-limit request rejected it: %v", err)
+	}
+	store, err := OpenReceiptStoreV2(t.TempDir(), 32<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, created, err := store.Admit(context.Background(), "principal", validated, digest); err != nil || !created {
+		t.Fatalf("exact-limit admission created=%v err=%v", created, err)
+	}
+
+	if _, err := ValidateTaskRequestV2(append(append([]byte(nil), raw...), ' ')); err == nil {
+		t.Fatal("request one byte over the wire limit was accepted")
+	}
+	oversizedDirect := validated
+	oversizedDirect.TaskID = "task_direct_oversized"
+	oversizedDirect.StartURL += strings.Repeat("x", 128)
+	if _, err := canonicalRequestDigestV2(oversizedDirect); err == nil {
+		t.Fatal("direct oversized admission request bypassed the original wire limit")
+	}
+
+	withExplicitDefaults := validated
+	withExplicitDefaults.Limits = core.LimitOverridesV2{}
+	withExplicitDefaults.Evidence = EvidenceCompactV2
+	if got, err := canonicalRequestDigestV2(withExplicitDefaults); err != nil || got != digest {
+		t.Fatalf("explicit defaults digest = %q err=%v, want %q", got, err, digest)
+	}
+	omittedDefaults := validated
+	omittedDefaults.Evidence = ""
+	if got, err := canonicalRequestDigestV2(omittedDefaults); err != nil || got != digest {
+		t.Fatalf("omitted defaults digest = %q err=%v, want %q", got, err, digest)
+	}
+	invalidEvidence := validated
+	invalidEvidence.Evidence = "unsupported"
+	if _, err := canonicalRequestDigestV2(invalidEvidence); err == nil {
+		t.Fatal("invalid nonempty evidence bypassed request validation")
+	}
+	negativeLimit := int64(-1)
+	invalidLimits := validated
+	invalidLimits.Limits.Actions = &negativeLimit
+	if _, err := canonicalRequestDigestV2(invalidLimits); err == nil {
+		t.Fatal("invalid nonempty limits bypassed request validation")
+	}
+}
+
 func TestMarshalJSONNoHTMLEscapeV2LineSeparatorSemantics(t *testing.T) {
 	for _, separator := range []string{"\u2028", "\u2029"} {
 		value := map[string]string{"text": "left\\" + separator + "right", "literal": "\\u2028"}
