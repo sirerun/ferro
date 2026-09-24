@@ -1,0 +1,7 @@
+[
+  {"id":"provider-valid-plan-001","file":"valid-plan.json","case":"valid_plan","usage_known":true},
+  {"id":"provider-malformed-json-001","file":"malformed-json.json","case":"malformed_json","usage_known":true},
+  {"id":"provider-schema-wrong-001","file":"schema-wrong.json","case":"schema_mismatch","usage_known":true},
+  {"id":"provider-repair-001","file":"repair-request.json","case":"repair_response","usage_known":true},
+  {"id":"provider-missing-usage-001","file":"missing-usage.json","case":"missing_usage","usage_known":false}
+]

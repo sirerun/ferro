@@ -1,0 +1,10 @@
+{
+  "id": "provider-malformed-json-001",
+  "request_messages": [{"role":"user","content":"Extract the title and price."}],
+  "response": {
+    "id":"fixture-response-malformed-001",
+    "model":"fixture-model",
+    "choices":[{"message":{"role":"assistant","content":"{\"steps\":[{\"kind\":\"done\",\"result\":"},"finish_reason":"stop"}],
+    "usage":{"prompt_tokens":103,"completion_tokens":17,"total_tokens":120}
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "provider-valid-plan-001",
+  "request_messages": [{"role":"user","content":"Extract the title and price, then finish with the extracted facts."}],
+  "response": {
+    "id":"fixture-response-valid-001",
+    "model":"fixture-model",
+    "choices":[{"message":{"role":"assistant","content":"{\"steps\":[{\"kind\":\"extract\",\"fields\":{\"title\":\"[data-testid=title]\",\"price\":\"[data-testid=price]\"}},{\"kind\":\"done\",\"result\":{\"title\":\"Catalog item A\",\"price\":\"$19.00\"}}]}"},"finish_reason":"stop"}],
+    "usage":{"prompt_tokens":182,"completion_tokens":57,"total_tokens":239}
+  }
+}
