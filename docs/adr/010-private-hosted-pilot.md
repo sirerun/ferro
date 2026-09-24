@@ -26,3 +26,5 @@ owners would lose command routing. The deployment design must explicitly
 qualify wake-up, in-flight protection, durable state, reconnect and uncertainty
 before claiming scale-to-zero readiness. Existing fixed-auth transport work
 remains useful and is independent of that infrastructure decision.
+
+The user subsequently confirmed disconnect-based sleep: Connect wakes the container; authenticated tab heartbeats keep it running; sleep follows disconnect/heartbeat expiry only after active work, leases and dispatched commands drain. This is not between-task sleep.
