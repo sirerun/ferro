@@ -47,16 +47,17 @@ type HostedLifecycle struct {
 
 	// requests is held for the duration of short application work. Drain uses
 	// TryLock so it never queues behind a task that is waiting on /bridge/reply.
-	requests  sync.RWMutex
-	runMu     sync.Mutex
-	mu        sync.Mutex
-	ready     bool
-	draining  bool
-	slept     bool
-	started   time.Time
-	lastWork  time.Time
-	nextRenew time.Time
-	drainErr  error
+	requests        sync.RWMutex
+	runMu           sync.Mutex
+	mu              sync.Mutex
+	ready           bool
+	draining        bool
+	slept           bool
+	started         time.Time
+	lastWork        time.Time
+	nextRenew       time.Time
+	drainErr        error
+	beforeDrainGate func() // deterministic interleaving seam for idle admission tests
 }
 
 // NewHostedLifecycle wraps an authenticated hosted handler for one extension
@@ -188,7 +189,24 @@ func (l *HostedLifecycle) step(ctx context.Context) (bool, error) {
 	l.mu.Lock()
 	idleSince := l.lastWork
 	l.mu.Unlock()
-	if now.Sub(idleSince) < l.opts.IdleGrace || !l.requests.TryLock() {
+	if now.Sub(idleSince) < l.opts.IdleGrace {
+		return false, nil
+	}
+	if l.beforeDrainGate != nil {
+		l.beforeDrainGate()
+	}
+	if !l.requests.TryLock() {
+		return false, nil
+	}
+	// Recheck after fencing admitted requests. Without this second sample, a
+	// request can complete between the preliminary idle check and gate
+	// acquisition, leaving a stale timestamp to trigger drain.
+	now = l.opts.Now()
+	l.mu.Lock()
+	idleSince = l.lastWork
+	l.mu.Unlock()
+	if now.Sub(idleSince) < l.opts.IdleGrace {
+		l.requests.Unlock()
 		return false, nil
 	}
 	// The exclusive request gate fences every accepted application request.

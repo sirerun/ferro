@@ -168,7 +168,7 @@ test('background hosted recovery does not cancel an explicit connection workflow
   context.chrome.storage.session.set=async value=>{stored=value.connection;};
   context.ensureContentReady=async()=>{};context.startPolling=()=>{};context.restoreSidePanelAccess=async()=>{};
   context.connection=oldConnection;
-  const manual=connectHosted(listeners,{tabId:42});
+  const manual=connectHosted(listeners,{tabId:42,confirmDisconnectTab:'browser-context-default-1234.41'});
   await started;
   const recovered=await vm.runInContext('recoverHostedConnection(connection, 7)',context);
   assert.equal(recovered,false);

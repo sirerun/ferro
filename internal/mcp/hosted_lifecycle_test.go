@@ -643,6 +643,36 @@ func TestHostedLifecycleMeaningfulMCPRequestRefreshesIdleAndPreservesBody(t *tes
 	}
 }
 
+func TestHostedLifecycleRechecksIdleAfterRequestGateInterleaving(t *testing.T) {
+	_, life, clock := newLifecycleFixture(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}), nil)
+	if err := life.establishProtection(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(2 * time.Minute)
+	interleaved := false
+	life.beforeDrainGate = func() {
+		if interleaved {
+			return
+		}
+		interleaved = true
+		if got := requestLifecycleBody(life, http.MethodPost, "/mcp", `{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"navigate"}}`).Code; got != http.StatusNoContent {
+			t.Fatalf("interleaved application request status %d", got)
+		}
+	}
+	done, err := life.step(context.Background())
+	if err != nil || done {
+		t.Fatalf("stale idle sample drained after accepted request: done=%v err=%v", done, err)
+	}
+	if !interleaved || !life.lastWork.Equal(clock.Now()) {
+		t.Fatal("interleaved work did not refresh the idle timestamp")
+	}
+	if _, sleeps := life.controller.(*lifecycleController).calls(); sleeps != 0 {
+		t.Fatalf("sleep called despite fresh activity: %d", sleeps)
+	}
+}
+
 func TestLifecycleMCPClassifierDoesNotNarrowBodyLimit(t *testing.T) {
 	body := bytes.Repeat([]byte("x"), int(maxLifecycleMCPBodyBytes+1))
 	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
