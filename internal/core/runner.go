@@ -187,6 +187,9 @@ func (r *Runner) run(ctx, runCtx context.Context, maxElements int, t Task, drive
 		if rerr.Action.Kind == KindPlanAgain || rerr.Action.Kind == "eof" {
 			m.Plannings++
 			if m.Plannings >= t.MaxPlannings {
+				if _, bounded := r.LLM.(*budgetedClientV2); bounded {
+					return nil, m, fmt.Errorf("planning pass limit reached: %w", ErrBudgetExhaustedV2)
+				}
 				return nil, m, fmt.Errorf("replan limit reached: %w", rerr)
 			}
 			continue

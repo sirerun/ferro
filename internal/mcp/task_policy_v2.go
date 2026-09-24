@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/url"
@@ -57,6 +58,9 @@ func (d *taskPolicyDriverV2) Navigate(ctx context.Context, target string) error 
 		return err
 	}
 	operationErr := d.driver.Navigate(ctx, target)
+	if uncertainOperationV2(operationErr) {
+		return operationErr
+	}
 	if err := d.guard.Check(ctx); err != nil {
 		return err
 	}
@@ -131,6 +135,9 @@ func (d *taskPolicyDriverV2) Snapshot(ctx context.Context, maxElements int) (*co
 		return nil, err
 	}
 	snapshot, operationErr := d.driver.Snapshot(ctx, maxElements)
+	if uncertainOperationV2(operationErr) {
+		return nil, operationErr
+	}
 	if err := d.guard.Check(ctx); err != nil {
 		return nil, err
 	}
@@ -157,6 +164,9 @@ func (d *taskPolicyDriverV2) run(ctx context.Context, operation func() error) er
 		return err
 	}
 	operationErr := operation()
+	if uncertainOperationV2(operationErr) {
+		return operationErr
+	}
 	if err := d.guard.Check(ctx); err != nil {
 		return err
 	}
@@ -174,6 +184,9 @@ func (d *taskPolicyDriverV2) checkCurrentOrigin(ctx context.Context) error {
 		return err
 	}
 	snapshot, err := d.driver.Snapshot(ctx, 0)
+	if uncertainOperationV2(err) {
+		return err
+	}
 	if guardErr := d.guard.Check(ctx); guardErr != nil {
 		return guardErr
 	}
@@ -272,4 +285,14 @@ func isNilPolicyDependencyV2(value any) bool {
 	default:
 		return false
 	}
+}
+
+// A post-operation guard may deny the result, but must never erase evidence
+// that a dispatched browser operation has an unknown outcome.
+func uncertainOperationV2(err error) bool {
+	var stopped *core.StopError
+	if !errors.As(err, &stopped) {
+		return false
+	}
+	return stopped.Code == "outcome_uncertain" || stopped.Code == "disconnected" || stopped.Code == "pairing_changed"
 }

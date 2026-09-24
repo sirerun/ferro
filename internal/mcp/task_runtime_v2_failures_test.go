@@ -27,3 +27,14 @@ func TestRuntimeV2_InputTokenCeilingIsBudgetExhaustion(t *testing.T) {
 		t.Fatalf("wrong input ceiling outcome: %+v calls=%d", result, calls.Load())
 	}
 }
+
+func TestRuntimeV2_PlanningCeilingIsBudgetExhaustion(t *testing.T) {
+	o, _, calls := runtimeFixtureV2(t, `{"steps":[{"kind":"plan_again","reason":"refresh"}]}`)
+	in := runtimeRequestV2("planning-ceiling")
+	one := int64(1)
+	in.Limits.PlanningPasses = &one
+	result := callRuntimeV2(t, o, in)
+	if result.Status != TaskBudgetExhaustedV2 || calls.Load() != 1 || result.Budget.PlanningPasses != 1 {
+		t.Fatalf("wrong planning ceiling outcome: %+v calls=%d", result, calls.Load())
+	}
+}
