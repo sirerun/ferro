@@ -330,6 +330,17 @@ func (b *Bridge) Connected() bool {
 	return b.pairedTab != "" && time.Since(b.lastSeen) < 45*time.Second
 }
 
+// HasPendingCommands reports whether an action is queued, dispatched, or
+// still awaiting its extension reply. Hosted lifecycle code uses this as a
+// drain guard; an idle poll alone is not pending command work.
+func (b *Bridge) HasPendingCommands() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	// A canceled command can remain in queue until the next poll discards it;
+	// all live queued commands are represented in waiting.
+	return len(b.waiting) != 0 || len(b.dispatched) != 0
+}
+
 type pairingKey struct{}
 type pairingPin struct {
 	bridge     *Bridge
