@@ -15,6 +15,7 @@ let activeTab = null;
 let connection = null;
 let actionError = '';
 let pending = false;
+let pendingBase = '';
 let statusRequest = 0;
 const HOSTED_BRIDGE_BASE = 'https://ferro.sire.run/bridge';
 function validBridgeBase(base) {
@@ -31,6 +32,11 @@ async function refreshStatus() {
     connection = response;
     activeTab = tab;
     openChat.hidden = !response.configured || tab?.id !== response.tabId;
+    if (pending && pendingBase === HOSTED_BRIDGE_BASE) {
+      status.textContent = 'Starting hosted service, then connecting this tab…';
+      toggle.disabled = true;
+      return;
+    }
     if (response.configured) {
       baseInput.value = response.base;
       baseInput.disabled = true;
@@ -63,6 +69,7 @@ async function refreshStatus() {
 toggle.onclick = async () => {
   if (pending) return;
   pending = true;
+  pendingBase = '';
   toggle.disabled = true;
   actionError = '';
   try {
@@ -83,11 +90,14 @@ toggle.onclick = async () => {
         throw new Error('Use http://127.0.0.1:<port> for a local bridge or https://ferro.sire.run/bridge for the hosted pilot.');
       }
       if (!token && !canReuseCredentials) throw new Error('Enter the pairing token provided for this bridge endpoint.');
+      pendingBase = base;
+      status.textContent = base === HOSTED_BRIDGE_BASE ? 'Starting hosted service, then connecting this tab…' : 'Connecting this tab…';
       let response = await chrome.runtime.sendMessage({
         type: 'ferro-connect', connection: { base, token, tabId: tab.id },
       });
       if (response?.requiresConfirmation) {
         if (!confirm(response.remote ? 'This pairing belongs to another browser. Continue only if you intend to connect after its owner disconnects.' : 'Disconnect the current tab and connect this one?')) { actionError = 'Connection unchanged.'; return; }
+        status.textContent = base === HOSTED_BRIDGE_BASE ? 'Starting hosted service, then switching tabs…' : 'Switching tabs…';
         response = await chrome.runtime.sendMessage({type:'ferro-connect', connection:{base,token,tabId:tab.id}, confirmDisconnectTab:response.pairedTab});
         if (response?.requiresConfirmation) throw new Error('The paired tab changed. Connect again to confirm.');
       }
@@ -99,6 +109,7 @@ toggle.onclick = async () => {
     actionError = error.message || String(error);
   } finally {
     pending = false;
+    pendingBase = '';
     await refreshStatus();
   }
 };

@@ -37,6 +37,9 @@ const POLL_TIMEOUT_MS = 30000; // one long-poll GET at a time
 const POLL_ERROR_BACKOFF_MS = 2000; // bridge unreachable (laptop asleep, etc.)
 const HOSTED_BRIDGE_BASE = 'https://ferro.sire.run/bridge';
 const HOSTED_BROWSER_ID_KEY = 'hostedBrowserIdentity';
+const HOSTED_WAKE_TIMEOUT_MS = 5000;
+const HOSTED_COLD_START_BUDGET_MS = 180000;
+const HOSTED_READINESS_RETRY_MS = 2500;
 
 function validBridgeBase(base) {
   return /^http:\/\/(127\.0\.0\.1|localhost):[0-9]+$/.test(base) || base === HOSTED_BRIDGE_BASE;
@@ -49,16 +52,332 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+let connectionWorkflowGeneration = 0;
+let connectionWorkflowAbort = null;
+let connectionWorkflowTargetKey = null;
+let hostedConnectionCommitQueue = Promise.resolve();
+
+function hostedTargetKey(connection) {
+  return connection?.base === HOSTED_BRIDGE_BASE && Number.isInteger(connection.tabId)
+    ? `${HOSTED_BRIDGE_BASE}:${connection.tabId}`
+    : null;
+}
+
+function beginConnectionWorkflow(connection = null) {
+  connectionWorkflowAbort?.abort();
+  connectionWorkflowGeneration++;
+  connectionWorkflowTargetKey = hostedTargetKey(connection);
+  connectionWorkflowAbort = new AbortController();
+  return {generation:connectionWorkflowGeneration, controller:connectionWorkflowAbort};
+}
+
+function invalidateConnectionWorkflow() {
+  connectionWorkflowGeneration++;
+  connectionWorkflowTargetKey = null;
+  connectionWorkflowAbort?.abort();
+  connectionWorkflowAbort = null;
+}
+
+function assertConnectionWorkflow(generation, signal) {
+  if (generation !== connectionWorkflowGeneration || signal?.aborted) {
+    const error = new Error('Connection attempt was canceled.');
+    error.name = 'AbortError';
+    throw error;
+  }
+}
+
+async function workflowAwait(promise, generation, signal) {
+  assertConnectionWorkflow(generation, signal);
+  const result = await promise;
+  assertConnectionWorkflow(generation, signal);
+  return result;
+}
+
+function hostedFetchSignal(signal, timeoutMs) {
+  return AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]);
+}
+
+async function hostedStatus(connection, generation, signal, timeoutMs = HOSTED_WAKE_TIMEOUT_MS) {
+  assertConnectionWorkflow(generation, signal);
+  const response = await fetch(`${HOSTED_BRIDGE_BASE}/chat/status`, {
+    method:'POST',
+    headers:{Authorization:`Bearer ${connection.token}`, 'Content-Type':'application/json', 'X-Ferro-Chat-Session':'extension-pairing-recovery'},
+    body:'{}',
+    signal:hostedFetchSignal(signal, timeoutMs),
+  });
+  assertConnectionWorkflow(generation, signal);
+  if (response.status === 401 || response.status === 403) throw new Error(`Hosted service rejected the pairing credential (HTTP ${response.status}).`);
+  if (response.status >= 400 && response.status < 500) throw new Error(`Hosted service status check failed (HTTP ${response.status}).`);
+  if (!response.ok) return {ready:false, retryable:true};
+  let state;
+  try { state = await response.json(); } catch (_) { throw new Error('Hosted service returned an invalid readiness response.'); }
+  assertConnectionWorkflow(generation, signal);
+  if (!state || typeof state !== 'object' || Array.isArray(state)) throw new Error('Hosted service returned an invalid readiness response.');
+  return {ready:true, state};
+}
+
+async function wakeHostedService(connection, generation, signal) {
+  assertConnectionWorkflow(generation, signal);
+  const response = await workflowAwait(fetch(`${HOSTED_BRIDGE_BASE}/wake`, {
+    method:'POST',
+    headers:{Authorization:`Bearer ${connection.token}`},
+    signal:hostedFetchSignal(signal, HOSTED_WAKE_TIMEOUT_MS),
+  }), generation, signal);
+  if (response.status === 401 || response.status === 403) throw new Error(`Hosted wake request was rejected (HTTP ${response.status}).`);
+  if (response.status !== 202) throw new Error(`Hosted wake request failed (HTTP ${response.status}).`);
+}
+
+async function waitForHostedReadiness(connection, generation, signal, deadline) {
+  while (Date.now() < deadline) {
+    assertConnectionWorkflow(generation, signal);
+    try {
+      const result = await workflowAwait(hostedStatus(connection, generation, signal, Math.min(HOSTED_WAKE_TIMEOUT_MS, deadline - Date.now())), generation, signal);
+      if (result.ready) return result.state;
+    } catch (error) {
+      if (signal.aborted || generation !== connectionWorkflowGeneration) throw error;
+      if (/HTTP 401|HTTP 403|HTTP 4\d\d/.test(error.message)) throw error;
+      // Startup can surface as a 503, and a network interruption is safe to retry here.
+    }
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    await workflowAwait(sleepWithSignal(Math.min(HOSTED_READINESS_RETRY_MS, remaining), signal), generation, signal);
+  }
+  assertConnectionWorkflow(generation, signal);
+  throw new Error('Hosted service did not become ready within 180 seconds.');
+}
+
+async function wakeAndWaitHosted(connection, generation, signal) {
+  const deadline = Date.now() + HOSTED_COLD_START_BUDGET_MS;
+  await workflowAwait(wakeHostedService(connection, generation, signal), generation, signal);
+  return workflowAwait(waitForHostedReadiness(connection, generation, signal, deadline), generation, signal);
+}
+
+function sleepWithSignal(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      const error = new Error('Connection attempt was canceled.');
+      error.name = 'AbortError';
+      reject(error);
+      return;
+    }
+    const finish = () => { signal.removeEventListener('abort', abort); resolve(); };
+    const timer = setTimeout(finish, ms);
+    function abort() {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', abort);
+      const error = new Error('Connection attempt was canceled.');
+      error.name = 'AbortError';
+      reject(error);
+    }
+    signal.addEventListener('abort', abort, {once:true});
+  });
+}
+
+async function storeHostedConnection(connection, generation, signal, pairCreated = true) {
+  const targetKey = hostedTargetKey(connection);
+  const operation = hostedConnectionCommitQueue.catch(() => {}).then(async () => {
+    assertConnectionWorkflow(generation, signal);
+    try {
+      await chrome.storage.session.set({connection,bridgeCredentials:{base:connection.base,token:connection.token}});
+      try { assertConnectionWorkflow(generation, signal); }
+      catch (error) {
+        if (targetKey !== connectionWorkflowTargetKey) {
+          const current = await chrome.storage.session.get('connection');
+          const saved = current.connection;
+          if (saved?.base === connection.base && saved?.token === connection.token && saved?.browserId === connection.browserId && saved?.tabId === connection.tabId) {
+            await chrome.storage.session.remove('connection');
+          }
+          if (pairCreated) await cleanupCreatedHostedPair(connection, targetKey);
+        }
+        throw error;
+      }
+    } catch (error) {
+      if (generation === connectionWorkflowGeneration && pairCreated) await cleanupCreatedHostedPair(connection);
+      throw error;
+    }
+  });
+  hostedConnectionCommitQueue = operation.catch(() => {});
+  await workflowAwait(operation, generation, signal);
+}
+
+async function recoverHostedConnection(connection, loopId) {
+  const {generation, controller} = beginConnectionWorkflow(connection);
+  const {signal} = controller;
+  try {
+    const state = await wakeAndWaitHosted(connection, generation, signal);
+    const current = await workflowAwait(getConnection(), generation, signal);
+    if (!current || current.base !== HOSTED_BRIDGE_BASE || current.browserId !== connection.browserId || current.tabId !== connection.tabId) {
+      throw new Error('Hosted pairing recovery no longer owns this browser tab.');
+    }
+    const expected = hostedWireTabId(connection);
+    if (state.paired_tab && state.paired_tab !== expected) {
+      throw new Error('Hosted pairing is owned by another browser tab; recovery cannot take it over.');
+    }
+    const pairPromise = fetch(`${HOSTED_BRIDGE_BASE}/pair`, {
+      method:'POST', headers:{Authorization:`Bearer ${connection.token}`, ...tabIdentityHeaders(connection)},
+      signal:hostedFetchSignal(signal, HOSTED_WAKE_TIMEOUT_MS),
+    });
+    let paired;
+    try { paired = await workflowAwait(pairPromise, generation, signal); }
+    catch (error) {
+      if (generation !== connectionWorkflowGeneration && connectionWorkflowTargetKey !== hostedTargetKey(connection)) {
+        await cleanupCreatedHostedPair(connection, hostedTargetKey(connection));
+      }
+      throw error;
+    }
+    if (!paired.ok) {
+      if (paired.status === 401 || paired.status === 403 || paired.status >= 400 && paired.status < 500) throw new Error(`Hosted pairing recovery failed (HTTP ${paired.status}).`);
+      throw new Error(`Hosted pairing recovery failed (HTTP ${paired.status}).`);
+    }
+    assertConnectionWorkflow(generation, signal);
+    if (loopGeneration !== loopId) return false;
+    lastPollSuccessAt = Date.now();
+    lastPollError = '';
+    return true;
+  } finally {
+    if (generation === connectionWorkflowGeneration) connectionWorkflowAbort = null;
+  }
+}
+
+async function connectHosted(message, sender, generation, signal) {
+  if (activeAction) throw new Error('A browser action is still running. Stop it before reconnecting.');
+  if (senderIsNotExtensionPage(sender)) throw new Error('pair using the extension popup or side panel');
+  const c = {...message.connection, base:HOSTED_BRIDGE_BASE};
+  c.browserId = await workflowAwait(getHostedBrowserIdentity(generation, signal), generation, signal);
+  if (!c.token) {
+    const stored = await workflowAwait(chrome.storage.session.get(['connection','bridgeCredentials']), generation, signal);
+    const saved = stored.connection || stored.bridgeCredentials;
+    if (saved?.base === c.base) c.token = saved.token;
+  }
+  if (!c.token) throw new Error('Enter the pairing token once to connect this Chrome session.');
+  if (!Number.isInteger(c.tabId) || c.tabId < 0) throw new Error('Choose a website tab to connect.');
+  await workflowAwait(ensureContentReady(c.tabId), generation, signal);
+  let previous = await workflowAwait(getConnection(), generation, signal);
+  const hadLocalConnection = !!previous;
+  const state = await wakeAndWaitHosted(c, generation, signal);
+  if (!previous && state.paired_tab) {
+    const scoped = parseHostedWireTabId(state.paired_tab);
+    if (!scoped) throw new Error('Invalid pairing status from the service.');
+    previous = {base:c.base, token:c.token, ...scoped};
+  }
+  if (state.paired_tab && !parseHostedWireTabId(state.paired_tab)) throw new Error('Invalid pairing status from the service.');
+  const samePair = previous && previous.base === c.base && previous.tabId === c.tabId && previous.browserId === c.browserId;
+  if ((state.busy !== false || state.leased !== false) && !samePair) throw new Error('A task or agent lease is still running. Stop it before connecting another tab.');
+  if (samePair) {
+    const response = await workflowAwait(fetch(`${HOSTED_BRIDGE_BASE}/pair`, {
+      method:'POST', headers:{Authorization:`Bearer ${c.token}`, ...tabIdentityHeaders(c)},
+      signal:hostedFetchSignal(signal, HOSTED_WAKE_TIMEOUT_MS),
+    }), generation, signal);
+    if (!response.ok) throw new Error(`Pairing failed (HTTP ${response.status}).`);
+    if (!hadLocalConnection) {
+      await storeHostedConnection(c, generation, signal, true);
+      startPolling();
+    }
+    try { await workflowAwait(restoreSidePanelAccess(), generation, signal); }
+    catch (error) { if (signal.aborted || generation !== connectionWorkflowGeneration) throw error; }
+    return {ok:true, browserId:c.browserId};
+  }
+
+  const previousIsRemoteHosted = !!(previous && previous.base === HOSTED_BRIDGE_BASE && previous.browserId !== c.browserId);
+  const previousConfirmationId = previous && (previous.wireTabId || (previous.browserId ? hostedWireTabId(previous) : String(previous.tabId)));
+  if (previous && message.confirmDisconnectTab !== previousConfirmationId) {
+    return {requiresConfirmation:true, pairedTab:previousConfirmationId, remote:previousIsRemoteHosted};
+  }
+  let stoppedPrevious = false;
+  if (previous && !previousIsRemoteHosted) {
+    stopPolling();
+    stoppedPrevious = true;
+  }
+  try {
+    if (previous && !previousIsRemoteHosted && previousConfirmationId !== hostedWireTabId(c)) {
+      const disconnected = await workflowAwait(fetch(`${previous.base}/disconnect`, {
+        method:'POST', headers:{Authorization:`Bearer ${previous.token}`, ...tabIdentityHeaders(previous)},
+        signal:hostedFetchSignal(signal, HOSTED_WAKE_TIMEOUT_MS),
+      }), generation, signal);
+      if (!disconnected.ok) throw new Error(`Could not release the previous tab (HTTP ${disconnected.status}).`);
+    }
+    const pairPromise = fetch(`${HOSTED_BRIDGE_BASE}/pair`, {
+      method:'POST', headers:{Authorization:`Bearer ${c.token}`, ...tabIdentityHeaders(c)},
+      signal:hostedFetchSignal(signal, HOSTED_WAKE_TIMEOUT_MS),
+    });
+    let response;
+    try { response = await pairPromise; }
+    catch (error) {
+      if (generation !== connectionWorkflowGeneration && connectionWorkflowTargetKey !== hostedTargetKey(c)) {
+        await cleanupCreatedHostedPair(c, hostedTargetKey(c));
+      }
+      throw error;
+    }
+    try { assertConnectionWorkflow(generation, signal); }
+    catch (error) {
+      if (response.ok) await cleanupCreatedHostedPair(c, hostedTargetKey(c));
+      throw error;
+    }
+    if (!response.ok) throw new Error(`Pairing failed (HTTP ${response.status}).`);
+    await storeHostedConnection(c, generation, signal, true);
+    startPolling();
+    try { await workflowAwait(restoreSidePanelAccess(), generation, signal); }
+    catch (error) { if (signal.aborted || generation !== connectionWorkflowGeneration) throw error; }
+    return {ok:true, browserId:c.browserId};
+  } catch (error) {
+    if (stoppedPrevious && previous && !signal.aborted && generation === connectionWorkflowGeneration) {
+      try {
+        const current = await workflowAwait(getConnection(), generation, signal);
+        if (current && current.base === previous.base && current.browserId === previous.browserId && current.tabId === previous.tabId) {
+          const recoveryState = previous.base === HOSTED_BRIDGE_BASE
+            ? await wakeAndWaitHosted(previous, generation, signal)
+            : null;
+          if (!recoveryState || !recoveryState.paired_tab || recoveryState.paired_tab === hostedWireTabId(previous)) {
+            const restored = await workflowAwait(fetch(`${previous.base}/pair`, {
+              method:'POST', headers:{Authorization:`Bearer ${previous.token}`, ...tabIdentityHeaders(previous)},
+              signal:hostedFetchSignal(signal, HOSTED_WAKE_TIMEOUT_MS),
+            }), generation, signal);
+            if (!restored.ok) error.message += ` The previous tab could not be restored (HTTP ${restored.status}).`;
+          }
+        }
+      } catch (restoreError) {
+        if (!signal.aborted && generation === connectionWorkflowGeneration) error.message += ` The previous tab could not be restored: ${restoreError.message}.`;
+      }
+      startPolling();
+    }
+    throw error;
+  }
+}
+
+function senderIsNotExtensionPage(sender) {
+  return sender.id !== chrome.runtime.id || ![chrome.runtime.getURL('popup.html'), chrome.runtime.getURL('sidepanel.html')].includes(sender.url);
+}
+
+async function cleanupCreatedHostedPair(connection, obsoleteTargetKey = null) {
+  try {
+    const response = await fetch(`${HOSTED_BRIDGE_BASE}/chat/status`, {
+      method:'POST', headers:{Authorization:`Bearer ${connection.token}`, 'Content-Type':'application/json', 'X-Ferro-Chat-Session':'extension-pairing-recovery'},
+      body:'{}', signal:AbortSignal.timeout(HOSTED_WAKE_TIMEOUT_MS),
+    });
+    if (!response.ok) return;
+    const state = await response.json();
+    if (state.paired_tab !== hostedWireTabId(connection)) return;
+    if (obsoleteTargetKey && connectionWorkflowTargetKey === obsoleteTargetKey) return;
+    await fetch(`${HOSTED_BRIDGE_BASE}/disconnect`, {
+      method:'POST', headers:{Authorization:`Bearer ${connection.token}`, ...tabIdentityHeaders(connection)},
+      signal:AbortSignal.timeout(HOSTED_WAKE_TIMEOUT_MS),
+    });
+  } catch (_) { /* best effort; never log credentials or response bodies */ }
+}
+
 async function getConnection() {
   const { connection } = await chrome.storage.session.get('connection');
   return connection || null;
 }
 
-async function getHostedBrowserIdentity() {
-  const stored = await chrome.storage.local.get(HOSTED_BROWSER_ID_KEY);
+async function getHostedBrowserIdentity(generation, signal) {
+  const read = chrome.storage.local.get(HOSTED_BROWSER_ID_KEY);
+  const stored = generation === undefined ? await read : await workflowAwait(read, generation, signal);
   if (stored[HOSTED_BROWSER_ID_KEY]) return stored[HOSTED_BROWSER_ID_KEY];
   const identity = crypto.randomUUID();
-  await chrome.storage.local.set({[HOSTED_BROWSER_ID_KEY]: identity});
+  const write = chrome.storage.local.set({[HOSTED_BROWSER_ID_KEY]: identity});
+  if (generation === undefined) await write;
+  else await workflowAwait(write, generation, signal);
   return identity;
 }
 
@@ -295,7 +614,11 @@ async function fetchNext(base, token, tabId, browserId) {
     signal: AbortSignal.any([pendingPoll.signal, AbortSignal.timeout(POLL_TIMEOUT_MS)]),
   });
   if (res.status === 204) return null;
-  if (!res.ok) throw new Error(`bridge GET /next: HTTP ${res.status}`);
+  if (!res.ok) {
+    const error = new Error(`bridge GET /next: HTTP ${res.status}`);
+    error.status = res.status;
+    throw error;
+  }
   return res.json();
 }
 
@@ -322,8 +645,10 @@ async function pollLoop(myGeneration) {
       await sleep(1000);
       continue;
     }
+    let safePollFailure = true;
     try {
       const next = await fetchNext(connection.base, connection.token, connection.tabId, connection.browserId);
+      safePollFailure = false;
       if (loopGeneration !== myGeneration) return; // paired out from under us
       lastPollSuccessAt = Date.now();
       lastPollError = "";
@@ -344,6 +669,19 @@ async function pollLoop(myGeneration) {
     } catch (error) {
       if (loopGeneration !== myGeneration) return;
       lastPollError = error.message || String(error);
+      if (connection.base === HOSTED_BRIDGE_BASE && safePollFailure) {
+        if (error.status === 401 || error.status === 403) return;
+        const retryable = !error.status || error.status === 409 || error.status >= 500;
+        if (retryable) {
+          try {
+            if (await recoverHostedConnection(connection, myGeneration)) continue;
+          } catch (recoveryError) {
+            if (loopGeneration !== myGeneration) return;
+            lastPollError = recoveryError.message || 'Hosted pairing recovery failed.';
+          }
+        }
+      }
+      if (!safePollFailure) return; // an action already ran; never fetch it again after a lost reply
       // Transport failure (bridge not running, laptop asleep, network
       // hiccup) -- distinct from a "blocked" page: nothing gets POSTed
       // here because there is no request id to reply to. Back off and
@@ -379,6 +717,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       let previousIsRemoteHosted = false;
       let hadLocalConnection = false;
       try {
+        if (senderIsNotExtensionPage(sender)) throw new Error('pair using the extension popup or side panel');
+        const workflow = beginConnectionWorkflow(message.connection);
+        if (message.connection?.base === HOSTED_BRIDGE_BASE) {
+          const response = await connectHosted(message, sender, workflow.generation, workflow.controller.signal);
+          assertConnectionWorkflow(workflow.generation, workflow.controller.signal);
+          sendResponse(response);
+          return;
+        }
         if (activeAction) throw new Error('A browser action is still running. Stop it before reconnecting.');
         // Pairing may only be requested by our own popup or panel, never page content.
         if (sender.id !== chrome.runtime.id || ![chrome.runtime.getURL('popup.html'), chrome.runtime.getURL('sidepanel.html')].includes(sender.url)) throw new Error('pair using the extension popup or side panel');
@@ -511,6 +857,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       if (sender.id !== chrome.runtime.id || ![chrome.runtime.getURL('popup.html'), chrome.runtime.getURL('sidepanel.html')].includes(sender.url)) { sendResponse({error:'disconnect using the popup'}); return; }
       if (activeAction) { sendResponse({error:'A browser action is still running. Wait for it to finish before disconnecting.'}); return; }
+      invalidateConnectionWorkflow();
       const c = await getConnection();
       stopPolling();
       let warning = '';
@@ -557,6 +904,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok:true, warning });
     })();
     return true;
+  }
+
+  if (message.type === 'ferro-cancel-connection') {
+    if (senderIsNotExtensionPage(sender)) { sendResponse({error:'cancel using the extension popup or side panel'}); return false; }
+    invalidateConnectionWorkflow();
+    sendResponse({ok:true});
+    return false;
   }
 
   if (message.type === 'ferro-content-ready') {
