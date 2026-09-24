@@ -501,3 +501,12 @@ Two rules for contributors, both recorded in `docs/adr/`:
 MIT. See `LICENSE`.
 
 For unpacked-extension tests, use a recent Chrome with the browser-target `Extensions.loadUnpacked` debugging API (`CHROME_PATH` overrides discovery). The harness enables extension debugging only in a disposable profile. Tests use local fixture sites.
+
+### Pairing connection status
+
+The pairing popup shows whether the configured bridge has answered recently and
+provides a single Connect/Disconnect button. Use the bridge address reported by
+`ferro-mcp status`; its port may differ from 4173. Reconnecting status means the
+pairing is configured but the bridge has not answered recently. Disconnect errors
+and unconfirmed remote disconnects remain visible. This reports bridge transport
+health, not whether the website is ready for a task.

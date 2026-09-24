@@ -92,3 +92,12 @@ screenshots, run a local model or add a browser process to your existing session
 The chat has no idle model calls; its elapsed-time timer runs only during a task.
 These are architectural properties, not a measured performance comparison with
 another extension. A real provider and live source still need qualification.
+
+## One panel for the paired tab
+
+Only the paired tab has a Ferro side panel. On other tabs, the toolbar opens a
+connection popup. Connect the active tab and confirm a switch before Ferro
+releases the previous pairing. Then choose **Open chat**. The paired tab's
+toolbar opens the panel directly. Disconnecting hides the panel without closing
+the webpage. The pairing token stays in Chrome session storage; if Chrome clears
+that storage, enter the token again.

@@ -144,7 +144,12 @@ $('connection-form').onsubmit = async event => {
     const token = $('token').value.trim() || connection?.token;
     if (!token) throw new Error('Paste the pairing token from bridge-token.');
     const next = {base, token, tabId:tab.id};
-    const reply = await chrome.runtime.sendMessage({type:'ferro-connect', connection:next});
+    let reply = await chrome.runtime.sendMessage({type:'ferro-connect', connection:next});
+    if (reply?.requiresConfirmation) {
+      if (!confirm('Disconnect the current tab and connect this one?')) { notice('Connection unchanged.'); return; }
+      reply = await chrome.runtime.sendMessage({type:'ferro-connect', connection:next, confirmDisconnectTab:reply.pairedTab});
+      if (reply?.requiresConfirmation) throw new Error('The paired tab changed. Click Connect current tab again.');
+    }
     if (!reply || reply.error) throw new Error(reply?.error || 'Could not pair this tab.');
     connection = next; $('token').value = '';
     await refresh(); await loadSettings();

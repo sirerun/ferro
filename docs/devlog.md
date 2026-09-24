@@ -205,3 +205,16 @@ manifest/action icons and retained the generated PNG master plus an SVG for UI
 use. The side-panel wordmark pulses a light outer ring; reduced-motion settings
 disable that animation. The old extension popup shares the mark. Updated the
 extension version so Chrome recognizes the UI/icon change.
+
+## 2026-09-24 — Scope Ferro panel to the paired tab
+
+Moved the panel handoff work onto current main without bringing along unrelated
+model-prompt refactoring or archived planning files. Unpaired tabs now open a
+connection popup; only the paired tab can open the panel. Switching requires
+confirmation, and the old tab's panel closes while its page stays open. Review
+also fixed disconnected bridge fields remaining disabled when session
+credentials exist, and made panel-update failures visible without reporting a
+successful browser pairing as failed. Bridge fields remain editable after
+disconnect, and changing the bridge URL sends the newly entered token. All 30
+extension tests passed, including both Chrome fixture tests in a disposable
+profile.
