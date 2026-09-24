@@ -112,12 +112,13 @@
     },
     {
       "id": "L02",
-      "state": "queued",
+      "state": "running",
       "model": "gpt-6-luna",
       "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
-      "branch": null,
-      "agent": null
+      "branch": "codex/bulk-v2-l02",
+      "agent": "headless codex exec",
+      "pid": 30798
     },
     {
       "id": "L03",
