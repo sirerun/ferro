@@ -353,7 +353,7 @@ func (r *Runner) executeWithRepairs(ctx context.Context, cdpCtx context.Context,
 		patched, ok, err := r.repairStep(ctx, rerr, snap, fresh, m)
 		if err != nil {
 			var repairStop *StopError
-			if errors.As(err, &repairStop) || isTaskV2BudgetFailure(err) || isProviderContextTerminationV2(err) {
+			if errors.As(err, &repairStop) || ctx.Err() != nil || isTaskV2BudgetFailure(err) || isProviderContextTerminationV2(err) {
 				return nil, extracted, &RunError{StepIndex: rerr.StepIndex, Action: rerr.Action, Err: err}
 			}
 		}
