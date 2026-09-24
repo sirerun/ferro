@@ -202,8 +202,8 @@ func normalizeProfileEndpointV2(raw string) (string, error) {
 	u.Host = host
 	if u.Path == "/" {
 		u.Path = ""
+		u.RawPath = ""
 	}
-	u.RawPath = ""
 	return strings.TrimRight(u.String(), "/"), nil
 }
 

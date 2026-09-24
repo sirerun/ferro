@@ -90,6 +90,34 @@ func TestUsageV2_UsageSurvivesChoiceFailure(t *testing.T) {
 	}
 }
 
+func TestUsageV2_MetadataSurvivesMalformedContent(t *testing.T) {
+	for _, tc := range []struct {
+		name, message string
+	}{
+		{"array content", `{"content":[]}`},
+		{"object content", `{"content":{"text":"not a string"}}`},
+		{"null content", `{"content":null}`},
+		{"missing content", `{}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprintf(w, `{"id":"response-123","model":"reported-model","choices":[{"message":%s}],"usage":{"prompt_tokens":9,"completion_tokens":4,"cost":0.000002}}`, tc.message)
+			}))
+			defer srv.Close()
+			got, err := (&OpenAICompatible{BaseURL: srv.URL, Model: "configured-model", UsageCostCurrency: "USD"}).CompleteWithUsage(context.Background(), "s", "u")
+			if err == nil {
+				t.Fatal("malformed content must not be accepted as a completion")
+			}
+			if got.Usage.InputTokens == nil || *got.Usage.InputTokens != 9 || got.Usage.OutputTokens == nil || *got.Usage.OutputTokens != 4 || got.Usage.BilledMicroUSD == nil || *got.Usage.BilledMicroUSD != 2 {
+				t.Fatalf("valid usage was discarded with malformed content: %+v", got.Usage)
+			}
+			if got.Model != "reported-model" || got.ProviderRequestID != "response-123" {
+				t.Fatalf("safe response identity was discarded: %+v", got)
+			}
+		})
+	}
+}
+
 func TestUsageV2_TimeoutAfterSend(t *testing.T) {
 	received := make(chan struct{})
 	release := make(chan struct{})

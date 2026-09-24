@@ -122,6 +122,16 @@ func TestProfilesV2_LegacyMapping(t *testing.T) {
 	}
 }
 
+func TestProfilesV2_PreservesEscapedEndpointPath(t *testing.T) {
+	profile, err := NewLegacyProfileV2("legacy-mcp", "https://EXAMPLE.com:443/gateway/team%2Fmodel/v1", "model", "ref", core.DefaultLimitsV2())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Endpoint != "https://example.com/gateway/team%2Fmodel/v1" {
+		t.Fatalf("escaped endpoint route changed during normalization: %q", profile.Endpoint)
+	}
+}
+
 func TestProfilesV2_NoKeyLegacyProfile(t *testing.T) {
 	profile, err := NewLegacyProfileV2("legacy-mcp", "http://localhost:8080/v1", "local-model", "", core.DefaultLimitsV2())
 	if err != nil {

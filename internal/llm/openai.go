@@ -56,16 +56,17 @@ var _ MetadataCompleterV2 = (*OpenAICompatible)(nil)
 const metadataBodyLimit = 2 << 20
 const metadataErrorBodyLimit = 8 << 10
 
-type metadataResponse struct {
-	ID      string `json:"id"`
-	Model   string `json:"model"`
-	Choices []struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-		FinishReason *string `json:"finish_reason"`
-	} `json:"choices"`
-	Usage *metadataUsage `json:"usage"`
+type metadataResponseEnvelope struct {
+	ID      json.RawMessage `json:"id"`
+	Model   json.RawMessage `json:"model"`
+	Choices json.RawMessage `json:"choices"`
+	Usage   json.RawMessage `json:"usage"`
+}
+type metadataChoice struct {
+	Message struct {
+		Content json.RawMessage `json:"content"`
+	} `json:"message"`
+	FinishReason *string `json:"finish_reason"`
 }
 type metadataUsage struct {
 	PromptTokens     *json.Number `json:"prompt_tokens"`
@@ -125,51 +126,81 @@ func (o *OpenAICompatible) CompleteWithUsage(ctx context.Context, system, user s
 	}
 	data, readErr := io.ReadAll(io.LimitReader(resp.Body, limit+1))
 	if readErr != nil {
-		var partial metadataResponse
-		if json.Unmarshal(data, &partial) == nil {
-			result.Model = boundedString(partial.Model, 256)
-			if result.Model == "" {
-				result.Model = boundedString(o.Model, 256)
-			}
-			if partial.ID != "" {
-				result.ProviderRequestID = boundedString(partial.ID, 256)
-			}
-			if partial.Usage != nil {
-				_ = decodeMetadataUsage(&result.Usage, partial.Usage, o.UsageCostCurrency == "USD")
-			}
-		}
+		_, _ = decodeMetadataEnvelope(data, &result, o)
 		return result, fmt.Errorf("llm: read provider response failed (http %d)", resp.StatusCode)
 	}
 	if int64(len(data)) > limit {
 		return result, fmt.Errorf("llm: provider response exceeds %d bytes", limit)
 	}
-	var decoded metadataResponse
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		return result, fmt.Errorf("llm: decode provider response")
-	}
-	result.Model = boundedString(decoded.Model, 256)
-	if result.Model == "" {
-		result.Model = boundedString(o.Model, 256)
-	}
-	if decoded.ID != "" {
-		result.ProviderRequestID = boundedString(decoded.ID, 256)
-	}
-	if decoded.Usage != nil {
-		if err := decodeMetadataUsage(&result.Usage, decoded.Usage, o.UsageCostCurrency == "USD"); err != nil {
-			return result, err
-		}
+	choicesRaw, metadataErr := decodeMetadataEnvelope(data, &result, o)
+	if metadataErr != nil {
+		return result, metadataErr
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return result, fmt.Errorf("llm: provider returned http %d", resp.StatusCode)
 	}
-	if len(decoded.Choices) == 0 {
+	var decoded []metadataChoice
+	if len(choicesRaw) == 0 || string(choicesRaw) == "null" {
 		return result, fmt.Errorf("llm: provider response has no choices")
 	}
-	result.Text = decoded.Choices[0].Message.Content
-	if decoded.Choices[0].FinishReason != nil {
-		result.FinishReason = boundedString(*decoded.Choices[0].FinishReason, 128)
+	if err := json.Unmarshal(choicesRaw, &decoded); err != nil {
+		return result, fmt.Errorf("llm: decode provider choices")
+	}
+	if len(decoded) == 0 {
+		return result, fmt.Errorf("llm: provider response has no choices")
+	}
+	content := bytes.TrimSpace(decoded[0].Message.Content)
+	if len(content) == 0 || bytes.Equal(content, []byte("null")) {
+		return result, fmt.Errorf("llm: provider response has invalid content")
+	}
+	if err := json.Unmarshal(content, &result.Text); err != nil {
+		return result, fmt.Errorf("llm: provider response has invalid content")
+	}
+	if decoded[0].FinishReason != nil {
+		result.FinishReason = boundedString(*decoded[0].FinishReason, 128)
 	}
 	return result, nil
+}
+
+// decodeMetadataEnvelope keeps top-level usage and identity parsing independent
+// from choice/content validation so malformed content cannot erase valid spend.
+func decodeMetadataEnvelope(data []byte, result *core.CompletionV2, o *OpenAICompatible) (json.RawMessage, error) {
+	var envelope metadataResponseEnvelope
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return nil, fmt.Errorf("llm: decode provider response")
+	}
+	var identityErr error
+	if len(envelope.Model) > 0 && !bytes.Equal(bytes.TrimSpace(envelope.Model), []byte("null")) {
+		var model string
+		if err := json.Unmarshal(envelope.Model, &model); err != nil {
+			identityErr = fmt.Errorf("llm: invalid provider response model")
+		} else {
+			result.Model = boundedString(model, 256)
+		}
+	}
+	if result.Model == "" {
+		result.Model = boundedString(o.Model, 256)
+	}
+	if len(envelope.ID) > 0 && !bytes.Equal(bytes.TrimSpace(envelope.ID), []byte("null")) {
+		var id string
+		if err := json.Unmarshal(envelope.ID, &id); err != nil {
+			if identityErr == nil {
+				identityErr = fmt.Errorf("llm: invalid provider response id")
+			}
+		} else if id != "" {
+			result.ProviderRequestID = boundedString(id, 256)
+		}
+	}
+	if len(envelope.Usage) > 0 && !bytes.Equal(bytes.TrimSpace(envelope.Usage), []byte("null")) {
+		var usage metadataUsage
+		if err := json.Unmarshal(envelope.Usage, &usage); err != nil {
+			return envelope.Choices, fmt.Errorf("llm: decode provider usage")
+		}
+		if err := decodeMetadataUsage(&result.Usage, &usage, o.UsageCostCurrency == "USD"); err != nil {
+			return envelope.Choices, err
+		}
+	}
+	return envelope.Choices, identityErr
 }
 
 func boundedString(s string, max int) string {
