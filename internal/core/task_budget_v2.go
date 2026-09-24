@@ -317,6 +317,28 @@ func validateCompletionUsageV2(completion CompletionV2) error {
 			return fmt.Errorf("reported usage requires a received response")
 		}
 	}
+	if completion.Transmission == TransmissionResponseReceivedV2 && completion.Usage.TotalTokens != nil {
+		input, output := completion.Usage.InputTokens, completion.Usage.OutputTokens
+		var minimum int64
+		if input != nil {
+			minimum = *input
+		}
+		if output != nil {
+			if *output > minimum {
+				minimum = *output
+			}
+		}
+		if input != nil && output != nil {
+			sum, ok := addNonnegativeV2(*input, *output)
+			if !ok {
+				return fmt.Errorf("reported input and output token sum overflow")
+			}
+			minimum = sum
+		}
+		if *completion.Usage.TotalTokens < minimum {
+			return fmt.Errorf("reported total tokens are below reported input/output")
+		}
+	}
 	return nil
 }
 

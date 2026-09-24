@@ -140,7 +140,7 @@ func TestBudgetV2_Overflow(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := budget.Reconcile(first.ID, CompletionV2{Transmission: TransmissionResponseReceivedV2, Usage: RequestUsageV2{
-		InputTokens: usagePtrV2(math.MaxInt64), TotalTokens: usagePtrV2(0),
+		BilledMicroUSD: usagePtrV2(math.MaxInt64), TotalTokens: usagePtrV2(0),
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +150,7 @@ func TestBudgetV2_Overflow(t *testing.T) {
 	}
 	before := budget.Snapshot()
 	err = budget.Reconcile(second.ID, CompletionV2{Transmission: TransmissionResponseReceivedV2, Usage: RequestUsageV2{
-		InputTokens: usagePtrV2(1), TotalTokens: usagePtrV2(0),
+		BilledMicroUSD: usagePtrV2(1), TotalTokens: usagePtrV2(0),
 	}})
 	if err == nil {
 		t.Fatal("overflowing reported input subtotal accepted")
@@ -158,7 +158,7 @@ func TestBudgetV2_Overflow(t *testing.T) {
 	if after := budget.Snapshot(); !reflect.DeepEqual(before, after) {
 		t.Fatalf("overflowing reconciliation mutated accounting: before=%+v after=%+v", before, after)
 	}
-	if err := budget.Reconcile(second.ID, CompletionV2{Transmission: TransmissionResponseReceivedV2, Usage: RequestUsageV2{TotalTokens: usagePtrV2(math.MaxInt64)}}); err != nil {
+	if err := budget.Reconcile(second.ID, CompletionV2{Transmission: TransmissionResponseReceivedV2, Usage: RequestUsageV2{TotalTokens: usagePtrV2(0)}}); err != nil {
 		t.Fatalf("valid reconciliation after rejected overflow failed: %v", err)
 	}
 }
@@ -223,6 +223,60 @@ func TestBudgetV2_MalformedCompletionIsNonmutating(t *testing.T) {
 	}
 	if after := budget.Snapshot(); !reflect.DeepEqual(before, after) {
 		t.Fatalf("negative usage mutated accounting: before=%+v after=%+v", before, after)
+	}
+}
+
+func TestBudgetV2_InconsistentTotalIsNonmutating(t *testing.T) {
+	budget, _, err := budgetTestClockV2()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation, err := budget.Admit(context.Background(), budgetKindPlanningV2, 1, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := budget.Snapshot()
+	underreported := CompletionV2{Transmission: TransmissionResponseReceivedV2, Usage: RequestUsageV2{
+		InputTokens: usagePtrV2(1), TotalTokens: usagePtrV2(0),
+	}}
+	if err := budget.Reconcile(reservation.ID, underreported); err == nil {
+		t.Fatal("zero total below reported input was accepted")
+	}
+	if after := budget.Snapshot(); !reflect.DeepEqual(before, after) {
+		t.Fatalf("underreported total mutated accounting: before=%+v after=%+v", before, after)
+	}
+	corrected := CompletionV2{Transmission: TransmissionResponseReceivedV2, Usage: RequestUsageV2{
+		InputTokens: usagePtrV2(1), TotalTokens: usagePtrV2(1),
+	}}
+	if err := budget.Reconcile(reservation.ID, corrected); err != nil {
+		t.Fatalf("reservation was marked reconciled after invalid total: %v", err)
+	}
+}
+
+func TestBudgetV2_ReportedTokenSumOverflowIsNonmutating(t *testing.T) {
+	budget, _, err := budgetTestClockV2()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation, err := budget.Admit(context.Background(), budgetKindPlanningV2, 1, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := budget.Snapshot()
+	overflow := CompletionV2{Transmission: TransmissionResponseReceivedV2, Usage: RequestUsageV2{
+		InputTokens: usagePtrV2(math.MaxInt64), OutputTokens: usagePtrV2(1), TotalTokens: usagePtrV2(math.MaxInt64),
+	}}
+	if err := budget.Reconcile(reservation.ID, overflow); err == nil {
+		t.Fatal("overflowing reported input/output sum was accepted")
+	}
+	if after := budget.Snapshot(); !reflect.DeepEqual(before, after) {
+		t.Fatalf("overflowing reported token sum mutated accounting: before=%+v after=%+v", before, after)
+	}
+	corrected := CompletionV2{Transmission: TransmissionResponseReceivedV2, Usage: RequestUsageV2{
+		InputTokens: usagePtrV2(math.MaxInt64), TotalTokens: usagePtrV2(math.MaxInt64),
+	}}
+	if err := budget.Reconcile(reservation.ID, corrected); err != nil {
+		t.Fatalf("reservation was marked reconciled after overflow: %v", err)
 	}
 }
 
