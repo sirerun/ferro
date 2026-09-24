@@ -1,0 +1,126 @@
+{
+  "schema": "ferro.bulk-contract-lock/v1",
+  "revision": 2,
+  "source_base_revision": "603b94c1f566be151e9a6e156298cb3f87d6f6de",
+  "files": [
+    {
+      "path": "internal/core/task_contract_v2.go",
+      "sha256": "52186dfdbbbb19baa6bf2bacaed49efe6a1d2179fc268aa34ca53a4d8d8c8435"
+    },
+    {
+      "path": "internal/core/task_contract_v2_test.go",
+      "sha256": "c22e12de48b78dfdc7ef985a25bbb6578ec54a24b55280ae30e1b10b05ad54d6"
+    },
+    {
+      "path": "internal/mcp/task_contract_v2.go",
+      "sha256": "705fc258b06c7e4cfc67004cf3f12b0905ca27b2eb6dcd8cf832c3e2f5e19c12"
+    },
+    {
+      "path": "internal/mcp/task_contract_v2_test.go",
+      "sha256": "f7d9af6f8591cfe6de2c9c4b1e2c516b579df092e1f4729ab2556c0075d1984f"
+    },
+    {
+      "path": "internal/llm/usage_contract_v2.go",
+      "sha256": "fcb356d892501226273f579fd2c10e1054215fa01f5127c892cb33407615a9ba"
+    },
+    {
+      "path": "internal/llm/usage_contract_v2_test.go",
+      "sha256": "193d944096303b371022601bcca2293a4d050e85f74726f509db75d0df192247"
+    },
+    {
+      "path": "docs/contracts/bulk-v2.md",
+      "sha256": "7fc6b4916bbf5d36771b3fc03a874d2b29dcd6014eff9c921dfe129c33f10305"
+    },
+    {
+      "path": "docs/contracts/provider-usage-notes.md",
+      "sha256": "2d0ffc02a689997930d20bbcae3e8d45773b202762be90ffaf0e3683825f69d9"
+    },
+    {
+      "path": "docs/adr/009-bounded-task-contract.md",
+      "sha256": "0a2de245252b3a874336c8f2bf00a1139ec0fe70194b0e20628915bf9c55c261"
+    },
+    {
+      "path": "docs/contracts/check_bulk_v2.py",
+      "sha256": "69c818c3787431641305e891ad0e62e015c0f61cd90b869f4953b213b03512b1"
+    },
+    {
+      "path": "docs/contracts/check_bulk_lock.py",
+      "sha256": "ba6e69c61252db28ad34ac9099b266def75002ae26114b6f79c8221cafeac1eb"
+    },
+    {
+      "path": "docs/contracts/bulk-v2/profile.json",
+      "sha256": "3a866d0454310f4ff0b1c179fae06c1c4c2b1e07bfb676b09431448047e4ef24"
+    },
+    {
+      "path": "docs/contracts/bulk-v2/receipt.json",
+      "sha256": "f795b50d74c89f3ff23c7894370391454e11dd1ea9eaa374605713cb8f82e613"
+    },
+    {
+      "path": "docs/contracts/bulk-v2/request-invalid.json",
+      "sha256": "58f59d9526cb99bfc2770db2d09cc3cdfc9229ca08de4b3f7e627dfbc23dcdf8"
+    },
+    {
+      "path": "docs/contracts/bulk-v2/request-valid.json",
+      "sha256": "432932130d7d766e3d8845bb46c20d022cb4d9999cbdc113850d9d920e37994d"
+    },
+    {
+      "path": "docs/contracts/bulk-v2/result-failure.json",
+      "sha256": "99181966a4d6196b819b871b8bb084b882dd509b364ed152685f1ee63161e9ff"
+    },
+    {
+      "path": "docs/contracts/bulk-v2/result-success.json",
+      "sha256": "a9abed9e903c3e7b24492e62ce51a9fbe16d6e2bf949e63ffa980298a53119c5"
+    },
+    {
+      "path": "docs/contracts/bulk-v2/usage.json",
+      "sha256": "bac1add9005fb9ee19b292e656a70769066aefe7d8b5250ba998af54b2cb5f3a"
+    }
+  ],
+  "signatures": {
+    "L01": [
+      "NewProfileResolverV2(source ProfileSourceV2, credentials CredentialResolverV2) (ProfileResolverV2, error)",
+      "NewLegacyProfileV2(name, endpoint, model, credentialRef string, limits core.LimitsV2) (ProfileV2, error)",
+      "DescribeProfileV2(profile ProfileV2) ProfileDescriptionV2"
+    ],
+    "L02": [
+      "(*OpenAICompatible).CompleteWithUsage(context.Context, string, string) (core.CompletionV2, error)",
+      "OpenAICompatible.UsageCostCurrency string"
+    ],
+    "L03": [
+      "NewTaskBudgetV2(limits LimitsV2, started time.Time) (BudgetControllerV2, error)"
+    ],
+    "L04": [
+      "NewTaskPolicyDriverV2(driver core.PageDriver, policy TaskPolicyV2, guard TaskPolicyGuardV2, budget core.BudgetControllerV2) (core.PageDriver, error)"
+    ],
+    "L05": [
+      "PreflightSchemaV2(raw json.RawMessage) error",
+      "ValidateResultV2(raw json.RawMessage, value any) error"
+    ],
+    "L06": [
+      "ReplayIdentityV2(ctx ReplayContextV2) (string, error)"
+    ],
+    "L07": [
+      "OpenReceiptStoreV2(directory string, maxBytes int64) (ReceiptStoreV2, error)"
+    ],
+    "L08": [
+      "BuildTaskResultV2(ctx context.Context, record ExecutionRecordV2, sink ArtifactSinkV2) (TaskResultV2, error)"
+    ],
+    "L09": [
+      "Consume RunTaskV2Request and TaskResultV2 from locked contracts; fixture-only"
+    ],
+    "L10": [
+      "Consume locked JSON fixtures and checker; documentation-only"
+    ]
+  },
+  "import_direction": {
+    "core": "no internal/mcp or internal/llm imports",
+    "llm": "may import core",
+    "mcp": "may import core and llm"
+  },
+  "checks": [
+    "python3 docs/contracts/check_bulk_lock.py",
+    "GOWORK=off go test ./internal/core ./internal/llm ./internal/mcp",
+    "python3 docs/contracts/check_bulk_v2.py"
+  ],
+  "fixtures": "request-valid/result-success/result-failure are accepted; request-invalid is rejected; TestContractFixturesV2 checks actual validators"
+}

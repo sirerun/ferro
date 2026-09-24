@@ -58,7 +58,7 @@ The lock must contain: schema version; source base revision; path and SHA-256 of
 Freeze all of these, with explicit values rather than “choose appropriate”:
 
 1. Exact JSON field names and optionality; represent missing numeric provider usage distinctly from zero.
-2. Exact Go symbols/signatures for resolver, credential lookup, usage completion, admission/reservation/reconciliation, policy wrapper, schema preflight, replay identity, receipt store and result builder. Each L lane must be able to compile against them without sibling lane commits. Use narrow consuming interfaces and injected test dependencies.
+2. Exact Go symbols/signatures for resolver, credential lookup, usage completion, admission/reservation/reconciliation, policy wrapper, schema preflight, replay identity, receipt store and result builder. Shared types and consuming interfaces must be real compilable declarations. Constructors/helpers implemented by a packet have exact signatures frozen in the lock and contract document; that packet defines their bodies. Do not add placeholder production functions merely to declare those future symbols. Each L lane must compile independently against the shared declarations, with injected test dependencies instead of sibling implementations.
 3. Profile storage and revision format, atomic update semantics, credential reference behavior and legacy mapping. No paid default model selected by a cheap lane.
 4. Stable typed error/status/retry mapping, including failed versus uncertain transmission and lost-return receipts. Freeze authenticated lookup by owner-scoped task_id when execution_id was never received; atomic same-key/same-digest admission, changed-input conflict, concurrent duplicate behavior, recovery retention/tombstones and expiry behavior are required.
 5. Counters: count provider network attempts, all planning passes including initial pass, all repair/extraction attempts; define action units exactly. Recommended action unit: each admitted non-internal PageDriver operation; internal Settle does not count twice when part of another operation. Instrumentation must not recursively count its own origin-check snapshot.
@@ -70,7 +70,7 @@ Freeze all of these, with explicit values rather than “choose appropriate”:
 11. Existing public LLMClient and legacy run_task remain source/wire compatible. The metadata path issues one HTTP request, not one request per interface.
 12. Provider fixture mapping based on reviewed official documentation. Record provider-document date/links; no expensive live call needed to freeze deterministic parsing behavior.
 
-Acceptance: contract packages compile and contract tests pass; all ten packets reference actual defined signatures; a dependency/import check finds no cycle; each worker's scope can be implemented without editing another worker's files. Gate failure blocks dispatch. A frontier reviewer reviews this lock before implementation assignments.
+Acceptance: contract packages compile and contract tests pass; all ten packets reference declared consuming types/interfaces and exactly documented lane-owned implementation signatures; a dependency/import check finds no cycle; each worker's scope can be implemented without editing another worker's files. Gate failure blocks dispatch. A frontier reviewer reviews this lock before implementation assignments.
 
 ## 4. Session launch and branch protocol
 
@@ -145,7 +145,7 @@ Integrate accepted commits in deterministic order: L02, L03, L05, L06, L01, L04,
 
 G02 exclusively owns runner.go, executor.go, repair.go, ferro.go, existing cache/schema changes if needed, tools_run_task.go, owner.go, server.go, config.go, chat.go and CLI registration. It must:
 
-1. Preserve legacy behavior and add run_task_v2 registration using frozen wire types.
+1. Preserve legacy behavior and add run_task_v2 registration using frozen wire types. Call ValidateTaskRequestV2 on the original request bytes before typed receipt admission; contract revision 2 separates the raw 64 KiB wire limit from normalized semantic validation.
 2. Wire immutable profiles and metadata client; attach the admission wrapper so ALL planner, parse-retry, repair and extraction calls go through it.
 3. Establish one execution deadline and action counter; wrap the actual PageDriver with policy and ownership checks without recursively counting guard snapshots.
 4. Pass schema/replay state through the core Task; preflight before paid work and validate before success.

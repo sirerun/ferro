@@ -87,8 +87,11 @@ outside this change. See ADR 008 and README's setup sections.
   allowlist, the doFill and planner-prompt fixes, `MaxPlannings`,
   `FERRO_MCP_MAX_ELEMENTS`) is reachable from `main`.
 
+## Completed foundation components — 2026-09-24
+- [PR #16](https://github.com/sirerun/ferro/pull/16): contract revision 2, profiles, usage accounting, budgets, read-only policy driver, schemas and durable receipts (L01–L05, L07). Fresh headless review and combined race/real-Chrome/vet/contract checks passed; see [review evidence](evidence/bulk-v2/review-2026-09-24.md). Runtime wiring and live qualification are pending.
+
 ## In progress
-- (none)
+- Bulk-browser execution: L06 replay, L08 result assembly, G02 runtime composition, L09 fixtures, L10 operator documentation and G03 qualification remain to be implemented or completed from the revision-2 baseline.
 
 ## In flight
 - (none)
