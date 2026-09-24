@@ -145,7 +145,7 @@ Integrate accepted commits in deterministic order: L02, L03, L05, L06, L01, L04,
 
 G02 exclusively owns runner.go, executor.go, repair.go, ferro.go, existing cache/schema changes if needed, tools_run_task.go, owner.go, server.go, config.go, chat.go and CLI registration. It must:
 
-1. Preserve legacy behavior and add run_task_v2 registration using frozen wire types.
+1. Preserve legacy behavior and add run_task_v2 registration using frozen wire types. Call ValidateTaskRequestV2 on the original request bytes before typed receipt admission; contract revision 2 separates the raw 64 KiB wire limit from normalized semantic validation.
 2. Wire immutable profiles and metadata client; attach the admission wrapper so ALL planner, parse-retry, repair and extraction calls go through it.
 3. Establish one execution deadline and action counter; wrap the actual PageDriver with policy and ownership checks without recursively counting guard snapshots.
 4. Pass schema/replay state through the core Task; preflight before paid work and validate before success.

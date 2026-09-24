@@ -17,3 +17,9 @@ L01–L10 can implement against additive types after review. G01 does not create
 core.ValidateSchemaShapeV2 bridges bounded schema preflight to the existing private validator. L05 consumes that helper without replacing validation semantics. Provider metadata uses one HTTP attempt and explicit optional cost-currency mapping. Monetary reserve admission remains unsupported without a verified rate contract. Output larger than the inline limit uses an explicit accepted-result artifact reference, not a truncated or invalid inline success.
 
 All tool schemas are generic MCP consumer contracts. External schedulers own durable queues and batch orchestration; Ferro owns bounded browser execution and receipts. No particular orchestrator is an implementation dependency. Hosted account authority and direct mutation approval remain separate reviewed extensions.
+
+## Contract revision 2 — wire and semantic validation
+
+Fresh review reproduced exact-limit requests rejected after defaults or Unicode origin normalization expanded their serialized size. The 64 KiB request limit applies to original JSON at `ValidateTaskRequestV2`, before decoding and normalization. A shared private semantic validator enforces field limits, policy, schema and evidence rules for decoded requests and typed receipt admission. Canonical hashing consumes the normalized result without charging normalization expansion against the original wire budget. The typed receipt API cannot reconstruct original byte length; every future G02 handler must call the wire validator before admission.
+
+This refactor preserves wire literals, public signatures and raw-input limits. It replaces the serialization/projection workaround, increments the contract lock, and requires affected consumers to adopt the new frozen baseline and rerun their checks. No implementation lane was running against the prior lock when this amendment was made.

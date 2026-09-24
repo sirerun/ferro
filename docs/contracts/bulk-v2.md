@@ -1,10 +1,12 @@
-# Ferro task contract v2 — contract revision 1
+# Ferro task contract v2 — contract revision 2
 
-Status: accepted for local bounded read-only implementation, 2026-09-24. Core, provider and MCP package tests plus the actual fixture validator passed on the combined code. Independent contract review findings are resolved. CONTRACT_SHA is recorded separately in the dispatch ledger; each packet verifies the file lock before editing. This is not runtime or hosted qualification.
+Status: local bounded read-only implementation contract, 2026-09-24. CONTRACT_SHA and acceptance/verification status are recorded in the dispatch ledger and foundation review evidence; each packet verifies the file lock before editing. This is not runtime or hosted qualification.
 
 ## Wire types and bounds
 
 The request literal is `ferro.task/v2`; result literal is `ferro.result/v2`. `RunTaskV2Request` carries required `task_id`, `goal`, `model_profile`, `output_schema`, and `policy`; numeric overrides are pointers so an omitted value differs from explicit zero. All supplied numerical limits must be positive; zero is rejected. Optional `start_url` must have an allowed policy origin; `replay_key` is only a caller label. Goal is at most 16 KiB UTF-8 bytes, schema at most 32 KiB/depth 16, request at most 64 KiB. Task IDs are ASCII `[A-Za-z0-9_-]{1,128}`. Unknown request fields and trailing JSON are rejected. Evidence is `compact` or `artifacts`; omitted means compact.
+
+Revision 2 clarifies the validation boundary without changing wire literals, limits or public signatures. `ValidateTaskRequestV2` enforces the 64 KiB limit on original JSON before decoding. Shared semantic validation checks and normalizes typed fields; receipt admission and canonical hashing reuse it without reapplying the original byte limit after defaults or Unicode origin normalization. Internal callers must validate original wire bytes before typed admission. An already-normalized struct cannot prove the length of its original encoding. See ADR 009.
 
 Pilot ceilings: runtime 90,000 ms; actions 20; model requests 3; repairs 1; planning passes 2; output tokens 2,048; input tokens 12,000; total reserved tokens 24,000. Overrides only tighten the service-configured value. A monetary reserve cannot be implemented without a verified rate input. The initial L03 constructor has none, so it rejects every nonnil reserve with ErrUnsupportedCostReserveV2. Hard-dollar mode is rejected with ErrUnsupportedHardDollarV2. Actual reported costs remain nullable and are retained independently.
 

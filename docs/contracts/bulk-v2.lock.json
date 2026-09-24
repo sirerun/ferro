@@ -1,7 +1,7 @@
 {
   "schema": "ferro.bulk-contract-lock/v1",
-  "revision": 1,
-  "source_base_revision": "1716aaf47093c64c47fa7f8a9da19adf20182f55",
+  "revision": 2,
+  "source_base_revision": "603b94c1f566be151e9a6e156298cb3f87d6f6de",
   "files": [
     {
       "path": "internal/core/task_contract_v2.go",
@@ -13,7 +13,7 @@
     },
     {
       "path": "internal/mcp/task_contract_v2.go",
-      "sha256": "76d7d90c9047e23c624192179c089d75476bea29cd16cfd2c551e3392845ac0c"
+      "sha256": "705fc258b06c7e4cfc67004cf3f12b0905ca27b2eb6dcd8cf832c3e2f5e19c12"
     },
     {
       "path": "internal/mcp/task_contract_v2_test.go",
@@ -29,7 +29,7 @@
     },
     {
       "path": "docs/contracts/bulk-v2.md",
-      "sha256": "f28b168d46030254ed2f481f88de54dd834b59e97dd222c70a3139501c91183a"
+      "sha256": "7fc6b4916bbf5d36771b3fc03a874d2b29dcd6014eff9c921dfe129c33f10305"
     },
     {
       "path": "docs/contracts/provider-usage-notes.md",
@@ -37,7 +37,7 @@
     },
     {
       "path": "docs/adr/009-bounded-task-contract.md",
-      "sha256": "7272592b0a5e7c2e0136740d3e518617ac8a2c7b7754edf9c56c151ca8430999"
+      "sha256": "0a2de245252b3a874336c8f2bf00a1139ec0fe70194b0e20628915bf9c55c261"
     },
     {
       "path": "docs/contracts/check_bulk_v2.py",
