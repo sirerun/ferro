@@ -276,7 +276,7 @@ Environment variables:
 | `FERRO_MCP_LLM_API_KEY` | API key, if the endpoint needs one |
 | `FERRO_MCP_CHROME_USER_DATA_DIR` | Chrome profile directory. Default `$FERRO_MCP_HOME/chrome-profile` |
 | `FERRO_MCP_CHROME_PROFILE_DIRECTORY` | Chrome's `--profile-directory` value, for a user data dir holding more than one profile |
-| `FERRO_MCP_START_URL` | Optional initial navigation when the owner starts |
+| `FERRO_MCP_START_URL` | Optional initial navigation for the `cdp` backend; ignored by `extension` |
 | `FERRO_MCP_HEADLESS` | `true` to run headless (default `false`) |
 | `FERRO_MCP_CACHE_PATH` | Resolution/replay cache path (see Replay and extraction, above) |
 | `FERRO_MCP_MAX_REPAIRS` | Per-task repair budget (default 2) |
@@ -377,7 +377,9 @@ website tab you want to use, enter the service URL and the token from
 `~/.ferro-mcp/bridge-token`, and choose **Connect current tab**. Connecting a
 different tab releases the prior pairing first; only one tab is controlled at a
 time. The token stays in Chrome's session storage, so pair again after Chrome
-restarts. The service writes the token to a private file and never prints it.
+restarts. Pairing replaces the previous tab when its poll has ended; if its poll
+is still shutting down, the panel shows that server response and asks you to
+retry. The service writes the token to a private file and never prints it.
 
 Configure a local MCP client to run the same binary with
 `FERRO_MCP_BACKEND=extension` and the same `FERRO_MCP_HOME`. It will relay to the
@@ -484,9 +486,10 @@ Two rules for contributors, both recorded in `docs/adr/`:
 
 ## Limitations
 
-- Element targeting resolves refs to CSS selectors by signature. Identical
-  elements under different headings can collide; the repairer and the
-  resolution cache mitigate this but do not eliminate it.
+- The `cdp` backend resolves refs to CSS selectors by signature. The extension
+  backend uses a unique DOM path and checks the live tag, role, accessible name,
+  text and link path against the snapshot before acting; a stale target is
+  rejected and can be repaired from a fresh snapshot.
 - The snapshot is text only. Canvas-heavy or image-driven pages are out of
   scope for now.
 - No anti-bot evasion beyond standard launch flags.

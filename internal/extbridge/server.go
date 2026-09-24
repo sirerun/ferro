@@ -112,25 +112,43 @@ func (b *Bridge) handleNext(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, TabIDHeader+" header is required", http.StatusBadRequest)
 		return
 	}
-	if err := b.pair(tabID); err != nil {
+	b.mu.Lock()
+	if err := b.pairLocked(tabID); err != nil {
+		b.mu.Unlock()
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
-
-	b.mu.Lock()
 	generation := b.generation
+	b.activePolls[tabID]++
 	b.mu.Unlock()
+	defer func() {
+		b.mu.Lock()
+		b.activePolls[tabID]--
+		if b.activePolls[tabID] <= 0 {
+			delete(b.activePolls, tabID)
+		}
+		b.mu.Unlock()
+	}()
 	timer := time.NewTimer(b.pollTimeout)
 	defer timer.Stop()
 	for {
 		select {
 		case pa := <-b.queue:
 			b.mu.Lock()
-			if generation != b.generation || pa.generation != generation || b.pairedTab != tabID {
+			if generation != b.generation || b.pairedTab != tabID {
+				// A long poll from the previous tab may still be unwinding after
+				// disconnect. Preserve commands queued for the new generation.
+				if pa.generation == b.generation && b.pairedTab != "" {
+					b.queue <- pa
+				}
 				b.mu.Unlock()
-				b.deliver(pa.id, Reply{Code: "pairing_changed", Error: "pairing changed before dispatch"})
 				http.Error(w, "pairing changed", 409)
 				return
+			}
+			if pa.generation != generation {
+				b.mu.Unlock()
+				b.deliver(pa.id, Reply{Code: "pairing_changed", Error: "pairing changed before dispatch"})
+				continue
 			}
 			_, waiting := b.waiting[pa.id]
 			live := waiting && pa.ctx.Err() == nil
@@ -217,7 +235,7 @@ func (b *Bridge) handlePair(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing tab id", 400)
 		return
 	}
-	if err := b.pair(id); err != nil {
+	if err := b.pairExplicit(id); err != nil {
 		http.Error(w, err.Error(), 409)
 		return
 	}

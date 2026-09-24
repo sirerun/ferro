@@ -46,9 +46,10 @@ type Owner struct {
 	// are page-specific), and resolves refs for click/fill/select/extract;
 	// extracted persists {{extract.last...}} state across primitive calls,
 	// the same templating vocabulary run_task's plans use.
-	exec      *core.Executor
-	snap      *core.Snapshot
-	extracted map[string]any
+	exec           *core.Executor
+	snap           *core.Snapshot
+	snapGeneration uint64
+	extracted      map[string]any
 
 	listener net.Listener
 
@@ -136,6 +137,9 @@ func NewOwner(ctx context.Context, cfg Config) (*Owner, error) {
 		if err != nil {
 			log.Printf("initial navigation to %q failed; service will continue: %v", cfg.StartURL, err)
 		}
+	}
+	if cfg.StartURL != "" && cfg.Backend == "extension" {
+		log.Printf("FERRO_MCP_START_URL is ignored with the extension backend; navigate explicitly after pairing")
 	}
 	if cfg.Remote {
 		if err := o.startRemote(ctx); err != nil {
@@ -305,6 +309,7 @@ func (o *Owner) Call(ctx context.Context, tool string, args json.RawMessage) (st
 	if o.leaseOwner != "" && time.Now().After(o.leaseUntil) {
 		o.leaseOwner = ""
 		o.snap = nil
+		o.snapGeneration = 0
 		o.extracted = map[string]any{}
 	}
 	if o.leaseOwner != "" && o.leaseOwner != who {

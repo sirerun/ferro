@@ -10,6 +10,18 @@ import (
 	"time"
 )
 
+func TestLeaderForwardsStopFromPromotedOwner(t *testing.T) {
+	leader := &Leader{stopRequested: make(chan struct{})}
+	owner := &Owner{stopCh: make(chan struct{})}
+	leader.watchOwner(owner)
+	owner.requestStop()
+	select {
+	case <-leader.StopRequested():
+	case <-time.After(time.Second):
+		t.Fatal("promoted owner stop was not forwarded")
+	}
+}
+
 // TestLeaderElection_TwoProcessesRaceToOwn is T11.2's acceptance test:
 // starting two ferro-mcp "processes" (Leader instances, standing in for two
 // separate OS processes as far as flock/socket semantics are concerned —

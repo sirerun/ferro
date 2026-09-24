@@ -2,6 +2,8 @@ package core
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -131,7 +133,15 @@ func firstField(s string) string {
 // now (see repair.go and the RFC discussion).
 func buildSelector(e Element) string {
 	if e.Selector != "" {
-		return e.Selector
+		target, _ := json.Marshal(struct {
+			Selector string `json:"selector"`
+			Tag      string `json:"tag"`
+			Role     string `json:"role,omitempty"`
+			Name     string `json:"name,omitempty"`
+			Text     string `json:"text,omitempty"`
+			HREF     string `json:"href,omitempty"`
+		}{e.Selector, e.Tag, e.Role, e.Name, e.Text, e.HREF})
+		return "ferro-target:" + base64.RawURLEncoding.EncodeToString(target)
 	}
 	if e.HREF != "" && e.Tag == "a" {
 		return fmt.Sprintf(`a[href^="%s"]`, cssEscape(e.HREF))

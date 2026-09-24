@@ -68,6 +68,7 @@ func (o *Owner) runTask(ctx context.Context, args json.RawMessage) (any, error) 
 		return nil, fmt.Errorf("run_task requires FERRO_MCP_LLM_BASE_URL and FERRO_MCP_LLM_MODEL; direct browser tools do not")
 	}
 	o.snap = nil
+	o.snapGeneration = 0
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
 	result, metrics, err := runner.RunDriver(runCtx, driver, o.cfg.MaxElements, ferro.Task{

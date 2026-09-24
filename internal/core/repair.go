@@ -30,7 +30,7 @@ func Classify(rerr *RunError) ErrorClass {
 	msg := rerr.Err.Error()
 	switch rerr.Action.Kind {
 	case KindClick, KindFill, KindSelect:
-		if containsAny(msg, "no snapshot", "not in snapshot", "no such element", "not visible") {
+		if containsAny(msg, "no snapshot", "not in snapshot", "no such element", "not visible", "stale ref") {
 			return ErrStaleRef
 		}
 		if containsAny(msg, "timeout", "deadline") {

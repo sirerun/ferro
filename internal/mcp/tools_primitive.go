@@ -169,11 +169,20 @@ func (o *Owner) checkOrigin(ctx context.Context, target string) error {
 func (o *Owner) snapshot(ctx context.Context, _ json.RawMessage) (any, error) {
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
+	generation := uint64(0)
+	if o.bridge != nil {
+		generation = o.bridge.Generation()
+		runCtx = o.bridge.PinGeneration(runCtx, generation)
+	}
 	snap, err := o.driver.Snapshot(runCtx, o.cfg.MaxElements)
 	if err != nil {
 		return nil, err
 	}
+	if o.bridge != nil && generation != o.bridge.Generation() {
+		return nil, &core.StopError{Code: "pairing_changed", Message: "tab pairing changed during the snapshot; take a fresh snapshot"}
+	}
 	o.snap = snap
+	o.snapGeneration = generation
 	return snap, nil
 }
 
@@ -194,6 +203,7 @@ func (o *Owner) navigate(ctx context.Context, args json.RawMessage) (any, error)
 	// Refs are page-specific; force the client to snapshot again before
 	// targeting one on the new page.
 	o.snap = nil
+	o.snapGeneration = 0
 	return res, nil
 }
 
@@ -207,6 +217,10 @@ func (o *Owner) click(ctx context.Context, args json.RawMessage) (any, error) {
 	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
+	var err error
+	if runCtx, err = o.pinSnapshot(runCtx); err != nil {
+		return nil, err
+	}
 	return o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindClick, Ref: in.Ref}, o.extracted)
 }
 
@@ -220,6 +234,10 @@ func (o *Owner) fill(ctx context.Context, args json.RawMessage) (any, error) {
 	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
+	var err error
+	if runCtx, err = o.pinSnapshot(runCtx); err != nil {
+		return nil, err
+	}
 	return o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindFill, Ref: in.Ref, Text: in.Text, Secret: in.Secret}, o.extracted)
 }
 
@@ -233,6 +251,10 @@ func (o *Owner) selectOption(ctx context.Context, args json.RawMessage) (any, er
 	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
+	var err error
+	if runCtx, err = o.pinSnapshot(runCtx); err != nil {
+		return nil, err
+	}
 	return o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindSelect, Ref: in.Ref, Value: in.Value}, o.extracted)
 }
 
@@ -243,6 +265,10 @@ func (o *Owner) key(ctx context.Context, args json.RawMessage) (any, error) {
 	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
+	var err error
+	if runCtx, err = o.pinSnapshot(runCtx); err != nil {
+		return nil, err
+	}
 	return o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindKey, Text: in.Text}, o.extracted)
 }
 
@@ -253,6 +279,10 @@ func (o *Owner) scroll(ctx context.Context, args json.RawMessage) (any, error) {
 	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
+	var err error
+	if runCtx, err = o.pinSnapshot(runCtx); err != nil {
+		return nil, err
+	}
 	return o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindScroll, To: in.To}, o.extracted)
 }
 
@@ -264,6 +294,10 @@ func (o *Owner) wait(ctx context.Context, args json.RawMessage) (any, error) {
 	// Fixed sleeps read no page content. The driver gates DOM waits.
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
+	var err error
+	if runCtx, err = o.pinSnapshot(runCtx); err != nil {
+		return nil, err
+	}
 	return o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindWait, For: in.For}, o.extracted)
 }
 
@@ -277,5 +311,21 @@ func (o *Owner) extract(ctx context.Context, args json.RawMessage) (any, error) 
 	}
 	runCtx, cancel := o.actionCtx(ctx)
 	defer cancel()
+	var err error
+	if runCtx, err = o.pinSnapshot(runCtx); err != nil {
+		return nil, err
+	}
 	return o.exec.ExecuteOne(runCtx, o.snap, core.Action{Kind: core.KindExtract, Fields: in.Fields}, o.extracted)
+}
+
+func (o *Owner) pinSnapshot(ctx context.Context) (context.Context, error) {
+	if o.bridge == nil || o.snap == nil {
+		return ctx, nil
+	}
+	if o.snapGeneration != o.bridge.Generation() {
+		o.snap = nil
+		o.snapGeneration = 0
+		return ctx, &core.StopError{Code: "pairing_changed", Message: "tab pairing changed; take a fresh snapshot before continuing"}
+	}
+	return o.bridge.PinGeneration(ctx, o.snapGeneration), nil
 }

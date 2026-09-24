@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/dndungu/ferro/internal/core"
 )
 
 // --- Tier 1: queue/pairing logic in isolation (no HTTP) ---------------------
@@ -41,6 +43,23 @@ func TestPair_SameTabRepeatsOK(t *testing.T) {
 	}
 }
 
+func TestPairExplicitRefreshesSameTabGeneration(t *testing.T) {
+	b, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.pair("tab-1"); err != nil {
+		t.Fatal(err)
+	}
+	old := b.Generation()
+	if err := b.pairExplicit("tab-1"); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.Generation(); got != old+1 {
+		t.Fatalf("generation = %d, want %d", got, old+1)
+	}
+}
+
 func TestPair_SecondDifferentTabRejected(t *testing.T) {
 	b, err := New()
 	if err != nil {
@@ -49,6 +68,9 @@ func TestPair_SecondDifferentTabRejected(t *testing.T) {
 	if err := b.pair("tab-1"); err != nil {
 		t.Fatalf("first pair: %v", err)
 	}
+	b.mu.Lock()
+	b.activePolls["tab-1"] = 1
+	b.mu.Unlock()
 	if err := b.pair("tab-2"); err == nil {
 		t.Fatal("pairing a second, different tab while one is active: got nil error, want rejection")
 	}
@@ -82,6 +104,56 @@ func TestPair_ReplacesStalePairing(t *testing.T) {
 	}
 	if got := <-ch; got.Code != "disconnected" {
 		t.Fatalf("pending call reply = %+v, want disconnected", got)
+	}
+}
+
+func TestPair_ReplacesInactivePairingImmediatelyAndDrainsQueue(t *testing.T) {
+	b, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.pair("old-tab"); err != nil {
+		t.Fatal(err)
+	}
+	ch := make(chan Reply, 1)
+	b.mu.Lock()
+	b.waiting["queued"] = ch
+	b.queue <- &pendingAction{id: "queued", generation: b.generation}
+	oldGeneration := b.generation
+	b.mu.Unlock()
+	if err := b.pair("new-tab"); err != nil {
+		t.Fatal(err)
+	}
+	if got := b.PairedTab(); got != "new-tab" {
+		t.Fatalf("paired tab = %q, want new-tab", got)
+	}
+	if b.generation != oldGeneration+1 {
+		t.Fatalf("generation = %d, want %d", b.generation, oldGeneration+1)
+	}
+	if got := <-ch; got.Code != "disconnected" {
+		t.Fatalf("pending call reply = %+v, want disconnected", got)
+	}
+	if got := len(b.queue); got != 0 {
+		t.Fatalf("queued stale actions = %d, want 0", got)
+	}
+}
+
+func TestPinnedSnapshotCannotEnqueueAfterPairingChanges(t *testing.T) {
+	b, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.pair("old-tab"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := b.PinGeneration(context.Background(), b.Generation())
+	if err := b.pair("new-tab"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = b.Enqueue(ctx, Command{Op: "click", Selector: "#save"})
+	var stopped *core.StopError
+	if !errors.As(err, &stopped) || stopped.Code != "pairing_changed" {
+		t.Fatalf("Enqueue() error = %v, want pairing_changed", err)
 	}
 }
 
@@ -390,11 +462,20 @@ func TestHTTP_SecondPairingAttemptRejected(t *testing.T) {
 	if status := poll("tab-1"); status != http.StatusNoContent {
 		t.Fatalf("first pairing poll status = %d, want %d", status, http.StatusNoContent)
 	}
+	b.mu.Lock()
+	b.activePolls["tab-1"] = 1 // model a live extension long poll
+	b.mu.Unlock()
 	if status := poll("tab-2"); status != http.StatusConflict {
 		t.Fatalf("second, different-tab pairing poll status = %d, want %d", status, http.StatusConflict)
 	}
+	b.mu.Lock()
+	delete(b.activePolls, "tab-1")
+	b.mu.Unlock()
+	if status := poll("tab-2"); status != http.StatusNoContent {
+		t.Fatalf("inactive pairing takeover status = %d, want %d", status, http.StatusNoContent)
+	}
 	if status := poll("tab-1"); status != http.StatusNoContent {
-		t.Fatalf("re-polling the already-paired tab status = %d, want %d", status, http.StatusNoContent)
+		t.Fatalf("different tab may replace an inactive pairing; poll status = %d, want %d", status, http.StatusNoContent)
 	}
 }
 

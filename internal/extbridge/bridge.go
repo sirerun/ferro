@@ -91,12 +91,13 @@ type Bridge struct {
 	token       string
 	pollTimeout time.Duration
 
-	mu         sync.Mutex
-	lastSeen   time.Time
-	generation uint64
-	pairedTab  string                // "" until the first /next request pairs
-	waiting    map[string]chan Reply // action id -> the Enqueue call awaiting its reply
-	queue      chan *pendingAction   // actions waiting to be handed to /next
+	mu          sync.Mutex
+	lastSeen    time.Time
+	generation  uint64
+	pairedTab   string                // "" until the first /next request pairs
+	activePolls map[string]int        // live /next requests by tab
+	waiting     map[string]chan Reply // action id -> the Enqueue call awaiting its reply
+	queue       chan *pendingAction   // actions waiting to be handed to /next
 
 	// srv and ln back Start/Stop; the HTTP wiring itself (handlers, routing,
 	// auth) lives in server.go, kept separate from the queue/pairing logic
@@ -113,6 +114,7 @@ func New(opts ...Option) (*Bridge, error) {
 	b := &Bridge{
 		pollTimeout: defaultPollTimeout,
 		waiting:     make(map[string]chan Reply),
+		activePolls: make(map[string]int),
 		queue:       make(chan *pendingAction, defaultQueueCapacity),
 	}
 	for _, opt := range opts {
@@ -140,34 +142,71 @@ func (b *Bridge) PairedTab() string {
 	return b.pairedTab
 }
 
-// pair records tabID as the active pairing if none is active yet, or
-// confirms tabID matches the existing pairing. It returns an error — meant
-// to surface as 409 Conflict — when a different tab is already paired.
+// Generation returns the current pairing generation. Snapshot refs are valid
+// only for the generation in which they were captured.
+func (b *Bridge) Generation() uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.generation
+}
+
+// pair records the tabID reported by a poll, pairing it if none is active and
+// replacing an inactive tab. It returns an error when another tab still has
+// a live poll.
 func (b *Bridge) pair(tabID string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	return b.pairLocked(tabID)
+}
+
+// pairExplicit starts a fresh extension control session, including when
+// Chrome reuses the previous numeric tab id after restarting.
+func (b *Bridge) pairExplicit(tabID string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.pairedTab == tabID {
+		b.resetPairingLocked()
+	}
+	return b.pairLocked(tabID)
+}
+
+func (b *Bridge) pairLocked(tabID string) error {
 	// Chrome clears storage.session when it restarts or reloads an extension.
-	// The server can therefore retain a pairing whose long poll has gone stale.
-	// Let the next authenticated tab replace it instead of requiring a service
-	// restart, and invalidate any refs/actions tied to the previous generation.
-	if b.pairedTab != "" && time.Since(b.lastSeen) >= 45*time.Second {
-		b.pairedTab = ""
-		b.generation++
-		for id, ch := range b.waiting {
-			ch <- Reply{Code: "disconnected", Error: "extension disconnected; inspect the page before retrying"}
-			delete(b.waiting, id)
+	// If the old extension no longer has a live poll, replace it immediately.
+	// Otherwise preserve the active pairing until it disconnects.
+	if b.pairedTab != "" && b.pairedTab != tabID {
+		if b.activePolls[b.pairedTab] > 0 {
+			return fmt.Errorf("tab %q is already paired; disconnect it or wait for its poll to stop", b.pairedTab)
 		}
+		b.resetPairingLocked()
+	} else if b.pairedTab != "" && b.activePolls[b.pairedTab] == 0 && time.Since(b.lastSeen) >= 45*time.Second {
+		// A restarted Chrome may reuse a numeric tab id; force refs to be
+		// reacquired even when the id happens to match.
+		b.resetPairingLocked()
 	}
 	if b.pairedTab == "" {
 		b.pairedTab = tabID
 		b.lastSeen = time.Now()
 		return nil
 	}
-	if b.pairedTab != tabID {
-		return fmt.Errorf("tab %q is already paired; only one active pairing is allowed at a time", b.pairedTab)
-	}
 	b.lastSeen = time.Now()
 	return nil
+}
+
+func (b *Bridge) resetPairingLocked() {
+	b.pairedTab = ""
+	b.generation++
+	for id, ch := range b.waiting {
+		ch <- Reply{Code: "disconnected", Error: "extension disconnected; inspect the page before retrying"}
+		delete(b.waiting, id)
+	}
+	for {
+		select {
+		case <-b.queue:
+		default:
+			return
+		}
+	}
 }
 
 // Enqueue queues action for delivery to the paired extension's next GET
@@ -263,5 +302,14 @@ func (b *Bridge) Pin(ctx context.Context) context.Context {
 	b.mu.Lock()
 	generation := b.generation
 	b.mu.Unlock()
+	return context.WithValue(ctx, pairingKey{}, pairingPin{b, generation})
+}
+
+// PinGeneration binds a call to a previously observed pairing generation.
+// A mismatch is rejected by Enqueue before an action reaches Chrome.
+func (b *Bridge) PinGeneration(ctx context.Context, generation uint64) context.Context {
+	if _, ok := ctx.Value(pairingKey{}).(pairingPin); ok {
+		return ctx
+	}
 	return context.WithValue(ctx, pairingKey{}, pairingPin{b, generation})
 }

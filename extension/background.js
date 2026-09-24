@@ -334,6 +334,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       let previous = null;
       let restartPreviousPoll = false;
       try {
+        if (activeAction) throw new Error('A browser action is still running. Stop it before reconnecting.');
         // Pairing may only be requested by our own popup or panel, never page content.
         if (sender.id !== chrome.runtime.id || ![chrome.runtime.getURL('popup.html'), chrome.runtime.getURL('sidepanel.html')].includes(sender.url)) throw new Error('pair using the extension popup or side panel');
         const c = message.connection;
@@ -341,10 +342,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!Number.isInteger(c.tabId) || c.tabId < 0) throw new Error('Choose a website tab to connect.');
         await ensureContentReady(c.tabId);
         previous = await getConnection();
-        if (previous && previous.tabId !== c.tabId) {
-          if (activeAction) throw new Error('A browser action is still running. Stop it before switching tabs.');
+        if (previous) {
           stopPolling();
           restartPreviousPoll = true;
+        }
+        if (previous && previous.tabId !== c.tabId) {
           const disconnected = await fetch(`${previous.base}/disconnect`, {
             method:'POST',
             headers:{Authorization:`Bearer ${previous.token}`,'X-Ferro-Tab-Id':String(previous.tabId)},
@@ -355,7 +357,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           }
         }
         const response = await fetch(`${c.base}/pair`, { method: 'POST', headers: { Authorization: `Bearer ${c.token}`, 'X-Ferro-Tab-Id': String(c.tabId) }, signal: AbortSignal.timeout(5000) });
-        if (!response.ok) throw new Error(`Pairing failed: HTTP ${response.status}`);
+        if (!response.ok) {
+          const detail = (await response.text()).trim();
+          const retry = response.status === 409 ? ' Retry after the previous tab’s poll has stopped.' : '';
+          throw new Error(`Pairing failed: ${detail || `HTTP ${response.status}`}.${retry}`);
+        }
         await chrome.storage.session.set({ connection: c });
         restartPreviousPoll = false;
         startPolling();

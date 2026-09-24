@@ -228,6 +228,18 @@
   // Action execution.
   // ---------------------------------------------------------------------
   function mustFind(selector) {
+    let expected = null;
+    if (selector.startsWith('ferro-target:')) {
+      try {
+        let payload = selector.slice('ferro-target:'.length).replace(/-/g, '+').replace(/_/g, '/');
+        payload += '='.repeat((4 - payload.length % 4) % 4);
+        const bytes = Uint8Array.from(atob(payload), (char) => char.charCodeAt(0));
+        expected = JSON.parse(new TextDecoder().decode(bytes));
+        selector = expected.selector;
+      } catch (_) {
+        throw new Error('invalid snapshot target');
+      }
+    }
     let el;
     try {
       el = document.querySelector(selector);
@@ -236,6 +248,21 @@
     }
     if (!el) throw new Error(`no element matches ${JSON.stringify(selector)}`);
     if (document.querySelectorAll(selector).length !== 1) throw new Error('ambiguous selector; refusing to choose an arbitrary element');
+    if (expected) {
+      let name = el.getAttribute('aria-label') || el.getAttribute('placeholder') || '';
+      if (!name && ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName) && el.id) {
+        name = document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.innerText.trim() || '';
+      }
+      let text = /^H[1-4]$/.test(el.tagName) ? el.innerText : (el.innerText || '').trim();
+      if (text.length > 80) text = text.slice(0, 80) + '…';
+      const href = el.tagName === 'A' && el.getAttribute('href') ? new URL(el.getAttribute('href'), location.href).pathname : '';
+      if (el.tagName.toLowerCase() !== expected.tag ||
+          (el.getAttribute('role') || '') !== (expected.role || '') ||
+          name !== (expected.name || '') || text !== (expected.text || '') ||
+          href !== (expected.href || '')) {
+        throw new Error('stale ref: the target no longer matches the latest snapshot');
+      }
+    }
     return el;
   }
 
@@ -295,7 +322,8 @@
       const failures = {};
       for (const field of keys) {
         try {
-          const el = document.querySelector(fields[field]);
+          const selector = fields[field];
+          const el = selector.startsWith('ferro-target:') ? mustFind(selector) : document.querySelector(selector);
           if (!el) throw new Error('no matching element');
           out[field] = String(el.value ?? el.innerText ?? '').trim();
         } catch (error) {

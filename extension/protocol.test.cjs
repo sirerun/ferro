@@ -104,7 +104,7 @@ test('failed tab switch restores the previous pairing and resumes polling',async
   const {context,listeners}=worker({fetch:async(url,options)=>{
     const tab=options.headers['X-Ferro-Tab-Id'];
     requests.push({url,method:options.method,tab});
-    if (new URL(url).pathname==='/pair' && tab==='42') return {ok:false,status:403};
+    if (new URL(url).pathname==='/pair' && tab==='42') return {ok:false,status:403,text:async()=> 'access denied'};
     return {ok:true,status:200};
   }});
   context.chrome.storage.session.get=async()=>({connection:stored});
@@ -114,7 +114,7 @@ test('failed tab switch restores the previous pairing and resumes polling',async
   context.stopPolling=()=>{stopped++};
   context.startPolling=()=>{started++};
   const response=await new Promise(resolve=>listeners[0]({type:'ferro-connect',connection:{...previous,tabId:42}},{id:'test-extension',url:'chrome-extension://test-extension/sidepanel.html'},resolve));
-  assert.match(response.error,/Pairing failed: HTTP 403/);
+  assert.match(response.error,/Pairing failed: access denied/);
   assert.deepEqual(requests.map(r=>[new URL(r.url).pathname,r.method,r.tab]),[
     ['/disconnect','POST','41'],['/pair','POST','42'],['/pair','POST','41'],
   ]);

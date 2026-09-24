@@ -29,9 +29,11 @@ type Leader struct {
 	// the moment that one call's context ended.
 	rootCtx context.Context
 
-	mu       sync.Mutex
-	lockFile *os.File // held only while this process is the owner
-	owner    *Owner   // non-nil only while this process is the owner
+	mu            sync.Mutex
+	lockFile      *os.File // held only while this process is the owner
+	owner         *Owner   // non-nil only while this process is the owner
+	stopRequested chan struct{}
+	stopOnce      sync.Once
 }
 
 // NewLeader attempts to become the owner by flocking cfg.LockPath(); if the
@@ -41,7 +43,7 @@ func NewLeader(ctx context.Context, cfg Config) (*Leader, error) {
 	if err := os.MkdirAll(cfg.Home, 0o700); err != nil {
 		return nil, fmt.Errorf("create %s: %w", cfg.Home, err)
 	}
-	l := &Leader{cfg: cfg, rootCtx: ctx}
+	l := &Leader{cfg: cfg, rootCtx: ctx, stopRequested: make(chan struct{})}
 	if _, _, err := l.tryBecomeOwner(); err != nil {
 		return nil, err
 	}
@@ -57,6 +59,10 @@ func (l *Leader) Owner() *Owner {
 	defer l.mu.Unlock()
 	return l.owner
 }
+
+// StopRequested forwards an explicit stop request from whichever Owner this
+// process currently holds, including one acquired later through promotion.
+func (l *Leader) StopRequested() <-chan struct{} { return l.stopRequested }
 
 // tryBecomeOwner attempts the exclusive flock; on success it constructs a
 // real Owner (launching Chrome) and starts serving the socket for future
@@ -99,7 +105,15 @@ func (l *Leader) tryBecomeOwner() (*Owner, bool, error) {
 	l.lockFile = f
 	l.owner = o
 	l.mu.Unlock()
+	l.watchOwner(o)
 	return o, true, nil
+}
+
+func (l *Leader) watchOwner(o *Owner) {
+	go func() {
+		<-o.StopRequested()
+		l.stopOnce.Do(func() { close(l.stopRequested) })
+	}()
 }
 
 // Call implements caller: it dispatches directly if this process is the

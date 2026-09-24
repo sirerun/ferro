@@ -90,6 +90,30 @@ test('extension takeSnapshot() matches internal/core/snapshot.go golden (T12.2 p
     assert.ok(selectors.length > 0);
     assert.ok(selectors.every((entry) => entry.selector && entry.count === 1),
       `execution snapshots must provide a unique live selector for every ref: ${JSON.stringify(selectors.filter((entry) => !entry.selector || entry.count !== 1).slice(0, 3))}`);
+
+    const executionSnapshot = await chrome.evaluate(`FerroAdapter.takeSnapshot(${MAX_ELEMENTS}, true)`);
+    const signIn = executionSnapshot.elements.find((element) => element.tag === 'button' && element.text === 'Sign in');
+    assert.ok(signIn, 'fixture sign-in button should be present');
+    const target = Buffer.from(JSON.stringify({
+      selector: signIn.selector,
+      tag: signIn.tag,
+      role: signIn.role,
+      name: signIn.name,
+      text: signIn.text,
+      href: signIn.href,
+    })).toString('base64url');
+    await chrome.evaluate(`(() => {
+      const section = document.createElement('section');
+      section.innerHTML = '<button>Inserted before the old target</button>';
+      document.body.insertBefore(section, document.querySelector('section'));
+    })()`);
+    const staleResult = await chrome.evaluate(`(async () => {
+      try {
+        await FerroAdapter.perform({op:'fill', selector:'ferro-target:${target}', text:'x', origin:location.origin, deadlineMs:Date.now()+5000});
+        return 'allowed';
+      } catch (error) { return error.message; }
+    })()`);
+    assert.match(staleResult, /stale ref/, 'a DOM change must reject a path that now points at a different element');
   } finally {
     await chrome.close();
   }
