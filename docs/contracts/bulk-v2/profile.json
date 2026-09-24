@@ -1,0 +1,1 @@
+{"name":"local-reviewed","revision":"sha256:immutable-content-digest","endpoint":"http://localhost:11434/v1","model":"reviewed-model-id","credential_ref":"secret-store-key","limits":{"runtime_ms":90000,"actions":20,"model_requests":3,"repairs":1,"planning_passes":2,"max_output_tokens":2048,"max_input_tokens":12000,"total_reserved_tokens":24000}}

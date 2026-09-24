@@ -1,0 +1,1 @@
+{"schema":"ferro.task/v2","task_id":"pilot_001","goal":"Read","profile":"local-reviewed","policy":{"mode":"read_only","origins":["https://example.org"]},"unexpected":true}
