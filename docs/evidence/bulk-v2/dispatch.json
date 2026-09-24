@@ -3,7 +3,7 @@
   "coordinator": "codex@ferro",
   "base_sha": "38516376385f33f17fccc6079f1e0de65a5c967e",
   "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
-  "updated_at": "2026-09-24T18:38:46.503118+00:00",
+  "updated_at": "2026-09-24T18:48:43.458460+00:00",
   "gate_state": {
     "G00": "accepted_with_G05_reconciliation",
     "G01": "accepted",
@@ -90,7 +90,7 @@
       ]
     }
   ],
-  "next_action": "Review L01/L03, then dispatch L02 and remaining packets against unchanged contract baseline. Coordinator owns shared integration.",
+  "next_action": "Review L03 correction, L04 policy and L07 receipts; dispatch remaining packets against frozen contract; G02 wiring follows component acceptance.",
   "verification": {
     "command": "GOWORK=off go test ./internal/core ./internal/llm ./internal/mcp",
     "core": "passed",
@@ -103,40 +103,48 @@
   "packets": [
     {
       "id": "L01",
-      "state": "running",
+      "state": "accepted",
       "model": "gpt-6-luna",
       "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "branch": "codex/bulk-v2-l01",
-      "agent": "/root/contract_final_fix"
+      "agent": "/root/contract_final_fix",
+      "commit_sha": "7d02c78f896e050799d1f57e022384318a1aaa10",
+      "integration_sha": "22d2d6a",
+      "tests": "Focused profile tests and full MCP package passed; no-key compatibility correction reviewed."
     },
     {
       "id": "L02",
-      "state": "running",
+      "state": "accepted",
       "model": "gpt-6-luna",
       "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "branch": "codex/bulk-v2-l02",
       "agent": "headless codex exec",
-      "pid": 30798
+      "pid": 30798,
+      "commit_sha": "e06df95dcfa2f0fde44975e0b7b8ad7a10be2f41",
+      "integration_sha": "2a7a142",
+      "tests": "Focused provider tests and full llm package passed; coordinator reviewed one-attempt and nullable metadata paths."
     },
     {
       "id": "L03",
-      "state": "running",
+      "state": "review_changes_requested",
       "model": "gpt-6-luna",
       "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "branch": "codex/bulk-v2-l03",
-      "agent": "/root/contract_review"
+      "agent": "/root/contract_review",
+      "commit_sha": "78cddec68c8d86705f102df54701ae300831c626",
+      "review": "Reject action admission after known token overrun."
     },
     {
       "id": "L04",
-      "state": "queued",
+      "state": "running",
       "model": "gpt-6-luna",
       "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
-      "branch": null,
-      "agent": null
+      "branch": "codex/bulk-v2-l04",
+      "agent": "/root/contract_final_fix"
     },
     {
       "id": "L05",
@@ -158,12 +166,13 @@
     },
     {
       "id": "L07",
-      "state": "queued",
+      "state": "running",
       "model": "gpt-6-luna",
       "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
-      "branch": null,
-      "agent": null
+      "branch": "codex/bulk-v2-l07",
+      "agent": "headless codex exec",
+      "pid": 54714
     },
     {
       "id": "L08",
