@@ -21,7 +21,7 @@ This runbook makes the parent [plan](../../plan-bulk-browser-execution.md) execu
 | L09 | Luna/cheap Codex | G01 | B10 fixtures | wave A |
 | L10 | Luna/cheap Codex | G01 | B11 documentation | wave A |
 | G02 | Frontier integrator | L01–L08 reviewed | B08; remaining B02–B07 wiring | serial integration |
-| G03 | Frontier reviewer | G02 + L09/L10 | B10 qualification | after integrated revision |
+| G03 | Frontier reviewer | G02 + L09/L10 | B10 executor fixture qualification only | after integrated revision |
 | G04 | Frontier Zatiti owner | G01; execution after G03 | B09 | discovery during wave A |
 | G05 | Frontier release/pilot owner | G03 + G04 | B11/B12 | serial installed/live gates |
 
@@ -154,7 +154,9 @@ G02 exclusively owns runner.go, executor.go, repair.go, ferro.go, existing cache
 
 Any frozen contract change requires a new lock revision, updated consumers and a rerun of affected tests. Rebase/restart only affected lanes with a supplied new baseline; never make running cheap lanes chase a moving branch.
 
-## 8. G03 qualification gate
+## 8. G03 executor fixture qualification gate
+
+This gate excludes Zatiti terminal verification (G04) and installed/live evidence (G05). B10 in the parent collects all three stages; its later evidence rows cannot block this gate.
 
 Own integration tests in new `integration/bulk_v2_*` files and existing harness adjustments reviewed for backward compatibility. Use L09 fixtures. Execute these observable cases through actual MCP, not direct helper invocation:
 
