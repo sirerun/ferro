@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -553,6 +554,107 @@ func TestHostedLifecycleInvalidBearerDoesNotResetIdleTimestamp(t *testing.T) {
 	}
 	if !life.lastWork.Equal(before) {
 		t.Fatal("invalid bearer reset the hosted idle timestamp")
+	}
+}
+
+func TestHostedLifecycleStatusAndProtocolTrafficDoesNotExtendIdle(t *testing.T) {
+	var seenBodies []string
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/mcp" {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, "read request", http.StatusBadRequest)
+				return
+			}
+			seenBodies = append(seenBodies, string(body))
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	_, life, clock := newLifecycleFixture(t, next, nil)
+	if err := life.establishProtection(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(2 * time.Minute)
+	lastWork := life.lastWork
+	messages := []string{
+		`{"jsonrpc":"2.0","id":1,"method":"ping"}`,
+		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
+		`{"jsonrpc":"2.0","id":2,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"browser_status"}}`,
+		`[{"jsonrpc":"2.0","id":4,"method":"ping"},{"jsonrpc":"2.0","method":"notifications/initialized"}]`,
+	}
+	for _, body := range messages {
+		if got := requestLifecycleBody(life, http.MethodPost, "/mcp", body).Code; got != http.StatusNoContent {
+			t.Fatalf("MCP status request response %d", got)
+		}
+		if !life.lastWork.Equal(lastWork) {
+			t.Fatalf("MCP status request %q reset idle timestamp", body)
+		}
+	}
+	if got := requestLifecycle(life, http.MethodPost, "/bridge/chat/status").Code; got != http.StatusNoContent {
+		t.Fatalf("sidepanel status response %d", got)
+	}
+	if !life.lastWork.Equal(lastWork) {
+		t.Fatal("sidepanel status request reset idle timestamp")
+	}
+	if len(seenBodies) != len(messages) {
+		t.Fatalf("wrapped handler saw %d MCP bodies, want %d", len(seenBodies), len(messages))
+	}
+	for i := range messages {
+		if seenBodies[i] != messages[i] {
+			t.Fatalf("MCP body %d changed during activity classification: %q", i, seenBodies[i])
+		}
+	}
+	done, err := life.step(context.Background())
+	if err != nil || !done {
+		t.Fatalf("status-only activity blocked idle drain: done=%v err=%v", done, err)
+	}
+}
+
+func TestHostedLifecycleMeaningfulMCPRequestRefreshesIdleAndPreservesBody(t *testing.T) {
+	const body = `{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"navigate","arguments":{"url":"https://example.test"}}}`
+	var gotBody string
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, "read request", http.StatusBadRequest)
+			return
+		}
+		gotBody = string(b)
+		w.WriteHeader(http.StatusNoContent)
+	})
+	_, life, clock := newLifecycleFixture(t, next, nil)
+	if err := life.establishProtection(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(2 * time.Minute)
+	if got := requestLifecycleBody(life, http.MethodPost, "/mcp", body).Code; got != http.StatusNoContent {
+		t.Fatalf("meaningful MCP request response %d", got)
+	}
+	if gotBody != body {
+		t.Fatalf("SDK body changed: got %q", gotBody)
+	}
+	if !life.lastWork.Equal(clock.Now()) {
+		t.Fatalf("meaningful MCP work did not refresh idle timestamp: %s != %s", life.lastWork, clock.Now())
+	}
+	done, err := life.step(context.Background())
+	if err != nil || done {
+		t.Fatalf("meaningful MCP request failed to defer drain: done=%v err=%v", done, err)
+	}
+}
+
+func TestLifecycleMCPClassifierDoesNotNarrowBodyLimit(t *testing.T) {
+	body := bytes.Repeat([]byte("x"), int(maxLifecycleMCPBodyBytes+1))
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
+	if mcpRequestIsTransient(req) {
+		t.Fatal("oversized invalid request classified as status-only")
+	}
+	got, err := io.ReadAll(req.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("classifier consumed or rejected request body: got %d bytes, want %d", len(got), len(body))
 	}
 }
 

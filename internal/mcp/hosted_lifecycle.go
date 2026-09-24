@@ -1,10 +1,13 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -290,6 +293,24 @@ func (l *HostedLifecycle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		l.next.ServeHTTP(w, r)
 		return
 	}
+	if r.URL.Path == "/bridge/chat/status" && r.Method == http.MethodPost {
+		if !l.authorized(r, l.bridgeToken) {
+			l.next.ServeHTTP(w, r)
+			return
+		}
+		if !l.admitTransient(w) {
+			return
+		}
+		l.next.ServeHTTP(w, r)
+		return
+	}
+	if r.URL.Path == "/mcp" && r.Method == http.MethodPost && l.authorized(r, l.mcpToken) && mcpRequestIsTransient(r) {
+		if !l.admitTransient(w) {
+			return
+		}
+		l.next.ServeHTTP(w, r)
+		return
+	}
 
 	active := r.URL.Path == "/mcp" && r.Method == http.MethodPost || strings.HasPrefix(r.URL.Path, "/bridge/") && !(r.URL.Path == "/bridge/next" && r.Method == http.MethodGet)
 	if !active {
@@ -318,6 +339,70 @@ func (l *HostedLifecycle) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		l.requests.RUnlock()
 	}()
 	l.next.ServeHTTP(w, r)
+}
+
+const maxLifecycleMCPBodyBytes int64 = 2 << 20
+
+// mcpRequestIsTransient identifies protocol and status traffic that must not
+// refresh the service idle clock. It reads no more than the same 2 MiB body
+// limit enforced by remoteHandler and restores every consumed byte before the
+// SDK sees the request. Oversize, malformed, and unrecognized requests remain
+// ordinary application activity; this classifier never rejects input.
+func mcpRequestIsTransient(r *http.Request) bool {
+	if r.Body == nil || r.ContentLength > maxLifecycleMCPBodyBytes {
+		return false
+	}
+	original := r.Body
+	body, err := io.ReadAll(io.LimitReader(original, maxLifecycleMCPBodyBytes+1))
+	r.Body = &replayedRequestBody{Reader: io.MultiReader(bytes.NewReader(body), original), original: original}
+	if err != nil || int64(len(body)) > maxLifecycleMCPBodyBytes {
+		return false
+	}
+	body = bytes.TrimSpace(body)
+	if len(body) == 0 {
+		return false
+	}
+	if body[0] == '[' {
+		var messages []json.RawMessage
+		if json.Unmarshal(body, &messages) != nil || len(messages) == 0 {
+			return false
+		}
+		for _, message := range messages {
+			if !transientMCPMessage(message) {
+				return false
+			}
+		}
+		return true
+	}
+	return transientMCPMessage(body)
+}
+
+type replayedRequestBody struct {
+	io.Reader
+	original io.ReadCloser
+}
+
+func (b *replayedRequestBody) Close() error { return b.original.Close() }
+
+func transientMCPMessage(raw json.RawMessage) bool {
+	var message struct {
+		Method string          `json:"method"`
+		Params json.RawMessage `json:"params"`
+	}
+	if json.Unmarshal(raw, &message) != nil || message.Method == "" {
+		return false
+	}
+	switch {
+	case message.Method == "ping", message.Method == "initialize", strings.HasPrefix(message.Method, "notifications/"):
+		return true
+	case message.Method == "tools/call":
+		var params struct {
+			Name string `json:"name"`
+		}
+		return json.Unmarshal(message.Params, &params) == nil && params.Name == "browser_status"
+	default:
+		return false
+	}
 }
 
 // healthReadinessWriter preserves host/TLS middleware decisions in the
