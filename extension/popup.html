@@ -1,14 +1,29 @@
-<!doctype html><html><head><meta charset="utf-8"><title>ferro remote bridge</title>
-<style>body{font:14px system-ui;width:340px;margin:20px;color:#152535}h1{font-size:18px;display:flex;align-items:center;gap:9px}h1 img{width:26px;height:26px}label{display:block;margin:12px 0 5px}input{box-sizing:border-box;width:100%;padding:8px;border:1px solid #aeb9c3;border-radius:5px}button{padding:9px 14px;margin-top:16px;margin-right:8px;cursor:pointer}#status{line-height:1.5}p{line-height:1.5}</style></head>
-<body>
-<h1><img src="icons/ferro-mark.svg" alt=""> Ferro</h1>
-<p>Pairs <b>this one tab</b> with a local <code>ferro-mcp</code> process so a remote agent can drive it. Only the tab you connect here is ever acted on.</p>
-<label for="base">Bridge URL</label>
-<input id="base" value="http://127.0.0.1:4175" placeholder="http://127.0.0.1:4175">
-<label for="token">Pairing token (from bridge-token)</label>
-<input id="token" type="password" autocomplete="off">
-<button id="open-chat" type="button" hidden>Open chat</button>
-<button id="connection-toggle" type="button" disabled>Checking connection…</button>
-<p id="status" role="status" aria-live="polite">Checking connection…</p>
-<script src="popup.js"></script>
-</body></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ferro · Connect a tab</title>
+<link rel="stylesheet" href="sidepanel.css"><link rel="stylesheet" href="popup.css">
+<script src="popup.js" defer></script>
+</head>
+<body class="pairing-popup">
+<header><span class="brand-mark" aria-hidden="true"><img src="icons/ferro-mark.svg" alt=""></span><strong>Ferro</strong><span class="header-note">Your browser, a little lighter.</span></header>
+<main class="pairing-card" aria-labelledby="pairing-title">
+  <h1 id="pairing-title">A little help with this tab.</h1>
+  <p class="intro">Connect the page in front of you, then pick up the conversation.</p>
+  <div class="connection-fields">
+    <label for="base">Local service</label>
+    <input id="base" type="url" value="http://127.0.0.1:4175" placeholder="http://127.0.0.1:4175" spellcheck="false" autocomplete="off">
+    <label for="token">Pairing token</label>
+    <input id="token" type="password" autocomplete="off" placeholder="Paste your pairing token" aria-describedby="token-hint">
+    <p id="token-hint" class="hint">Enter it once. Ferro reuses it when you switch tabs during this Chrome session.</p>
+  </div>
+  <div class="pairing-actions">
+    <button id="open-chat" class="primary" type="button" hidden>Open chat <span aria-hidden="true">↗</span></button>
+    <button id="connection-toggle" type="button" disabled>Checking connection…</button>
+  </div>
+  <p id="status" role="status" aria-live="polite">Checking connection…</p>
+</main>
+<footer>Only the tab you connect is shared with Ferro.</footer>
+</body>
+</html>

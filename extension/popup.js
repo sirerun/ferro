@@ -104,3 +104,11 @@ openChat.onclick = () => {
 
 refreshStatus();
 setInterval(refreshStatus, 2000);
+
+// Match the frame color already chosen in the chat panel.
+if (chrome.storage?.local) chrome.storage.local.get('ferroFrame').then(({ferroFrame}) => {
+  if (!/^#[a-f0-9]{6}$/i.test(ferroFrame || '')) return;
+  document.body.style.setProperty('--frame',ferroFrame);
+  const rgb=[1,3,5].map(i=>parseInt(ferroFrame.slice(i,i+2),16));
+  document.body.classList.add(rgb[0]*.2126+rgb[1]*.7152+rgb[2]*.0722<140?'custom-dark':'custom-light');
+}).catch(()=>{});

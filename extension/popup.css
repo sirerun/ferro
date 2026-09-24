@@ -1,0 +1,21 @@
+/* Shared frame, typography and focus mark come from sidepanel.css. */
+html{height:auto}
+body.pairing-popup{width:370px;height:auto;min-height:0;padding:0 16px 14px;display:block}
+.pairing-popup header{padding:0 4px;min-height:62px;gap:9px}
+.header-note{margin-left:auto;font-size:10px;opacity:.65;letter-spacing:.01em}
+.pairing-card{padding:24px 22px 18px;border:1px solid rgb(var(--glass)/.25);border-radius:25px;background:linear-gradient(150deg,rgb(var(--glass)/calc(var(--surface) + .08)),rgb(var(--glass)/var(--surface)) 60%,rgb(var(--glass)/calc(var(--surface) - .02)));backdrop-filter:blur(18px) saturate(1.18);-webkit-backdrop-filter:blur(18px) saturate(1.18);box-shadow:inset 0 1px 0 rgb(var(--glass)/.32),0 8px 24px rgb(0 0 0/.065)}
+.pairing-card h1{font-size:22px;line-height:1.2;font-weight:500;letter-spacing:-.8px;margin:0 0 10px;max-width:240px}
+.intro{font-size:13px;line-height:1.6;opacity:.75;margin:0 0 23px}
+.connection-fields label{display:block;font-size:12px;font-weight:500;margin:14px 0 6px}
+.connection-fields input{display:block;width:100%;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:rgb(var(--glass)/.12);font-size:13px;min-height:40px}
+.connection-fields input:disabled{opacity:.65;cursor:default}
+.connection-fields input::placeholder{color:inherit;opacity:.5}
+.pairing-card .hint{margin:9px 0 20px;font-size:11px;line-height:1.6}
+.pairing-actions{display:flex;gap:8px;flex-wrap:wrap}
+.pairing-actions button{border:1px solid var(--line);border-radius:22px;padding:10px 16px;background:rgb(var(--glass)/var(--surface));font-size:13px;min-height:40px;box-shadow:inset 0 1px 0 rgb(var(--glass)/.2)}
+.pairing-actions .primary,.pairing-actions:has(#open-chat[hidden]) #connection-toggle{background:var(--ink);color:var(--frame);border-color:transparent}
+.pairing-actions button:hover:not(:disabled){filter:brightness(.93)}
+.pairing-actions .primary span{margin-left:7px}
+#status{font-size:11px;line-height:1.6;opacity:.8;overflow-wrap:anywhere;margin:15px 0 0}
+.pairing-popup footer{padding:15px 6px 0;text-align:center;font-size:10px;opacity:.65}
+@media(prefers-reduced-motion:reduce){.pairing-popup *{animation:none!important}}
