@@ -3,9 +3,11 @@ package mcp
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -298,5 +300,191 @@ func TestReceiptsV2_RecoveryRetention(t *testing.T) {
 	}
 	if _, err := s.Lookup(context.Background(), "principal", r3.TaskID); err != nil {
 		t.Fatalf("unknown spend record removed: %v", err)
+	}
+}
+
+func TestReceiptsV2_UnknownSpendCannotBeCleanedAfterFinalize(t *testing.T) {
+	dir := t.TempDir()
+	s, r, d := receiptFixtureV2(t, dir)
+	rec := admitFixtureV2(t, s, r, d)
+	now := time.Now().UTC()
+	knownCost := int64(0)
+	result := TaskResultV2{
+		Schema: "ferro.result/v2", TaskID: r.TaskID, ExecutionID: rec.ExecutionID,
+		Status: TaskFailedV2, StartedAt: now.Add(-time.Minute), EndedAt: now,
+		ModelProfile: r.ModelProfile, ProfileRevision: "revision",
+		EffectiveLimits: core.DefaultLimitsV2(), Validation: "not_run",
+		Usage: core.RequestUsageV2{BilledMicroUSD: &knownCost},
+		Budget: core.BudgetSnapshotV2{
+			Requests: 2, UncertainRequests: 1,
+			ReportedUsage: core.RequestUsageV2{BilledMicroUSD: &knownCost}, Currency: "USD",
+		},
+		SideEffectState: SideEffectNoneV2,
+	}
+	if err := s.Finalize(context.Background(), "principal", rec.ExecutionID, result); err != nil {
+		t.Fatalf("Finalize(): %v", err)
+	}
+	internal := s.(*receiptStoreV2)
+	key := receiptKeyV2("principal", r.TaskID)
+	entry := internal.disk.Receipts[key]
+	finalizeMarkedReconciled := entry.Reconciled
+	// Simulate a previously persisted flag from the older, incomplete rule.
+	entry.Reconciled = true
+	entry.Receipt.CreatedAt = now.Add(-31 * 24 * time.Hour)
+	internal.disk.Receipts[key] = entry
+	if err := internal.persist(internal.disk); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Cleanup(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Lookup(context.Background(), "principal", r.TaskID); err != nil {
+		t.Fatalf("cleanup removed receipt with uncertain spend: %v", err)
+	}
+	if finalizeMarkedReconciled {
+		t.Fatal("Finalize marked a receipt reconciled despite uncertain requests")
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenReceiptStoreV2(dir, 32<<20)
+	if err != nil {
+		t.Fatalf("reopen after uncertain-spend cleanup: %v", err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	if got, err := reopened.Lookup(context.Background(), "principal", r.TaskID); err != nil || got.Result == nil || got.Result.Budget.UncertainRequests != 1 {
+		t.Fatalf("uncertain-spend receipt was not preserved: %+v %v", got, err)
+	}
+}
+
+func TestReceiptsV2_NearLimitFinalizeRemainsReopenable(t *testing.T) {
+	dir := t.TempDir()
+	s, r, d := receiptFixtureV2(t, dir)
+	rec := admitFixtureV2(t, s, r, d)
+	now := time.Now().UTC()
+	result := TaskResultV2{
+		Schema: "ferro.result/v2", TaskID: r.TaskID, ExecutionID: rec.ExecutionID,
+		Status: TaskFailedV2, StartedAt: now.Add(-time.Minute), EndedAt: now,
+		ModelProfile: r.ModelProfile, ProfileRevision: "revision",
+		EffectiveLimits: core.DefaultLimitsV2(), Validation: "not_run",
+		SideEffectState: SideEffectNoneV2,
+	}
+	result.Error = &TaskErrorV2{Category: "provider_error", Stage: "planning", Retry: "never"}
+	result.Error.Stage = nearLimitErrorStageV2(t, result)
+	encodedResult, err := json.Marshal(result)
+	if err != nil || int64(len(encodedResult)) > receiptMaxRecordV2 {
+		t.Fatalf("test result exceeds result boundary: bytes=%d err=%v", len(encodedResult), err)
+	}
+	receipt := ReceiptV2{
+		Owner: "principal", ExecutionID: rec.ExecutionID, TaskID: rec.TaskID,
+		RequestDigest: d, State: ReceiptFailedV2, Result: &result, CreatedAt: rec.CreatedAt,
+	}
+	encodedReceipt, err := json.Marshal(receipt)
+	if err != nil || int64(len(encodedReceipt)) <= receiptMaxRecordV2 {
+		t.Fatalf("test receipt does not exceed full receipt boundary: bytes=%d err=%v", len(encodedReceipt), err)
+	}
+
+	finalizeErr := s.Finalize(context.Background(), "principal", rec.ExecutionID, result)
+	if finalizeErr == nil {
+		if err := s.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if reopened, err := OpenReceiptStoreV2(dir, 32<<20); err != nil {
+			t.Fatalf("Finalize accepted a result that made the store unreopenable: %v", err)
+		} else {
+			_ = reopened.Close()
+		}
+		t.Fatal("Finalize accepted a full receipt above its persisted record limit")
+	}
+	if got, err := s.Get(context.Background(), "principal", rec.ExecutionID); err != nil || got.Result != nil || got.State != ReceiptAdmittedV2 {
+		t.Fatalf("rejected finalization corrupted the existing receipt: %+v %v", got, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenReceiptStoreV2(dir, 32<<20)
+	if err != nil {
+		t.Fatalf("store failed to reopen after rejected finalization: %v", err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	if got, err := reopened.Lookup(context.Background(), "principal", r.TaskID); err != nil || got.Result != nil {
+		t.Fatalf("existing receipt was lost after rejected finalization: %+v %v", got, err)
+	}
+}
+
+func nearLimitErrorStageV2(t *testing.T, result TaskResultV2) string {
+	t.Helper()
+	if result.Error == nil {
+		t.Fatal("near-limit result needs an error")
+	}
+	low, high := 0, int(receiptMaxRecordV2)
+	for low < high {
+		mid := low + (high-low+1)/2
+		result.Error.Stage = strings.Repeat("s", mid)
+		encoded, err := json.Marshal(result)
+		if err != nil {
+			t.Fatalf("marshal candidate result: %v", err)
+		}
+		if int64(len(encoded)) <= receiptMaxRecordV2 {
+			low = mid
+		} else {
+			high = mid - 1
+		}
+	}
+	return strings.Repeat("s", low)
+}
+
+func TestReceiptsV2_CanonicalSchemaDigest(t *testing.T) {
+	s, base, _ := receiptFixtureV2(t, t.TempDir())
+	r1 := base
+	r1.OutputSchema = []byte(`{"type":"object","properties":{"title":{"type":"string","description":"title"},"count":{"type":"integer","minimum":1}},"required":["title"]}`)
+	d1, err := canonicalRequestDigestV2(r1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r2 := base
+	r2.OutputSchema = []byte(`{"required":["title"],"properties":{"count":{"minimum":1,"type":"integer"},"title":{"description":"title","type":"string"}},"type":"object"}`)
+	d2, err := canonicalRequestDigestV2(r2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d1 != d2 {
+		t.Fatalf("reordered nested schema keys changed request identity: %s != %s", d1, d2)
+	}
+	first, created, err := s.Admit(context.Background(), "principal", r1, d1)
+	if err != nil || !created {
+		t.Fatalf("first schema admission = %+v, created=%v err=%v", first, created, err)
+	}
+	duplicate, created, err := s.Admit(context.Background(), "principal", r2, d2)
+	if err != nil || created || duplicate.ExecutionID != first.ExecutionID {
+		t.Fatalf("canonical duplicate admission = %+v, created=%v err=%v", duplicate, created, err)
+	}
+	r3 := base
+	r3.OutputSchema = []byte(`{"required":["title"],"properties":{"count":{"minimum":1,"type":"integer"},"title":{"description":"title","type":"number"}},"type":"object"}`)
+	d3, err := canonicalRequestDigestV2(r3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d3 == d1 {
+		t.Fatal("actual schema change retained the same request identity")
+	}
+	if _, created, err := s.Admit(context.Background(), "principal", r3, d3); !errors.Is(err, ErrReceiptConflictV2) || created {
+		t.Fatalf("changed output schema admission = created %v err %v", created, err)
+	}
+
+	precise1 := base
+	precise1.OutputSchema = []byte(`{"type":"integer","minimum":9007199254740992}`)
+	precise2 := base
+	precise2.OutputSchema = []byte(`{"minimum":9007199254740993,"type":"integer"}`)
+	p1, err := canonicalRequestDigestV2(precise1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2, err := canonicalRequestDigestV2(precise2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p1 == p2 {
+		t.Fatal("schema canonicalization collapsed distinct integer precision")
 	}
 }

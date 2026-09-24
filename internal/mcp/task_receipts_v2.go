@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -8,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -206,12 +208,38 @@ func canonicalRequestDigestV2(r RunTaskV2Request) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	canonicalSchema, err := canonicalJSONBytesV2(validated.OutputSchema)
+	if err != nil {
+		return "", fmt.Errorf("canonicalize output schema: %w", err)
+	}
+	validated.OutputSchema = canonicalSchema
 	b, err = json.Marshal(validated)
 	if err != nil {
 		return "", fmt.Errorf("encode canonical request: %w", err)
 	}
 	h := sha256.Sum256(b)
 	return hex.EncodeToString(h[:]), nil
+}
+
+func canonicalJSONBytesV2(raw []byte) ([]byte, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value any
+	if err := decoder.Decode(&value); err != nil {
+		return nil, fmt.Errorf("decode JSON value: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("JSON contains multiple values")
+		}
+		return nil, fmt.Errorf("decode trailing JSON data: %w", err)
+	}
+	encoded, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("encode canonical JSON: %w", err)
+	}
+	return encoded, nil
 }
 
 func (s *receiptStoreV2) Admit(ctx context.Context, owner string, request RunTaskV2Request, requestDigest string) (ReceiptV2, bool, error) {
@@ -402,7 +430,10 @@ func (s *receiptStoreV2) Finalize(ctx context.Context, owner, executionID string
 	}
 	sort.Slice(entry.Receipt.Artifacts, func(i, j int) bool { return entry.Receipt.Artifacts[i].ID < entry.Receipt.Artifacts[j].ID })
 	entry.UpdatedAt = time.Now().UTC()
-	entry.Reconciled = result.SideEffectState != SideEffectUnknownV2 && result.Usage.BilledMicroUSD != nil
+	if encodedReceipt, err := json.Marshal(entry.Receipt); err != nil || int64(len(encodedReceipt)) > receiptMaxRecordV2 {
+		return fmt.Errorf("task receipt exceeds 4 MiB")
+	}
+	entry.Reconciled = receiptResultReconciledV2(result)
 	next.Receipts[key] = entry
 	if err := s.persist(next); err != nil {
 		return err
@@ -450,7 +481,7 @@ func (s *receiptStoreV2) Cleanup(ctx context.Context, now time.Time) error {
 	next := cloneDiskV2(s.disk)
 	keys := make([]string, 0)
 	for k, e := range next.Receipts {
-		if !terminalReceiptV2(e.Receipt.State) || !e.Reconciled || e.Receipt.Result == nil || e.Receipt.Result.SideEffectState == SideEffectUnknownV2 || now.Sub(e.Receipt.CreatedAt) <= receiptKeepV2 {
+		if !terminalReceiptV2(e.Receipt.State) || !e.Reconciled || e.Receipt.Result == nil || !receiptResultReconciledV2(*e.Receipt.Result) || now.Sub(e.Receipt.CreatedAt) <= receiptKeepV2 {
 			continue
 		}
 		keys = append(keys, k)
@@ -471,6 +502,13 @@ func (s *receiptStoreV2) Cleanup(ctx context.Context, now time.Time) error {
 	}
 	s.disk = next
 	return nil
+}
+
+func receiptResultReconciledV2(result TaskResultV2) bool {
+	if result.SideEffectState == SideEffectUnknownV2 || result.Budget.UncertainRequests != 0 || result.Usage.BilledMicroUSD == nil {
+		return false
+	}
+	return result.Budget.UnresolvedMicroUSD == nil || *result.Budget.UnresolvedMicroUSD == 0
 }
 func terminalReceiptV2(s ReceiptStateV2) bool {
 	switch s {
