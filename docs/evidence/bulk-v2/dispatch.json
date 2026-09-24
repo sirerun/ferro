@@ -2,12 +2,13 @@
   "schema": "ferro.bulk-dispatch/v1",
   "coordinator": "codex@ferro",
   "base_sha": "38516376385f33f17fccc6079f1e0de65a5c967e",
-  "contract_sha": null,
-  "updated_at": "2026-09-24T18:12:19.153211+00:00",
+  "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+  "updated_at": "2026-09-24T18:38:46.503118+00:00",
   "gate_state": {
-    "G00": "accepted_with_release_reconciliation_pending",
-    "G01": "combined_tests_found_test_fixture_defect",
-    "L01-L10": "blocked_on_reviewed_contract"
+    "G00": "accepted_with_G05_reconciliation",
+    "G01": "accepted",
+    "G02": "not_started",
+    "G03": "not_started"
   },
   "sessions": [
     {
@@ -45,7 +46,7 @@
       "pid": 42544,
       "session_id": "01a0d48e-7a73-7e81-b081-064b6d22203b",
       "model": "gpt-6-luna",
-      "state": "integrated_pending_review",
+      "state": "accepted_after_review_and_combined_verification",
       "branch": "codex/bulk-v2-core-contract",
       "worktree": "../ferro-bulk-v2-core-contract",
       "base_sha": "b7f577b",
@@ -63,7 +64,7 @@
       "pid": 42545,
       "session_id": "01a0d48e-7a6e-7d73-ad27-41779fedb300",
       "model": "gpt-6-luna",
-      "state": "integrated_pending_review",
+      "state": "accepted_after_review_and_combined_verification",
       "branch": "codex/bulk-v2-wire-contract",
       "worktree": "../ferro-bulk-v2-wire-contract",
       "base_sha": "b7f577b",
@@ -81,7 +82,7 @@
     {
       "task": "test-correction",
       "model": "gpt-6-luna",
-      "state": "running",
+      "state": "accepted_after_review_and_combined_verification",
       "pid": 69595,
       "branch": "codex/bulk-v2-test-correction",
       "owns": [
@@ -89,12 +90,106 @@
       ]
     }
   ],
-  "next_action": "Review and integrate Luna test-fixture correction, rerun MCP/fixtures, complete contract review and lock before implementation packet dispatch.",
+  "next_action": "Review L01/L03, then dispatch L02 and remaining packets against unchanged contract baseline. Coordinator owns shared integration.",
   "verification": {
     "command": "GOWORK=off go test ./internal/core ./internal/llm ./internal/mcp",
     "core": "passed",
     "llm": "passed",
-    "mcp": "failed: TestRequestV2CanonicalOriginsAndStartURL contains no-op replacement; correction assigned",
-    "lease": "acquired and released successfully"
-  }
+    "mcp": "passed",
+    "fixture_checker": "passed",
+    "lock": "18 file hashes verified; revision 1",
+    "lease": "acquired and released"
+  },
+  "packets": [
+    {
+      "id": "L01",
+      "state": "running",
+      "model": "gpt-6-luna",
+      "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "branch": "codex/bulk-v2-l01",
+      "agent": "/root/contract_final_fix"
+    },
+    {
+      "id": "L02",
+      "state": "queued",
+      "model": "gpt-6-luna",
+      "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "branch": null,
+      "agent": null
+    },
+    {
+      "id": "L03",
+      "state": "running",
+      "model": "gpt-6-luna",
+      "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "branch": "codex/bulk-v2-l03",
+      "agent": "/root/contract_review"
+    },
+    {
+      "id": "L04",
+      "state": "queued",
+      "model": "gpt-6-luna",
+      "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "branch": null,
+      "agent": null
+    },
+    {
+      "id": "L05",
+      "state": "queued",
+      "model": "gpt-6-luna",
+      "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "branch": null,
+      "agent": null
+    },
+    {
+      "id": "L06",
+      "state": "queued",
+      "model": "gpt-6-luna",
+      "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "branch": null,
+      "agent": null
+    },
+    {
+      "id": "L07",
+      "state": "queued",
+      "model": "gpt-6-luna",
+      "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "branch": null,
+      "agent": null
+    },
+    {
+      "id": "L08",
+      "state": "queued",
+      "model": "gpt-6-luna",
+      "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "branch": null,
+      "agent": null
+    },
+    {
+      "id": "L09",
+      "state": "queued",
+      "model": "gpt-6-luna",
+      "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "branch": null,
+      "agent": null
+    },
+    {
+      "id": "L10",
+      "state": "queued",
+      "model": "gpt-6-luna",
+      "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "branch": null,
+      "agent": null
+    }
+  ]
 }
