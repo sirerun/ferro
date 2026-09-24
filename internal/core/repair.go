@@ -59,18 +59,6 @@ func containsAny(s string, subs ...string) bool {
 	return false
 }
 
-// repairSystem is a narrow prompt: patch one step, nothing else. The model
-// never sees prior steps, history, or the original goal context beyond a
-// one-line reminder — repair cost stays near ~1k tokens.
-const repairSystem = `You repair a single failed browser automation step.
-You will receive: the failed step (JSON), the error, and a FRESH page snapshot.
-Respond with ONLY the corrected step as JSON, same schema, or {"kind":"abort","reason":"..."}
-if the goal is impossible on this page.
-Rules:
-- Prefer remapping the ref to a matching [N] in the fresh snapshot.
-- If a wait would fix it (content still loading), return {"kind":"wait","for":"dom_settle"}.
-- Do not invent refs. Do not change the overall approach.`
-
 // repairStep asks the LLM to patch one failed action. ok=false means the
 // model declined (abort) or output was unusable — the caller keeps the
 // original error. orig is the snapshot the failed plan was built against;
