@@ -402,12 +402,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           });
           if (!statusResponse.ok) throw new Error('Could not check the existing pairing. Retry when the service is available.');
           const state = await statusResponse.json();
-          if (state.busy !== false || state.leased !== false) throw new Error('A task or agent lease is still running. Stop it before connecting another tab.');
           if (state.paired_tab) {
             const scoped = c.base === HOSTED_BRIDGE_BASE ? parseHostedWireTabId(state.paired_tab) : /^[0-9]+$/.test(state.paired_tab) ? {tabId:Number(state.paired_tab), wireTabId:state.paired_tab} : null;
             if (!scoped) throw new Error('Invalid pairing status from the service.');
             previous = {base:c.base, token:c.token, ...scoped};
           }
+          const rejoiningHostedPair = c.base === HOSTED_BRIDGE_BASE && previous && previous.browserId === c.browserId && previous.tabId === c.tabId;
+          if ((state.busy !== false || state.leased !== false) && !rejoiningHostedPair) throw new Error('A task or agent lease is still running. Stop it before connecting another tab.');
         }
         const samePair = previous && previous.base === c.base && previous.token === c.token && previous.tabId === c.tabId && (c.base !== HOSTED_BRIDGE_BASE || previous.browserId === c.browserId);
         if (samePair) {

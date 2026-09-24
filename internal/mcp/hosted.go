@@ -52,6 +52,10 @@ func NewPrivateHostedHandler(owner *Owner, publicOrigin string) (http.Handler, e
 	if len(bridgeToken) < 32 || bridgeToken == mcpToken {
 		return nil, fmt.Errorf("bridge and MCP tokens must be distinct strong credentials")
 	}
+	// Hosted pair identities are browser-scoped. Enable strict ownership
+	// before returning any public handler so /next cannot claim or replace a
+	// pairing based on poll timing.
+	owner.bridge.EnableStrictPairing()
 	publicHost := origin.Host
 	mcp := remoteHandler(owner, mcpToken, publicHost)
 	target := &url.URL{Scheme: "http", Host: owner.bridge.Addr()}

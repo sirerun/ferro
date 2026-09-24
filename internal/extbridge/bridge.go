@@ -91,14 +91,15 @@ type Bridge struct {
 	token       string
 	pollTimeout time.Duration
 
-	mu          sync.Mutex
-	lastSeen    time.Time
-	generation  uint64
-	pairedTab   string                // "" until the first /next request pairs
-	activePolls map[string]int        // live /next requests by tab
-	waiting     map[string]chan Reply // action id -> the Enqueue call awaiting its reply
-	dispatched  map[string]bool       // actions handed to the extension but not yet replied
-	queue       chan *pendingAction   // actions waiting to be handed to /next
+	mu            sync.Mutex
+	lastSeen      time.Time
+	generation    uint64
+	pairedTab     string                // "" until the first /next request pairs
+	strictPairing bool                  // hosted mode requires explicit pairing and disconnect
+	activePolls   map[string]int        // live /next requests by tab
+	waiting       map[string]chan Reply // action id -> the Enqueue call awaiting its reply
+	dispatched    map[string]bool       // actions handed to the extension but not yet replied
+	queue         chan *pendingAction   // actions waiting to be handed to /next
 
 	// srv and ln back Start/Stop; the HTTP wiring itself (handlers, routing,
 	// auth) lives in server.go, kept separate from the queue/pairing logic
@@ -152,6 +153,16 @@ func (b *Bridge) Generation() uint64 {
 	return b.generation
 }
 
+// EnableStrictPairing requires an explicit /pair before polling and prevents
+// an idle or expired poll from transferring a hosted pairing to another tab.
+// It is safe to call repeatedly; hosted owners enable it before publishing
+// their handler.
+func (b *Bridge) EnableStrictPairing() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.strictPairing = true
+}
+
 // pair records the tabID reported by a poll, pairing it if none is active and
 // replacing an inactive tab. It returns an error when another tab still has
 // a live poll.
@@ -166,7 +177,18 @@ func (b *Bridge) pair(tabID string) error {
 func (b *Bridge) pairExplicit(tabID string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.strictPairing && b.pairedTab == "" {
+		b.pairedTab = tabID
+		b.lastSeen = time.Now()
+		return nil
+	}
 	if b.pairedTab == tabID {
+		if b.strictPairing {
+			// Hosted reconnect is idempotent. In particular, don't invalidate
+			// active polls, snapshots, queued work, or an in-flight action.
+			b.lastSeen = time.Now()
+			return nil
+		}
 		if b.hasDispatchedLocked() {
 			return fmt.Errorf("tab %q has an action in progress; wait for it to finish before reconnecting", tabID)
 		}
@@ -176,6 +198,16 @@ func (b *Bridge) pairExplicit(tabID string) error {
 }
 
 func (b *Bridge) pairLocked(tabID string) error {
+	if b.strictPairing {
+		if b.pairedTab == "" {
+			return fmt.Errorf("tab must explicitly pair before polling")
+		}
+		if b.pairedTab != tabID {
+			return fmt.Errorf("tab %q is already paired; disconnect it before pairing another tab", b.pairedTab)
+		}
+		b.lastSeen = time.Now()
+		return nil
+	}
 	// Chrome clears storage.session when it restarts or reloads an extension.
 	// If the old extension no longer has a live poll, replace it immediately.
 	// Otherwise preserve the active pairing until it disconnects.

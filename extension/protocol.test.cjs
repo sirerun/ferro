@@ -342,3 +342,56 @@ test('hosted pairing scopes equal numeric tabs to separate extension contexts an
   assert.equal(paired,'browser-context-b-123456.42');
   assert.ok(events.filter(e=>e.path==='/pair').every(e=>e.tab==='42'&&e.browser));
 });
+
+test('hosted worker restart rejoins the same server pair, and explicitly pairs only after server reset', async()=>{
+  const localState={};
+  const routes=[];
+  let paired='';
+  const serverFetch=async(url,options={})=>{
+    const path=new URL(url).pathname;
+    const headers=options.headers||{};
+    routes.push([path,headers['X-Ferro-Browser-Id'],headers['X-Ferro-Tab-Id']]);
+    if(path.endsWith('/chat/status'))return {ok:true,status:200,json:async()=>({busy:!!paired,leased:false,paired_tab:paired||null})};
+    if(path.endsWith('/pair')){
+      const identity=`${headers['X-Ferro-Browser-Id']}.${headers['X-Ferro-Tab-Id']}`;
+      if(paired && paired!==identity)return {ok:false,status:409,text:async()=>'another browser owns the pairing'};
+      paired=identity;
+      return {ok:true,status:204};
+    }
+    return {ok:true,status:204};
+  };
+  function restartedWorker(){
+    const {context,listeners}=worker({fetch:serverFetch,crypto:{randomUUID:()=> 'browser-context-restart-1234'}});
+    context.chrome.storage.local.get=async key=>({[key]:localState[key]});
+    context.chrome.storage.local.set=async value=>Object.assign(localState,value);
+    context.chrome.storage.session.set=async()=>{};
+    context.ensureContentReady=async()=>{};
+    context.startPolling=()=>{};
+    context.restoreSidePanelAccess=async()=>{};
+    return {context,listeners};
+  }
+  const connect=agent=>new Promise(resolve=>agent.listeners[0]({type:'ferro-connect',connection:{base:'https://ferro.sire.run/bridge',token:'shared-token',tabId:42}},{id:'test-extension',url:'chrome-extension://test-extension/popup.html'},resolve));
+  const first=restartedWorker();
+  const initial=await connect(first);
+  assert.equal(initial.ok,true);
+  assert.equal(paired,'browser-context-restart-1234.42');
+  assert.deepEqual(routes.map(r=>r[0].replace('/bridge','')),['/chat/status','/pair']);
+
+  // A service-worker restart clears storage.session but keeps the browser's
+  // local installation identity and the server's explicit pairing.
+  routes.length=0;
+  const afterRestart=restartedWorker();
+  const rejoined=await connect(afterRestart);
+  assert.equal(rejoined.ok,true);
+  assert.deepEqual(routes.map(r=>r[0].replace('/bridge','')),['/chat/status']);
+
+  // If the service itself restarted and forgot the pair, recovery explicitly
+  // claims it with /pair before polling.
+  paired='';
+  routes.length=0;
+  const afterServerRestart=restartedWorker();
+  const pairedAgain=await connect(afterServerRestart);
+  assert.equal(pairedAgain.ok,true);
+  assert.equal(paired,'browser-context-restart-1234.42');
+  assert.deepEqual(routes.map(r=>r[0].replace('/bridge','')),['/chat/status','/pair']);
+});

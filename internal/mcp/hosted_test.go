@@ -170,6 +170,46 @@ func TestPrivateHostedHealthIsPrivateInfoFree(t *testing.T) {
 	}
 }
 
+func TestPrivateHostedPairingCannotBeClaimedOrReplacedByPolling(t *testing.T) {
+	owner, handler, _, bridgeToken := hostedFixture(t)
+	request := func(method, path, browser string) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, path, nil)
+		req.Host = "ferro.sire.run"
+		req.TLS = &tls.ConnectionState{}
+		req.Header.Set("Authorization", "Bearer "+bridgeToken)
+		req.Header.Set("X-Ferro-Browser-Id", browser)
+		req.Header.Set("X-Ferro-Tab-Id", "42")
+		rr := httptest.NewRecorder()
+		handler.ServeHTTP(rr, req)
+		return rr
+	}
+	const browserA = "browser-context-a-123456"
+	const browserB = "browser-context-b-123456"
+	if rr := request(http.MethodGet, "/bridge/next", browserA); rr.Code != http.StatusConflict {
+		t.Fatalf("unpaired hosted /next status %d, want 409: %s", rr.Code, rr.Body.String())
+	}
+	if rr := request(http.MethodPost, "/bridge/pair", browserA); rr.Code != http.StatusNoContent {
+		t.Fatalf("hosted pair A status %d, want 204: %s", rr.Code, rr.Body.String())
+	}
+	generation := owner.bridge.Generation()
+	if rr := request(http.MethodPost, "/bridge/pair", browserA); rr.Code != http.StatusNoContent {
+		t.Fatalf("same-identity hosted rejoin status %d, want 204: %s", rr.Code, rr.Body.String())
+	}
+	if got := owner.bridge.Generation(); got != generation {
+		t.Fatalf("same-identity rejoin changed generation %d to %d", generation, got)
+	}
+	if rr := request(http.MethodGet, "/bridge/next", browserB); rr.Code != http.StatusConflict {
+		t.Fatalf("different browser replaced idle hosted pair: status %d, want 409: %s", rr.Code, rr.Body.String())
+	}
+	if rr := request(http.MethodPost, "/bridge/pair", browserB); rr.Code != http.StatusConflict {
+		t.Fatalf("different browser explicit pair status %d, want 409: %s", rr.Code, rr.Body.String())
+	}
+	if got := owner.bridge.PairedTab(); got != browserA+".42" {
+		t.Fatalf("pair after rejected takeover %q, want %q", got, browserA+".42")
+	}
+}
+
 func TestPrivateHostedOriginValidation(t *testing.T) {
 	cases := []struct {
 		name, origin string
