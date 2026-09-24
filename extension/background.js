@@ -728,6 +728,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) return false;
 
   if (message.type === 'ferro-connect') {
+    let handlerWorkflowGeneration = null;
     (async () => {
       let previous = null;
       let restartPreviousPoll = false;
@@ -736,6 +737,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         if (senderIsNotExtensionPage(sender)) throw new Error('pair using the extension popup or side panel');
         const workflow = beginConnectionWorkflow(message.connection);
+        handlerWorkflowGeneration = workflow.generation;
         explicitConnectionWorkflowGeneration = workflow.generation;
         if (message.connection?.base === HOSTED_BRIDGE_BASE) {
           const response = await connectHosted(message, sender, workflow.generation, workflow.controller.signal);
@@ -851,7 +853,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ error: message });
       }
     })().finally(() => {
-      if (explicitConnectionWorkflowGeneration === connectionWorkflowGeneration) explicitConnectionWorkflowGeneration = null;
+      if (explicitConnectionWorkflowGeneration === handlerWorkflowGeneration) explicitConnectionWorkflowGeneration = null;
     });
     return true;
   }

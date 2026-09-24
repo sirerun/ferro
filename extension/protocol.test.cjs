@@ -178,6 +178,41 @@ test('background hosted recovery does not cancel an explicit connection workflow
   assert.equal(stored.tabId,42);
 });
 
+test('superseded explicit connect cleanup preserves newer connect priority over recovery',async()=>{
+  const oldConnection={base:'https://ferro.sire.run/bridge',token:'pilot-token',browserId:'browser-context-default-1234',tabId:41};
+  const wakeReleases=[];let wakeCount=0;
+  const wakeStarted=[];
+  let stored=oldConnection;
+  const {context,listeners}=worker({fetch:async(url)=>{
+    const path=new URL(url).pathname;
+    if(path.endsWith('/wake')){
+      const index=wakeCount++;
+      wakeStarted[index]();
+      return new Promise(resolve=>{wakeReleases[index]=resolve;});
+    }
+    if(path.endsWith('/chat/status'))return {ok:true,status:200,json:async()=>({busy:false,leased:false,paired_tab:null})};
+    if(path.endsWith('/pair'))return {ok:true,status:204};
+    return {ok:true,status:204};
+  }});
+  context.chrome.storage.session.get=async()=>({connection:stored});
+  context.chrome.storage.session.set=async value=>{stored=value.connection;};
+  context.ensureContentReady=async()=>{};context.startPolling=()=>{};context.restoreSidePanelAccess=async()=>{};
+  context.connection=oldConnection;
+  const waitWake=index=>new Promise(resolve=>{wakeStarted[index]=resolve;});
+  const connectA=connectHosted(listeners,{tabId:42,confirmDisconnectTab:'browser-context-default-1234.41'});
+  await waitWake(0);
+  const connectB=connectHosted(listeners,{tabId:43,confirmDisconnectTab:'browser-context-default-1234.41'});
+  await waitWake(1);
+  wakeReleases[0]({ok:true,status:202});
+  assert.match((await connectA).error,/canceled/);
+  const recovered=await vm.runInContext('recoverHostedConnection(connection, 7)',context);
+  assert.equal(recovered,false);
+  assert.equal(wakeCount,2,'background recovery must not start a third wake');
+  wakeReleases[1]({ok:true,status:202});
+  assert.equal((await connectB).ok,true);
+  assert.equal(stored.tabId,43);
+});
+
 test('invalid hosted token fails at wake without retry or credential disclosure',async()=>{
   let requests=0;
   const {context,listeners}=worker({fetch:async(_url,options)=>{requests++;assert.equal(options.headers.Authorization,'Bearer secret-token');return {ok:false,status:401,text:async()=> 'secret-token echoed'};}});
