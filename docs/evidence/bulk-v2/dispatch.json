@@ -5,8 +5,8 @@
   "contract_sha": null,
   "updated_at": "2026-09-24T17:49:27.807615+00:00",
   "gate_state": {
-    "G00": "in_progress",
-    "G01": "candidate_only",
+    "G00": "accepted_with_release_reconciliation_pending",
+    "G01": "candidate_corrections_in_progress",
     "L01-L10": "blocked_on_reviewed_contract"
   },
   "sessions": [
@@ -14,28 +14,63 @@
       "task": "g01",
       "pid": 18522,
       "model": "gpt-6-luna",
-      "state": "running",
+      "state": "review_changes_requested",
       "worktree": "../ferro-bulk-v2-g01",
       "branch": "codex/bulk-v2-g01",
-      "scope": "G01 candidate types, validation, fixtures; not accepted contract"
+      "scope": "G01 candidate types, validation, fixtures; not accepted contract",
+      "commit_sha": "6549782"
     },
     {
       "task": "baseline",
       "pid": 18523,
       "model": "gpt-6-luna",
-      "state": "running",
+      "state": "accepted",
       "worktree": "../ferro-bulk-v2-baseline",
       "branch": "codex/bulk-v2-baseline",
-      "scope": "G00 read-only baseline evidence"
+      "scope": "G00 read-only baseline evidence",
+      "commit_sha": "c371355"
     },
     {
       "task": "docs",
       "pid": 18524,
       "model": "gpt-6-luna",
-      "state": "running",
+      "state": "merged",
       "worktree": "../ferro-bulk-v2-docs",
       "branch": "codex/bulk-v2-docs",
-      "scope": "Reviewed Zatiti companion integration"
+      "scope": "Reviewed Zatiti companion integration",
+      "commit_sha": "0b745b3"
+    },
+    {
+      "task": "core-contract",
+      "pid": 42544,
+      "session_id": "01a0d48e-7a73-7e81-b081-064b6d22203b",
+      "model": "gpt-6-luna",
+      "state": "running",
+      "branch": "codex/bulk-v2-core-contract",
+      "worktree": "../ferro-bulk-v2-core-contract",
+      "base_sha": "b7f577b",
+      "owns": [
+        "internal/core/task_contract_v2.go",
+        "internal/core/task_contract_v2_test.go"
+      ],
+      "scope": "G01 coordinator-directed corrections; not independent contract acceptance"
+    },
+    {
+      "task": "wire-contract",
+      "pid": 42545,
+      "session_id": "01a0d48e-7a6e-7d73-ad27-41779fedb300",
+      "model": "gpt-6-luna",
+      "state": "running",
+      "branch": "codex/bulk-v2-wire-contract",
+      "worktree": "../ferro-bulk-v2-wire-contract",
+      "base_sha": "b7f577b",
+      "owns": [
+        "internal/mcp/task_contract_v2.go",
+        "internal/mcp/task_contract_v2_test.go",
+        "docs/contracts/bulk-v2/*.json",
+        "docs/contracts/check_bulk_v2.py"
+      ],
+      "scope": "G01 coordinator-directed corrections; not independent contract acceptance"
     }
   ]
 }
