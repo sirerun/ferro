@@ -77,25 +77,26 @@ type ArtifactV2 struct {
 }
 
 type TaskResultV2 struct {
-	Schema          string                `json:"schema"`
-	TaskID          string                `json:"task_id"`
-	ExecutionID     string                `json:"execution_id"`
-	Status          TaskStatusV2          `json:"status"`
-	StartedAt       time.Time             `json:"started_at"`
-	EndedAt         time.Time             `json:"ended_at"`
-	ModelProfile    string                `json:"model_profile"`
-	ProfileRevision string                `json:"profile_revision"`
-	Model           string                `json:"model,omitempty"`
-	EffectiveLimits core.LimitsV2         `json:"effective_limits"`
-	Result          json.RawMessage       `json:"result,omitempty"`
-	PartialResult   json.RawMessage       `json:"partial_result,omitempty"`
-	Validation      string                `json:"validation"`
-	Summary         string                `json:"summary,omitempty"`
-	Usage           core.RequestUsageV2   `json:"usage"`
-	Budget          core.BudgetSnapshotV2 `json:"budget"`
-	Error           *TaskErrorV2          `json:"error,omitempty"`
-	SideEffectState SideEffectStateV2     `json:"side_effect_state"`
-	Artifacts       []ArtifactV2          `json:"artifacts,omitempty"`
+	Schema           string                `json:"schema"`
+	TaskID           string                `json:"task_id"`
+	ExecutionID      string                `json:"execution_id"`
+	Status           TaskStatusV2          `json:"status"`
+	StartedAt        time.Time             `json:"started_at"`
+	EndedAt          time.Time             `json:"ended_at"`
+	ModelProfile     string                `json:"model_profile"`
+	ProfileRevision  string                `json:"profile_revision"`
+	Model            string                `json:"model,omitempty"`
+	EffectiveLimits  core.LimitsV2         `json:"effective_limits"`
+	Result           json.RawMessage       `json:"result,omitempty"`
+	ResultArtifactID string                `json:"result_artifact_id,omitempty"`
+	PartialResult    json.RawMessage       `json:"partial_result,omitempty"`
+	Validation       string                `json:"validation"`
+	Summary          string                `json:"summary,omitempty"`
+	Usage            core.RequestUsageV2   `json:"usage"`
+	Budget           core.BudgetSnapshotV2 `json:"budget"`
+	Error            *TaskErrorV2          `json:"error,omitempty"`
+	SideEffectState  SideEffectStateV2     `json:"side_effect_state"`
+	Artifacts        []ArtifactV2          `json:"artifacts,omitempty"`
 }
 
 type ProfileV2 struct {
@@ -187,25 +188,26 @@ type ReceiptStoreV2 interface {
 type TaskPolicyGuardV2 interface{ Check(context.Context) error }
 
 type ExecutionRecordV2 struct {
-	Owner           string
-	ExecutionID     string
-	TaskID          string
-	Profile         string
-	ProfileRevision string
-	Model           string
-	Limits          core.LimitsV2
-	Usage           core.RequestUsageV2
-	Budget          core.BudgetSnapshotV2
-	StartedAt       time.Time
-	EndedAt         time.Time
-	Status          TaskStatusV2
-	Error           *TaskErrorV2
-	SideEffectState SideEffectStateV2
-	Summary         string
-	Result          json.RawMessage
-	PartialResult   json.RawMessage
-	Validation      string
-	Artifacts       []ArtifactV2
+	Owner            string
+	ExecutionID      string
+	TaskID           string
+	Profile          string
+	ProfileRevision  string
+	Model            string
+	Limits           core.LimitsV2
+	Usage            core.RequestUsageV2
+	Budget           core.BudgetSnapshotV2
+	StartedAt        time.Time
+	EndedAt          time.Time
+	Status           TaskStatusV2
+	Error            *TaskErrorV2
+	SideEffectState  SideEffectStateV2
+	Summary          string
+	Result           json.RawMessage
+	ResultArtifactID string
+	PartialResult    json.RawMessage
+	Validation       string
+	Artifacts        []ArtifactV2
 }
 
 var taskIDPatternV2 = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
@@ -346,6 +348,9 @@ func canonicalOriginV2(raw string) (string, error) {
 	return u.Scheme + "://" + authority, nil
 }
 
+// ValidateTaskResultV2 validates result metadata and inline JSON. For an artifact-backed
+// result it validates the manifest only; the builder must validate the original
+// result against its output schema before storing the artifact bytes.
 func ValidateTaskResultV2(r TaskResultV2) error {
 	if r.Schema != "ferro.result/v2" || !validTaskIDV2(r.TaskID) || !validTaskIDV2(r.ExecutionID) || !validTaskIDV2(r.ModelProfile) || r.ProfileRevision == "" {
 		return fmt.Errorf("invalid result identity")
@@ -364,13 +369,19 @@ func ValidateTaskResultV2(r TaskResultV2) error {
 			return fmt.Errorf("negative usage")
 		}
 	}
+	if err := validateResultBudgetV2(r.Budget); err != nil {
+		return err
+	}
+	if r.ResultArtifactID != "" && !validTaskIDV2(r.ResultArtifactID) {
+		return fmt.Errorf("invalid result artifact ID")
+	}
 	if len(r.Result) > 16384 || len(r.PartialResult) > 16384 {
 		return fmt.Errorf("inline result exceeds 16384 bytes")
 	}
-	if len(r.Result) > 0 && !json.Valid(r.Result) {
+	if len(r.Result) > 0 && (!utf8Valid(r.Result) || !json.Valid(r.Result)) {
 		return fmt.Errorf("invalid result JSON")
 	}
-	if len(r.PartialResult) > 0 && !json.Valid(r.PartialResult) {
+	if len(r.PartialResult) > 0 && (!utf8Valid(r.PartialResult) || !json.Valid(r.PartialResult)) {
 		return fmt.Errorf("invalid partial result JSON")
 	}
 	if r.Validation != "valid" && r.Validation != "invalid" && r.Validation != "not_run" {
@@ -378,11 +389,11 @@ func ValidateTaskResultV2(r TaskResultV2) error {
 	}
 	switch r.Status {
 	case TaskSucceededV2:
-		if r.Validation != "valid" || len(r.Result) == 0 || len(r.PartialResult) > 0 || r.Error != nil {
+		if r.Validation != "valid" || (len(r.Result) == 0) == (r.ResultArtifactID == "") || len(r.PartialResult) > 0 || r.Error != nil {
 			return fmt.Errorf("success requires valid result without error")
 		}
 	case TaskFailedV2, TaskBlockedV2, TaskCancelledV2, TaskBudgetExhaustedV2, TaskOutcomeUncertainV2:
-		if len(r.Result) > 0 {
+		if len(r.Result) > 0 || r.ResultArtifactID != "" {
 			return fmt.Errorf("failure cannot contain accepted result")
 		}
 	default:
@@ -402,10 +413,48 @@ func ValidateTaskResultV2(r TaskResultV2) error {
 	if len(r.Artifacts) > 128 {
 		return fmt.Errorf("too many artifacts")
 	}
-	for _, a := range r.Artifacts {
-		if !validTaskIDV2(a.ID) || len(a.SHA256) != 64 || !isHexV2(a.SHA256) || a.Size < 0 || a.Size > 4<<20 || a.MediaType == "" || len(a.MediaType) > 128 {
+	artifactIDs := make(map[string]struct{}, len(r.Artifacts))
+	var referenced *ArtifactV2
+	for i := range r.Artifacts {
+		a := &r.Artifacts[i]
+		if !validTaskIDV2(a.ID) || len(a.SHA256) != 64 || !isHexV2(a.SHA256) || a.Size < 0 || a.Size > 4<<20 || a.MediaType == "" || len(a.MediaType) > 128 || !utf8Valid([]byte(a.MediaType)) {
 			return fmt.Errorf("invalid artifact metadata")
 		}
+		if _, exists := artifactIDs[a.ID]; exists {
+			return fmt.Errorf("duplicate artifact ID")
+		}
+		artifactIDs[a.ID] = struct{}{}
+		if a.ID == r.ResultArtifactID {
+			referenced = a
+		}
+	}
+	if r.ResultArtifactID != "" {
+		if referenced == nil {
+			return fmt.Errorf("result artifact not found")
+		}
+		if referenced.Size <= 16384 || referenced.Size > 4<<20 || referenced.MediaType != "application/json" {
+			return fmt.Errorf("invalid result artifact metadata")
+		}
+	}
+	return nil
+}
+
+func validateResultBudgetV2(b core.BudgetSnapshotV2) error {
+	for _, v := range []int64{b.Requests, b.Actions, b.PlanningPasses, b.Repairs, b.ReservedTokens, b.UncertainRequests, b.EstimatedInputTokens, b.ReservedOutputTokens} {
+		if v < 0 {
+			return fmt.Errorf("negative budget counter")
+		}
+	}
+	for _, v := range []*int64{b.ReportedUsage.InputTokens, b.ReportedUsage.OutputTokens, b.ReportedUsage.TotalTokens, b.ReportedUsage.ReasoningTokens, b.ReportedUsage.CacheReadTokens, b.ReportedUsage.CacheWriteTokens, b.ReportedUsage.BilledMicroUSD, b.ReservedMicroUSD, b.UnresolvedMicroUSD} {
+		if v != nil && *v < 0 {
+			return fmt.Errorf("negative budget amount")
+		}
+	}
+	if b.Currency != "" && b.Currency != "USD" {
+		return fmt.Errorf("unsupported budget currency")
+	}
+	if b.Currency == "" && (b.ReportedUsage.BilledMicroUSD != nil || b.ReservedMicroUSD != nil || b.UnresolvedMicroUSD != nil) {
+		return fmt.Errorf("budget currency required for monetary amounts")
 	}
 	return nil
 }

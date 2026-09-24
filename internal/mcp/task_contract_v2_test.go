@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/dndungu/ferro/internal/core"
 )
@@ -220,4 +221,120 @@ func TestContractFixturesV2(t *testing.T) {
 			t.Fatalf("usage roundtrip lost unknown-vs-zero distinction: %s", encoded)
 		}
 	})
+}
+
+func TestTaskResultV2ArtifactBackedSuccess(t *testing.T) {
+	result := validTaskResultV2()
+	result.Result = nil
+	result.ResultArtifactID = "result-large"
+	result.Artifacts = []ArtifactV2{{ID: "result-large", SHA256: strings.Repeat("a", 64), MediaType: "application/json", Size: 16385}}
+	if err := ValidateTaskResultV2(result); err != nil {
+		t.Fatalf("valid artifact-backed success rejected: %v", err)
+	}
+}
+
+func TestTaskResultV2RejectsInvalidArtifactAndResultCombinations(t *testing.T) {
+	base := validTaskResultV2()
+	base.Result = nil
+	base.ResultArtifactID = "result-large"
+	base.Artifacts = []ArtifactV2{{ID: "result-large", SHA256: strings.Repeat("a", 64), MediaType: "application/json", Size: 16385}}
+	for _, tc := range []struct {
+		name string
+		edit func(*TaskResultV2)
+	}{
+		{"missing reference", func(r *TaskResultV2) { r.Artifacts = nil }},
+		{"duplicate reference", func(r *TaskResultV2) { r.Artifacts = append(r.Artifacts, r.Artifacts[0]) }},
+		{"inline and artifact", func(r *TaskResultV2) { r.Result = json.RawMessage(`{}`) }},
+		{"artifact too small", func(r *TaskResultV2) { r.Artifacts[0].Size = 16384 }},
+		{"artifact wrong media type", func(r *TaskResultV2) { r.Artifacts[0].MediaType = "text/plain" }},
+		{"failure with artifact reference", func(r *TaskResultV2) { r.Status = TaskFailedV2; r.ResultArtifactID = "result-large" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := base
+			r.Artifacts = append([]ArtifactV2(nil), base.Artifacts...)
+			tc.edit(&r)
+			if err := ValidateTaskResultV2(r); err == nil {
+				t.Fatal("invalid artifact/result combination accepted")
+			}
+		})
+	}
+}
+
+func TestTaskResultV2RejectsNegativeBudgetAndMonetaryAmounts(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*TaskResultV2)
+	}{
+		{"negative counter", func(r *TaskResultV2) { r.Budget.Actions = -1 }},
+		{"negative reported usage", func(r *TaskResultV2) { v := int64(-1); r.Budget.ReportedUsage.InputTokens = &v }},
+		{"negative reserved money", func(r *TaskResultV2) { v := int64(-1); r.Budget.ReservedMicroUSD = &v }},
+		{"negative billed money", func(r *TaskResultV2) { v := int64(-1); r.Budget.ReportedUsage.BilledMicroUSD = &v }},
+		{"unsupported currency", func(r *TaskResultV2) { r.Budget.Currency = "EUR" }},
+		{"empty currency with monetary value", func(r *TaskResultV2) { v := int64(0); r.Budget.ReservedMicroUSD = &v }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := validTaskResultV2()
+			tc.edit(&r)
+			if err := ValidateTaskResultV2(r); err == nil {
+				t.Fatal("invalid budget accepted")
+			}
+		})
+	}
+}
+
+func TestTaskResultV2PreservesUnknownAndZeroBudgetMoney(t *testing.T) {
+	r := validTaskResultV2()
+	r.Budget.Currency = "USD"
+	zero := int64(0)
+	r.Budget.ReservedMicroUSD = &zero
+	if err := ValidateTaskResultV2(r); err != nil {
+		t.Fatalf("zero monetary amount with USD rejected: %v", err)
+	}
+	if r.Budget.UnresolvedMicroUSD != nil || r.Budget.ReportedUsage.BilledMicroUSD != nil {
+		t.Fatal("validation changed unknown monetary amounts")
+	}
+}
+
+func TestTaskResultV2AllowsTruthfulUsageOverrun(t *testing.T) {
+	r := validTaskResultV2()
+	r.Budget.Actions = r.EffectiveLimits.Actions + 1
+	used := r.EffectiveLimits.MaxInputTokens + 1
+	r.Budget.ReportedUsage.InputTokens = &used
+	if err := ValidateTaskResultV2(r); err != nil {
+		t.Fatalf("truthful usage overrun rejected: %v", err)
+	}
+}
+
+func TestTaskResultV2RejectsInvalidUTF8InResultAndArtifactMetadata(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*TaskResultV2)
+	}{
+		{"result", func(r *TaskResultV2) { r.Result = json.RawMessage{'{', '"', 0xff, '"', ':', '1', '}'} }},
+		{"partial result", func(r *TaskResultV2) {
+			r.Status = TaskFailedV2
+			r.Result = nil
+			r.PartialResult = json.RawMessage{'{', '"', 0xff, '"', ':', '1', '}'}
+		}},
+		{"artifact media type", func(r *TaskResultV2) {
+			r.Artifacts = []ArtifactV2{{ID: "a", SHA256: strings.Repeat("a", 64), MediaType: string([]byte{0xff}), Size: 1}}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := validTaskResultV2()
+			tc.edit(&r)
+			if err := ValidateTaskResultV2(r); err == nil {
+				t.Fatal("invalid UTF-8 accepted")
+			}
+		})
+	}
+}
+
+func validTaskResultV2() TaskResultV2 {
+	return TaskResultV2{
+		Schema: "ferro.result/v2", TaskID: "task", ExecutionID: "exec", Status: TaskSucceededV2,
+		StartedAt: time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC), EndedAt: time.Date(2026, 9, 24, 12, 0, 1, 0, time.UTC),
+		ModelProfile: "profile", ProfileRevision: "revision", EffectiveLimits: core.DefaultLimitsV2(),
+		Result: json.RawMessage(`{}`), Validation: "valid", SideEffectState: SideEffectNoneV2,
+	}
 }
