@@ -69,14 +69,24 @@ func (c *budgetedClientV2) Complete(ctx context.Context, system, user string) (s
 	}
 	if providerErr != nil {
 		if errors.Is(providerErr, context.Canceled) {
-			return "", context.Canceled
+			return "", &providerContextTerminationV2{err: context.Canceled}
 		}
 		if errors.Is(providerErr, context.DeadlineExceeded) {
-			return "", context.DeadlineExceeded
+			return "", &providerContextTerminationV2{err: context.DeadlineExceeded}
 		}
 		return "", &StopError{Code: "provider_error", Message: "model provider request failed"}
 	}
 	return completion.Text, nil
+}
+
+type providerContextTerminationV2 struct{ err error }
+
+func (e *providerContextTerminationV2) Error() string { return e.err.Error() }
+func (e *providerContextTerminationV2) Unwrap() error { return e.err }
+
+func isProviderContextTerminationV2(err error) bool {
+	var termination *providerContextTerminationV2
+	return errors.As(err, &termination)
 }
 
 type budgetRequestErrorV2 struct{ err error }

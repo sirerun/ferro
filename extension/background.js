@@ -412,6 +412,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         const samePair = previous && previous.base === c.base && previous.token === c.token && previous.tabId === c.tabId && (c.base !== HOSTED_BRIDGE_BASE || previous.browserId === c.browserId);
         if (samePair) {
+          if (c.base === HOSTED_BRIDGE_BASE) {
+            const response = await fetch(`${c.base}/pair`, { method: 'POST', headers: { Authorization: `Bearer ${c.token}`, ...tabIdentityHeaders(c) }, signal: AbortSignal.timeout(5000) });
+            if (!response.ok) {
+              const detail = (await response.text()).trim();
+              throw new Error(`Pairing failed: ${detail || `HTTP ${response.status}`}.`);
+            }
+          }
           if (!hadLocalConnection) {
             await chrome.storage.session.set({connection:c,bridgeCredentials:{base:c.base,token:c.token}});
             startPolling();
@@ -513,6 +520,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (!response.ok) {
             const detail = (await response.text()).trim();
             if (response.status === 409) {
+              try {
+                const status = await fetch(`${c.base}/chat/status`, {
+                  method:'POST', headers:{Authorization:`Bearer ${c.token}`, 'Content-Type':'application/json', 'X-Ferro-Chat-Session':'extension-pairing-recovery'},
+                  body:'{}', signal:AbortSignal.timeout(5000),
+                });
+                if (status.ok) {
+                  const state = await status.json();
+                  if ((state.paired_tab === null || state.paired_tab === '') && state.busy === false && state.leased === false) {
+                    await chrome.storage.session.remove('connection');
+                    try { await restoreSidePanelAccess(); } catch (error) {
+                      console.error('Could not update Ferro side panel after stale disconnect', error);
+                    }
+                    sendResponse({ ok:true, warning:'The service had already forgotten this pairing. Local connection state was cleared.' });
+                    return;
+                  }
+                }
+              } catch (statusError) {
+                console.warn('Could not verify stale Ferro pairing', statusError);
+              }
               startPolling();
               sendResponse({error:`Disconnect failed: ${detail || `HTTP ${response.status}`}`});
               return;

@@ -330,7 +330,7 @@ func (r *Runner) executeWithRepairs(ctx context.Context, cdpCtx context.Context,
 		}
 
 		var stopped *StopError
-		if errors.As(rerr, &stopped) || ctx.Err() != nil || isTaskV2BudgetFailure(rerr.Err) || isContextTerminationV2(rerr.Err) {
+		if errors.As(rerr, &stopped) || ctx.Err() != nil || isTaskV2BudgetFailure(rerr.Err) || isProviderContextTerminationV2(rerr.Err) {
 			return nil, extracted, rerr
 		}
 
@@ -353,7 +353,7 @@ func (r *Runner) executeWithRepairs(ctx context.Context, cdpCtx context.Context,
 		patched, ok, err := r.repairStep(ctx, rerr, snap, fresh, m)
 		if err != nil {
 			var repairStop *StopError
-			if errors.As(err, &repairStop) || isTaskV2BudgetFailure(err) || isContextTerminationV2(err) {
+			if errors.As(err, &repairStop) || isTaskV2BudgetFailure(err) || isProviderContextTerminationV2(err) {
 				return nil, extracted, &RunError{StepIndex: rerr.StepIndex, Action: rerr.Action, Err: err}
 			}
 		}
@@ -366,12 +366,6 @@ func (r *Runner) executeWithRepairs(ctx context.Context, cdpCtx context.Context,
 		snap = fresh
 		from = rerr.StepIndex
 	}
-}
-
-// isContextTerminationV2 identifies terminal provider signals that must not
-// trigger another browser repair or be hidden by the original browser error.
-func isContextTerminationV2(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 // shapeResult expands any {{extract.X}} templates left in a string Done

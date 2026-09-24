@@ -491,6 +491,50 @@ func TestTaskRuntimeV2Qualification_RestartReconcilesInflightReceiptWithoutRedis
 	}
 }
 
+func TestTaskRuntimeV2DuplicateReceiptBypassesOtherSessionLease(t *testing.T) {
+	o, driver, providerCalls := runtimeFixtureV2(t, runtimePlanV2)
+	sessionA, ctxA := qualificationSessionV2(t, o)
+	sessionB, ctxB := qualificationSessionV2(t, o)
+	in := runtimeRequestV2("lease_duplicate")
+	args := qualificationArgsV2(t, in)
+
+	first, _ := qualificationCallV2(t, sessionA, ctxA, "run_task_v2", args)
+	if first.IsError {
+		t.Fatal("initial task failed")
+	}
+	_, leaseText := qualificationCallV2(t, sessionB, ctxB, "acquire_tab", map[string]any{})
+	if !strings.Contains(leaseText, "acquired") {
+		t.Fatalf("session B did not acquire the tab: %s", leaseText)
+	}
+
+	duplicate, duplicateText := qualificationCallV2(t, sessionA, ctxA, "run_task_v2", args)
+	if duplicate.IsError {
+		t.Fatalf("same task did not return its receipt: %s", duplicateText)
+	}
+	var repeated TaskResultV2
+	if err := json.Unmarshal([]byte(duplicateText), &repeated); err != nil {
+		t.Fatalf("decode repeated result: %v: %s", err, duplicateText)
+	}
+	var initial TaskResultV2
+	if err := json.Unmarshal([]byte(first.Content[0].(*sdk.TextContent).Text), &initial); err != nil {
+		t.Fatalf("decode initial result: %v", err)
+	}
+	if repeated.ExecutionID != initial.ExecutionID || providerCalls.Load() != 1 || driver.calls["extract_field"] != 1 {
+		t.Fatalf("duplicate re-executed or changed receipt: initial=%+v repeated=%+v provider=%d actions=%v", initial, repeated, providerCalls.Load(), driver.calls)
+	}
+
+	changed := in
+	changed.Goal = "a different request"
+	conflict, conflictText := qualificationCallV2(t, sessionA, ctxA, "run_task_v2", qualificationArgsV2(t, changed))
+	if !conflict.IsError || providerCalls.Load() != 1 || driver.calls["extract_field"] != 1 {
+		t.Fatalf("changed same-key request was not rejected without execution: isError=%v text=%s provider=%d actions=%v", conflict.IsError, conflictText, providerCalls.Load(), driver.calls)
+	}
+	receipt, err := o.receipts.Lookup(context.Background(), privateReceiptOwnerV2, in.TaskID)
+	if err != nil || receipt.ExecutionID != initial.ExecutionID {
+		t.Fatalf("receipt principal or identity changed: receipt=%+v err=%v", receipt, err)
+	}
+}
+
 func TestTaskRuntimeV2Qualification_ConcurrentDuplicateAndChangedInput(t *testing.T) {
 	o, _, _ := runtimeFixtureV2(t, runtimePlanV2)
 	entered := make(chan struct{}, 1)

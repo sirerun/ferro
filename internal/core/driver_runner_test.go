@@ -42,6 +42,17 @@ func TestRunDriverRepairsWithoutCDP(t *testing.T) {
 		t.Fatalf("result=%v metrics=%+v err=%v snapshots=%d fills=%d", result, m, err, d.snapshots, d.fills)
 	}
 }
+
+func TestRunDriverRepairsOperationDeadlineWhileTaskContextLives(t *testing.T) {
+	d := &driverFixture{fail: context.DeadlineExceeded}
+	l := &repairFixture{}
+	r := &Runner{LLM: l, MaxRepairs: 1}
+
+	result, metrics, err := r.RunDriver(context.Background(), d, 200, Task{Goal: "fill"})
+	if err != nil || result != "ok" || d.fills != 2 || metrics.Repairs != 1 {
+		t.Fatalf("result=%v metrics=%+v err=%v fills=%d", result, metrics, err, d.fills)
+	}
+}
 func TestRunDriverNeverRepairsUncertainAction(t *testing.T) {
 	d := &driverFixture{fail: &StopError{Code: "outcome_uncertain", Message: "click may have landed"}}
 	l := &repairFixture{}
