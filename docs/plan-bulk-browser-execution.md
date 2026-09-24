@@ -91,7 +91,7 @@ Required request semantics:
 | Field | Contract |
 |---|---|
 | schema | Literal version identifier, e.g. ferro.task/v1 |
-| task_id | Caller correlation ID; never a claim of exactly-once browser execution |
+| task_id | Durable caller key scoped to the authenticated owner; supports recovery before execution_id is received; never an exactly-once browser-effect claim |
 | goal | Nonempty bounded text; reject oversized input before any model call |
 | start_url | Optional explicit URL; omission binds to the currently paired tab |
 | model_profile | Name resolved from service-owned configuration; no arbitrary key/base URL in task arguments |
@@ -215,8 +215,8 @@ Use existing storage facilities where available; otherwise a minimal private app
 - Store bounded detailed action traces, provider receipts and final outputs. Record metadata by default, not whole authenticated pages or secrets.
 - Opaque artifact identifiers, digest, media type, size; authenticated retrieval with ownership checks and bounded ranges. Prevent path traversal and cross-session unauthorized reads.
 - Explicit retention/size limit and operator-triggered cleanup; active/unreconciled receipts cannot disappear silently. No background lifecycle service added for cleanup.
-- Retrieval supports interrupted-call reconciliation using execution_id. A caller task_id is correlation only. Do not label retry as exactly once.
-- If deduplication is supported, persist a request digest and reject task_id reuse with changed input. After restart, an in-flight record becomes outcome_uncertain unless authoritative completion exists; never replay it automatically.
+- Retrieval supports interrupted-call reconciliation using execution_id or the authenticated owner plus caller task_id, including loss of the first response. Neither key confers authority. Freeze bounded lookup and unknown/not-found semantics in G01; a missing response never proves nonexecution.
+- Atomically persist owner/task_id and canonical request digest before dispatch. Concurrent same-key/same-request calls return the existing state without executing again; changed input conflicts. Preserve a key reservation/tombstone for the frozen recovery window even if large artifacts are cleaned up; define expiry behavior explicitly. After restart, an in-flight record becomes outcome_uncertain unless authoritative completion exists; never replay it automatically. This is request admission deduplication, not exactly-once website effects.
 - Preserve metrics and partial evidence on provider errors, cancellation, browser failure and validation failure.
 
 Tests: failed task retains spend, broken MCP connection preserves receipt, restart with in-flight record, duplicate request mismatch, bounded retrieval, access denial, redaction, oversized artifact, disk full, interrupted atomic write. Disk failure must not yield a success receipt with nonexistent artifacts.

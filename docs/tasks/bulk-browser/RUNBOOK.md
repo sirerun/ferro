@@ -58,7 +58,7 @@ Freeze all of these, with explicit values rather than “choose appropriate”:
 1. Exact JSON field names and optionality; represent missing numeric provider usage distinctly from zero.
 2. Exact Go symbols/signatures for resolver, credential lookup, usage completion, admission/reservation/reconciliation, policy wrapper, schema preflight, replay identity, receipt store and result builder. Each L lane must be able to compile against them without sibling lane commits. Use narrow consuming interfaces and injected test dependencies.
 3. Profile storage and revision format, atomic update semantics, credential reference behavior and legacy mapping. No paid default model selected by a cheap lane.
-4. Stable typed error/status/retry mapping, including failed versus uncertain transmission and lost-return receipts.
+4. Stable typed error/status/retry mapping, including failed versus uncertain transmission and lost-return receipts. Freeze authenticated lookup by owner-scoped task_id when execution_id was never received; atomic same-key/same-digest admission, changed-input conflict, concurrent duplicate behavior, recovery retention/tombstones and expiry behavior are required.
 5. Counters: count provider network attempts, all planning passes including initial pass, all repair/extraction attempts; define action units exactly. Recommended action unit: each admitted non-internal PageDriver operation; internal Settle does not count twice when part of another operation. Instrumentation must not recursively count its own origin-check snapshot.
 6. Hard count/runtime limits versus estimated token limits. Use the parent pilot defaults; request policy may tighten defaults but never exceed service maxima. Hard-dollar mode remains unavailable unless enforceable upper bounds are supplied; the initial implementation must explicitly refuse unsupported hard-dollar requests.
 7. Bounds: goal 16 KiB, schema 32 KiB/depth 16, provider body 2 MiB/error body 8 KiB, summary 2 KiB, inline result 16 KiB, receipt/artifact 4 MiB each, retrieval chunk at most 64 KiB. Specify aggregate storage cap and retention before L07 starts; initial recommendation 256 MiB with explicit operator cleanup, preserving active/unreconciled items. Fail closed at capacity rather than evicting those items.
@@ -167,7 +167,7 @@ Own integration tests in new `integration/bulk_v2_*` files and existing harness 
 5. Disconnect/pairing change/cancel: bounded terminal/uncertain result; lease released; receipt accessible only to owner.
 6. Provider timeout after request: unresolved cost retained; no automatic retry of uncertain browser effects.
 7. Large valid output: full artifact retrievable with matching digest; inline preview not mislabeled as complete data.
-8. Restart: unfinished execution reconciles as uncertain; no spontaneous replay.
+8. Restart: unfinished execution reconciles as uncertain; no spontaneous replay. Drop the initial response before execution_id is returned; a fresh authorized client must recover by its persisted task_id. Concurrent duplicate requests dispatch once, changed input conflicts, and another principal cannot retrieve the record.
 9. Warm replay: current facts extracted, partition maintained, model-call count genuinely zero when the validated production path permits it.
 10. Legacy regression: prior direct tools, run_task, chat and owner/shim tests still pass.
 
