@@ -1,6 +1,6 @@
-# ADR 009: Bounded task contract v2 (candidate)
+# ADR 009: Bounded task contract v2 
 
-Status: proposed; coordinator review pending. Date: 2026-09-24.
+Status: accepted for local bounded read-only implementation. Date: 2026-09-24.
 
 ## Decision
 
@@ -10,8 +10,10 @@ Requests are bounded, reject unknown/trailing JSON, use pointer numeric override
 
 ## Consequences
 
-L01–L10 can implement against additive types after review. G01 does not create placeholder implementations for later lanes. A contract lock/hash is intentionally deferred. Existing core schema matching remains the only schema engine.
+L01–L10 can implement against additive types after review. G01 does not create placeholder implementations for later lanes. The accepted lock hashes shared contract declarations, fixtures and exact lane-owned implementation signatures. Existing core schema matching remains the only schema engine.
 
-## Open decision
+## Resolved decisions
 
-The MCP package cannot call core’s private `checkSchema`. L05 owns the planned exported `PreflightSchemaV2` / `ValidateResultV2`, so coordinator review must settle how G01 wire validation invokes keyword/type preflight without transferring L05 implementation ownership.
+core.ValidateSchemaShapeV2 bridges bounded schema preflight to the existing private validator. L05 consumes that helper without replacing validation semantics. Provider metadata uses one HTTP attempt and explicit optional cost-currency mapping. Monetary reserve admission remains unsupported without a verified rate contract. Output larger than the inline limit uses an explicit accepted-result artifact reference, not a truncated or invalid inline success.
+
+All tool schemas are generic MCP consumer contracts. External schedulers own durable queues and batch orchestration; Ferro owns bounded browser execution and receipts. No particular orchestrator is an implementation dependency. Hosted account authority and direct mutation approval remain separate reviewed extensions.
