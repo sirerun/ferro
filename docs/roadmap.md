@@ -1,5 +1,7 @@
 # Roadmap
 
+For upcoming local bulk execution and hosted paid launch, use the [shared execution roadmap](execution-roadmap.md).
+
 See `docs/devlog.md` for the pre-2026-09-10 investigation history (the
 original "Runtime hardening" claim and its correction) -- superseded here by
 the Shipped entries below, which reflect independently re-verified reality.

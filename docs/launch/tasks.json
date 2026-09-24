@@ -1,0 +1,1878 @@
+{
+  "schema_version": 1,
+  "baseline": "daa5fd806fb241211a2e87d1c69d3302f9fc1601",
+  "scope": "Public hosted Ferro launch with evidence-backed AMSL component adoption",
+  "default_worker": "bounded implementation on a lower-reasoning coding model after contracts are frozen",
+  "shared_file_owner": "coordinator",
+  "tasks": [
+    {
+      "id": "D01",
+      "title": "Reconcile launch baseline and active work",
+      "repository": "ferro",
+      "lane": "coordinator",
+      "depends_on": [],
+      "owns": [
+        "docs/launch/evidence/D01.md"
+      ],
+      "steps": [
+        "Fetch main; record reviewed merge and dirty worktrees without changing them.",
+        "Inventory live agents/cwd and read relevant ajent.social; record conflicts and branch owners.",
+        "Establish local-mode baseline commands and capture actual results under build lease."
+      ],
+      "acceptance": [
+        "Exact base SHA, worktree list and regression commands recorded; no stale branch wholesale merge."
+      ],
+      "verification": "git diff --check; local Go/Node suites on selected baseline; report Chrome skips explicitly",
+      "reviewer": "coordinator",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": true
+    },
+    {
+      "id": "D02",
+      "title": "Complete cross-machine semantic census",
+      "repository": "ferro",
+      "lane": "coordinator",
+      "depends_on": [
+        "D01"
+      ],
+      "owns": [
+        "docs/launch/evidence/D02.md"
+      ],
+      "steps": [
+        "Use restricted census to revisit mini and MacBook source paths; record current revisions and uncommitted differences.",
+        "Compare at least two independent source lifecycles per candidate or justify RFC path C; inspect actual negative-path tests.",
+        "Mark each boundary EXTRACT, REFERENCE_EXISTING, INVESTIGATE or REJECT; separate source lineage and third-party forks."
+      ],
+      "acceptance": [
+        "No component justified by filename or worktree count; source maturity and differences documented; password/session divergence retained."
+      ],
+      "verification": "Reviewed comparison matrix and cited source locations in private evidence; no source runtime test claims without execution",
+      "reviewer": "coordinator",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": true
+    },
+    {
+      "id": "D03",
+      "title": "Clear provenance and public evidence boundary",
+      "repository": "ferro",
+      "lane": "coordinator",
+      "depends_on": [
+        "D02"
+      ],
+      "owns": [
+        "docs/launch/evidence/D03.md"
+      ],
+      "steps": [
+        "Inspect license/history/authorship for proposed copied code; flag restricted upstream license.",
+        "Create sanitized behavior contracts and attribution plan; forbid unapproved copying.",
+        "Review public fixtures, paths, URLs and notices before package work."
+      ],
+      "acceptance": [
+        "Every extraction has explicit original-code or cleared-copy path; restricted census never enters public commits."
+      ],
+      "verification": "Provenance review plus secret/private-identifier scan of proposed public artifacts",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": true
+    },
+    {
+      "id": "D04",
+      "title": "Freeze hosted architecture and threat model",
+      "repository": "ferro",
+      "lane": "coordinator",
+      "depends_on": [
+        "D01",
+        "D02"
+      ],
+      "owns": [
+        "docs/launch/architecture.md",
+        "docs/adr/011-hosted-ferro.md"
+      ],
+      "steps": [
+        "Adopt or explicitly revise architecture defaults with rationale.",
+        "Model account/device/task authority, stale worker/extension fencing, key custody, payment reconciliation and destructive-action confirmation.",
+        "Define local-mode preservation and rollback boundaries; reject unsupported browser actions."
+      ],
+      "acceptance": [
+        "No unresolved authority or replay semantics; coordinator approves single account/device/task scope and deployment profile."
+      ],
+      "verification": "Threat-model walkthrough using readiness Gate 3 scenarios",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": true
+    },
+    {
+      "id": "D05",
+      "title": "Freeze executable contracts and dependency versions",
+      "repository": "ferro",
+      "lane": "coordinator",
+      "depends_on": [
+        "D03",
+        "D04"
+      ],
+      "owns": [
+        "api/hosted-v1.yaml",
+        "internal/hosted/contracts/",
+        "docs/launch/contracts/",
+        "docs/launch/evidence/D05.md"
+      ],
+      "steps": [
+        "Write every architecture route and operation JSON schema with success/error examples and authorization matrix.",
+        "Define SQL table ownership, key constraints, migration ranges, exact package methods/typed errors and callback/cancel/confirmation state machines.",
+        "Pin reviewed SDK/tool/action/provider versions; define payload/rate/token limits and compatible protocol v1.",
+        "Freeze the maintenance CLI/workflow contract and IAM role separately; it has no public endpoint or arbitrary SQL capability."
+      ],
+      "acceptance": [
+        "Contracts validate; examples cover denied cases; no implementation agent must invent a shared interface; lockfile owner assigned."
+      ],
+      "verification": "OpenAPI/JSON Schema validation; contract fixture round trips; interface compile checks",
+      "reviewer": "security",
+      "estimated_agent_hours": "6-12",
+      "status": "planned",
+      "gate": true
+    },
+    {
+      "id": "D06",
+      "title": "Freeze website and extension interaction states",
+      "repository": "ferro",
+      "lane": "coordinator",
+      "depends_on": [
+        "D04"
+      ],
+      "owns": [
+        "docs/launch/ui-contract.md",
+        "testdata/hosted-ui/"
+      ],
+      "steps": [
+        "Enumerate logged-out/linking/online/offline/unpaid/busy/uncertain/revoked/deleted states.",
+        "Define screen copy, selectors, focus/live announcements, fixture API responses and exact confirmation UI.",
+        "Preserve glass bubbles and frame-color behavior; define account-separated local history."
+      ],
+      "acceptance": [
+        "Every error has recovery action; UI fixtures match D05 before integration; no silent tab switch or credential copy onboarding."
+      ],
+      "verification": "Review static UI fixtures against architecture and accessibility checklist",
+      "reviewer": "coordinator",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "D07",
+      "title": "Record launch-owner decisions and external setup",
+      "repository": "ferro",
+      "lane": "coordinator",
+      "depends_on": [
+        "D04"
+      ],
+      "owns": [
+        "docs/launch/deployment-inputs.example.json",
+        "docs/launch/evidence/D07.md"
+      ],
+      "steps": [
+        "Prepare concrete cloud cost/resource preview assumptions and required secret-reference names.",
+        "Record Google/publisher IDs, cloud account/region/domain authority, Stripe legal/price/currency/refund/tax policy, support and retention owners.",
+        "Separate prepared artifacts from authorized actual mutations; use fake values in committed examples.",
+        "Obtain or prepare an authorized draft store item for its stable ID early; public publication waits for R02."
+      ],
+      "acceptance": [
+        "No secret values committed; all public commercial claims and deployment inputs have an accountable owner; no implicit activation of other product staging."
+      ],
+      "verification": "Owner-reviewed decision table and non-secret config schema validation",
+      "reviewer": "maintainer",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": true
+    },
+    {
+      "id": "A01",
+      "title": "Implement PostgreSQL servicecred Store",
+      "repository": "go",
+      "lane": "amsl-identity",
+      "depends_on": [
+        "D05"
+      ],
+      "owns": [
+        "servicecred/pgstore/",
+        "docs/servicecred-postgres.md"
+      ],
+      "steps": [
+        "Reuse existing servicecred public API; add parameterized SQL Store adapter and caller-applied schema.",
+        "Implement atomic create, exact-bound revoke, authoritative lookup and sanitized list with context/timeouts.",
+        "Keep boltstore behavior/API and avoid cached authentication."
+      ],
+      "acceptance": [
+        "Two processes see committed revocation; no overwrite or secret leak; DB failures deny."
+      ],
+      "verification": "go test -race ./servicecred/... using disposable PostgreSQL contract suite",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A02",
+      "title": "Verify credential store parity and publishable evidence",
+      "repository": "go",
+      "lane": "amsl-identity",
+      "depends_on": [
+        "A01"
+      ],
+      "owns": [
+        "servicecred/contracttest/",
+        "servicecred/pgstore/contract_test.go",
+        "docs/evidence/servicecred-postgres.md"
+      ],
+      "steps": [
+        "Exercise all existing denied grant/expiry/scope/redaction cases against both supported stores.",
+        "Add DB outage, revoke/create race, account/resource mismatch and fresh-process checks.",
+        "Produce candidate implementation commit and review bundle without claiming stable status."
+      ],
+      "acceptance": [
+        "Every Store guarantee has a real persistence test; SQL driver/dependency rationale and provenance included."
+      ],
+      "verification": "go test -race ./servicecred/...; redaction serialization tests; package review",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A03",
+      "title": "Dogfood credentials in hosted Ferro",
+      "repository": "ferro",
+      "lane": "hosted-identity",
+      "depends_on": [
+        "A02",
+        "F02",
+        "F03"
+      ],
+      "owns": [
+        "internal/hosted/auth/device_credentials.go",
+        "internal/hosted/auth/device_credentials_test.go"
+      ],
+      "steps": [
+        "Pin reviewed published AMSL commit without replace/GOWORK override.",
+        "Wire trusted account/device ceilings and request-time verification into hosted middleware.",
+        "Exercise two credentials/users and restart revocation through real HTTP handlers."
+      ],
+      "acceptance": [
+        "Foreign device/session/task denied; disabled account overrides token; local shared mode never authorizes hosted endpoints."
+      ],
+      "verification": "go test ./internal/hosted/auth -run TestDeviceCredential -count=1 with PostgreSQL",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A04",
+      "title": "Freeze checkout capability contract",
+      "repository": "capabilities",
+      "lane": "amsl-billing",
+      "depends_on": [
+        "D05"
+      ],
+      "owns": [
+        "capabilities/billing.customer-checkout.json",
+        "docs/contracts/customer-checkout.md"
+      ],
+      "steps": [
+        "Write exact common lifecycle from D02, SDK alternatives and non-goals.",
+        "Specify durable attempt/lease/payload hash and provider-retention recovery semantics.",
+        "Record restricted evidence honestly; obtain API/security review before implementation."
+      ],
+      "acceptance": [
+        "No permanent exactly-once claim; caller retains prices/redirects/access; unknown outcome has explicit recover/needs-review state."
+      ],
+      "verification": "Catalog schema validation and deterministic generation; adversarial contract review",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A05",
+      "title": "Implement customer and checkout coordination",
+      "repository": "go",
+      "lane": "amsl-billing",
+      "depends_on": [
+        "A04"
+      ],
+      "owns": [
+        "billing/checkout/",
+        "docs/customer-checkout.md"
+      ],
+      "steps": [
+        "Implement frozen attempt lifecycle and PostgreSQL storage using maintained Stripe SDK adapter.",
+        "Claim provider work transactionally, call provider outside DB transaction and fence commit.",
+        "Add recovery and bounded retry/backoff without creating a new attempt after ambiguous timeout."
+      ],
+      "acceptance": [
+        "Same attempt stable; changed payload conflicts; concurrent processes do not silently create independent customer operations; expired idempotency outcomes require reconciliation."
+      ],
+      "verification": "go test -race ./billing/checkout/... with real PostgreSQL and deterministic lost-response provider fixtures",
+      "reviewer": "security",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A06",
+      "title": "Dogfood checkout and portal routes",
+      "repository": "ferro",
+      "lane": "hosted-billing",
+      "depends_on": [
+        "A05",
+        "F03",
+        "F02",
+        "F04"
+      ],
+      "owns": [
+        "internal/hosted/billing/checkout.go",
+        "internal/hosted/billing/checkout_test.go",
+        "internal/hosted/billing/portal.go"
+      ],
+      "steps": [
+        "Consume immutable AMSL pin; derive customer/price/return URLs from trusted server/account state.",
+        "Wire real web checkout/portal/status APIs and already-subscribed recovery.",
+        "Verify test-mode session create and redirect without granting entitlement."
+      ],
+      "acceptance": [
+        "Cross-account/price/return spoofing rejected; duplicate clicks reuse one active attempt; portal belongs to signed-in customer."
+      ],
+      "verification": "go test ./internal/hosted/billing -run TestCheckout; Stripe test-mode flow recorded; exercise actual durable web sessions and CSRF middleware, including unauthenticated, missing/invalid CSRF and cross-account denial",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A07",
+      "title": "Freeze subscription reconciliation contract",
+      "repository": "capabilities",
+      "lane": "amsl-billing",
+      "depends_on": [
+        "A04"
+      ],
+      "owns": [
+        "capabilities/billing.subscription-reconciliation.json",
+        "docs/contracts/subscription-reconciliation.md"
+      ],
+      "steps": [
+        "Specify verified inbox identity, customer mapping, lease epoch, current provider projection and transaction boundaries.",
+        "Specify duplicate/out-of-order/unmatched event recovery and sweeps; avoid timestamp-only ordering.",
+        "Keep entitlement/grace/tier predicates outside package."
+      ],
+      "acceptance": [
+        "Unknown customer events remain retryable; stale workers cannot overwrite current projection; provider mode/account is part of event binding."
+      ],
+      "verification": "Catalog validation and failure-state design review",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A08",
+      "title": "Implement verified inbox and reconciliation",
+      "repository": "go",
+      "lane": "amsl-billing",
+      "depends_on": [
+        "A07"
+      ],
+      "owns": [
+        "billing/subscription/",
+        "docs/subscription-reconciliation.md"
+      ],
+      "steps": [
+        "Implement durable accept/claim/reconcile/project/sweep API and official Stripe adapter.",
+        "Verify raw payload using SDK in ingress adapter; atomic inbox commit before acknowledgment.",
+        "Add bounded retry, dead-letter metadata, lease fencing and missing-webhook repair."
+      ],
+      "acceptance": [
+        "Crash/replay/reorder/race tests converge to current provider state; wrong account/mode/signature cannot affect projection."
+      ],
+      "verification": "go test -race ./billing/subscription/... with PostgreSQL and provider fixtures",
+      "reviewer": "security",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A09",
+      "title": "Dogfood subscription projection in Ferro",
+      "repository": "ferro",
+      "lane": "hosted-billing",
+      "depends_on": [
+        "A08",
+        "A06"
+      ],
+      "owns": [
+        "internal/hosted/billing/webhook.go",
+        "internal/hosted/billing/reconcile.go",
+        "internal/hosted/billing/reconcile_test.go"
+      ],
+      "steps": [
+        "Wire signed webhook route, durable reconciliation worker and scheduled sweep.",
+        "Consume immutable module pin and map customer identity only from trusted binding.",
+        "Expose billing status/freshness for website and task admission."
+      ],
+      "acceptance": [
+        "Real Stripe test-mode duplicate/reordered/cancel/payment-failure flows update correct account; redirect is never payment evidence."
+      ],
+      "verification": "go test ./internal/hosted/billing -run TestReconcile; provider test-mode evidence",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A10",
+      "title": "Document existing-library identity adoption",
+      "repository": "capabilities",
+      "lane": "amsl-identity",
+      "depends_on": [
+        "D05"
+      ],
+      "owns": [
+        "capabilities/identity.sessions.json",
+        "capabilities/identity.password-hashing.json",
+        "docs/recipes/browser-sessions.md"
+      ],
+      "steps": [
+        "Record why source JWT/passkey/password flows are not one reusable contract.",
+        "Reference OIDC verification and SCS/PostgreSQL integration, including expiry/revoke/CSRF tests Ferro must run.",
+        "Keep password hashing reference-only for this passwordless launch."
+      ],
+      "acceptance": [
+        "No new universal auth/user package or invented crypto; catalog distinguishes library reference from implemented AMSL behavior."
+      ],
+      "verification": "Catalog validation and recipe review against F03/F04 test requirements",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A11",
+      "title": "Implement reusable credential-free Go validation",
+      "repository": "workflows",
+      "lane": "delivery",
+      "depends_on": [
+        "D03"
+      ],
+      "owns": [
+        ".github/workflows/go-validation.yml",
+        "tests/go-validation/",
+        "docs/go-validation.md"
+      ],
+      "steps": [
+        "Use workflow_call with bounded typed inputs; pin action/tool SHAs and minimal permissions.",
+        "Run fmt/vet/test/race without arbitrary shell hooks, secret inheritance or privileged fork execution.",
+        "Preserve callers' trigger/concurrency ownership and stable aggregate result contract."
+      ],
+      "acceptance": [
+        "Malformed module path/timeouts rejected; a failing test makes caller fail; no elevated token or long-lived secret."
+      ],
+      "verification": "actionlint plus workflow fixture/static checks; actual caller runs are A12",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A12",
+      "title": "Dogfood Go validation in two real modules",
+      "repository": "ferro+go",
+      "lane": "delivery",
+      "depends_on": [
+        "A11",
+        "A02",
+        "F01"
+      ],
+      "owns": [
+        "ferro:.github/workflows/ci.yml",
+        "go:.github/workflows/ci.yml",
+        "docs/launch/evidence/A12.md"
+      ],
+      "steps": [
+        "Pin immutable reusable workflow in Ferro and AMSL Go; preserve product-specific Chrome/Postgres/security checks.",
+        "Record real successful runs in both repos and an intentionally failing test on a disposable branch.",
+        "Verify required-check names and merge_group behavior, then remove deliberate failure.",
+        "Coordinate the two caller lockfiles/check-name edits explicitly; preserve each repository own non-Go gates."
+      ],
+      "acceptance": [
+        "Two real module invocations demonstrated; baseline gates not weakened; no synthetic-only reuse claim."
+      ],
+      "verification": "GitHub Actions run URLs and exact caller/callee SHAs; check-required-status verification",
+      "reviewer": "coordinator",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A13",
+      "title": "Implement AWS deployment identity component",
+      "repository": "pulumi",
+      "lane": "infrastructure",
+      "depends_on": [
+        "D05",
+        "D07"
+      ],
+      "owns": [
+        "components/aws/deployment-identity/",
+        "docs/aws-deployment-identity.md"
+      ],
+      "steps": [
+        "Use existing or explicitly new GitHub OIDC provider; generate exact audience/subject trust from frozen contract.",
+        "Separate artifact/deploy roles and bounded resource policies; limit PassRole.",
+        "Return safe identity outputs and import instructions."
+      ],
+      "acceptance": [
+        "Wrong repo/ref/environment denied by trust shape; no blanket admin or duplicate shared provider creation."
+      ],
+      "verification": "Pulumi unit/mocks + JSON policy assertions",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A14",
+      "title": "Add deployment-identity enforcement tests",
+      "repository": "pulumi",
+      "lane": "infrastructure",
+      "depends_on": [
+        "A13"
+      ],
+      "owns": [
+        "policy/aws-deployment-identity/",
+        "tests/aws-deployment-identity/"
+      ],
+      "steps": [
+        "Test raw-role bypasses, wildcard trust, wrong audience, unsafe role delegation and environment mismatch.",
+        "Define policy attachment and audit outputs separately from construction.",
+        "Prepare disposable live federation fixture, no auto-apply."
+      ],
+      "acceptance": [
+        "Policy rejects unsafe raw and component resources; exact allowed contexts pass; live evidence still explicitly pending."
+      ],
+      "verification": "Pulumi policy tests and synthetic trust fixtures",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A15",
+      "title": "Dogfood deployment identity in Ferro CI",
+      "repository": "ferro",
+      "lane": "delivery",
+      "depends_on": [
+        "A14",
+        "I01"
+      ],
+      "owns": [
+        "infra/deployment_identity.go",
+        ".github/workflows/deploy.yml",
+        "docs/launch/evidence/A15.md"
+      ],
+      "steps": [
+        "Consume immutable Pulumi component and wire environment-specific GitHub deploy role.",
+        "Verify authorized qualification federation and denied wrong-context federation.",
+        "Record actual branch/environment protection and least-privilege resource access."
+      ],
+      "acceptance": [
+        "No stored cloud access key; untrusted PR never receives deployment credentials; pipeline role cannot edit unrelated resources."
+      ],
+      "verification": "Disposable AWS federation checks and CI run evidence",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A16",
+      "title": "Implement private AWS PostgreSQL component",
+      "repository": "pulumi",
+      "lane": "infrastructure",
+      "depends_on": [
+        "D05",
+        "D07"
+      ],
+      "owns": [
+        "components/aws/private-database/",
+        "docs/aws-private-database.md"
+      ],
+      "steps": [
+        "Implement approved private network/SG/encryption/secret/backup/deletion inputs with explicit cost and availability settings.",
+        "Export TLS/secret-reference/network outputs; support existing-resource import.",
+        "Keep runtime DDL permission separate from migration role."
+      ],
+      "acceptance": [
+        "No public DB, unrestricted ingress or secret output; backup/deletion choices visible; parameter/version pin is explicit."
+      ],
+      "verification": "Pulumi mock/resource-property tests",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A17",
+      "title": "Add database policy and failure tests",
+      "repository": "pulumi",
+      "lane": "infrastructure",
+      "depends_on": [
+        "A16"
+      ],
+      "owns": [
+        "policy/aws-private-database/",
+        "tests/aws-private-database/"
+      ],
+      "steps": [
+        "Reject public/unencrypted/unbacked-up/raw bypass resources and plaintext outputs.",
+        "Test allowed explicit availability/deletion profiles and import behavior.",
+        "Prepare restore fixture that consumes exported outputs."
+      ],
+      "acceptance": [
+        "Mocks and enforcement tests are labeled separately; production enforcement not inferred from policy-file existence."
+      ],
+      "verification": "Pulumi policy suite + resource output secret checks",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A19",
+      "title": "Wire database component into Ferro infrastructure",
+      "repository": "ferro",
+      "lane": "infrastructure",
+      "depends_on": [
+        "A17",
+        "I02",
+        "F02"
+      ],
+      "owns": [
+        "infra/database.go"
+      ],
+      "steps": [
+        "Consume the immutable database component and wire its outputs into Ferro connection, TLS, secret and migration-role configuration.",
+        "Verify the composition with Pulumi mocks/policies and a reviewed preview; hand the outputs to I03 for deployment."
+      ],
+      "acceptance": [
+        "Runtime and migration roles remain distinct; connection configuration consumes actual component outputs rather than duplicated constants.",
+        "This task completes wiring only; AMSL adoption and restore evidence remain incomplete until A18."
+      ],
+      "verification": "Pulumi composition mock/policy checks and reviewed resource preview; no live adoption claim",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-4",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "A18",
+      "title": "Dogfood database through Ferro deployment and restore",
+      "repository": "ferro",
+      "lane": "infrastructure",
+      "depends_on": [
+        "A19",
+        "I03",
+        "F13"
+      ],
+      "owns": [
+        "docs/launch/evidence/A18.md"
+      ],
+      "steps": [
+        "Verify the deployed Ferro consumes the immutable database component outputs for connection/TLS/secret config; use the I03 deployment path, not ad hoc provisioning.",
+        "Test denied public connection, app least privilege and migration role separation.",
+        "Restore a disposable copy and prove deletion/revocation tombstones survive before traffic."
+      ],
+      "acceptance": [
+        "Real consumer TLS and restore meet readiness targets; raw app credentials never printed; infrastructure policy attachment verified."
+      ],
+      "verification": "Disposable cloud DB checks and timed restore evidence",
+      "reviewer": "security",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "F01",
+      "title": "Scaffold hosted composition without changing local mode",
+      "repository": "ferro",
+      "lane": "hosted-core",
+      "depends_on": [
+        "D05"
+      ],
+      "owns": [
+        "cmd/ferro-cloud/",
+        "internal/hosted/server/",
+        "internal/hosted/config/"
+      ],
+      "steps": [
+        "Create hosted command, validated config, route composition seams and graceful shutdown.",
+        "Add liveness/readiness and injectable stores/provider transports.",
+        "Leave local Owner/Unix election/token behavior local."
+      ],
+      "acceptance": [
+        "Cloud command never launches Chrome or uses local shared bearer; missing required production config fails startup."
+      ],
+      "verification": "go test ./internal/hosted/config ./internal/hosted/server ./cmd/ferro-cloud; local regression suite",
+      "reviewer": "coordinator",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "F02",
+      "title": "Implement PostgreSQL schema and store foundations",
+      "repository": "ferro",
+      "lane": "hosted-core",
+      "depends_on": [
+        "F01"
+      ],
+      "owns": [
+        "internal/hosted/store/",
+        "migrations/hosted/",
+        "tests/postgres/"
+      ],
+      "steps": [
+        "Apply coordinator-owned schema/constraints/indexes and migrations; integrate library-owned schema explicitly.",
+        "Add account-bound query helpers, transaction rollback and lease/CAS primitives.",
+        "Provide disposable Postgres fixture and expand/contract upgrade harness."
+      ],
+      "acceptance": [
+        "Two-process unique account/task/device guarantees tested; no global unscoped child lookup; app cannot run DDL."
+      ],
+      "verification": "go test ./internal/hosted/store/... with actual PostgreSQL; upgrade previous->current schema test",
+      "reviewer": "security",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "F03",
+      "title": "Implement Google OIDC web login",
+      "repository": "ferro",
+      "lane": "hosted-identity",
+      "depends_on": [
+        "F02",
+        "A10"
+      ],
+      "owns": [
+        "internal/hosted/auth/oidc.go",
+        "internal/hosted/auth/principal.go",
+        "internal/hosted/auth/oidc_test.go"
+      ],
+      "steps": [
+        "Use pinned OIDC/OAuth libraries with fixed issuer/callback, state/nonce/PKCE and issuer+subject identity.",
+        "Implement account creation/lookup and account-status gate; no email auto-link.",
+        "Supply integration fixtures and no offline Google grants."
+      ],
+      "acceptance": [
+        "Wrong issuer/audience/state/nonce/code replay rejected; callback cannot redirect offsite; absent email does not create ambiguous identity."
+      ],
+      "verification": "go test ./internal/hosted/auth -run TestOIDC; actual qualification Google login recorded later Q01",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "F04",
+      "title": "Wire web session lifecycle and CSRF",
+      "repository": "ferro",
+      "lane": "hosted-identity",
+      "depends_on": [
+        "F03"
+      ],
+      "owns": [
+        "internal/hosted/auth/sessions.go",
+        "internal/hosted/auth/csrf.go",
+        "internal/hosted/auth/sessions_test.go"
+      ],
+      "steps": [
+        "Use SCS/Postgres store, secure cookies, rotation, idle/absolute expiry and CSRF.",
+        "Implement logout/logout-all/recent-login requirements and disabled-account denial.",
+        "Expose web-only administration principal checks."
+      ],
+      "acceptance": [
+        "Expired/replayed/fixed sessions, missing CSRF and foreign-origin state changes denied; logout reaches both replicas."
+      ],
+      "verification": "go test ./internal/hosted/auth -run TestSession with PostgreSQL",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "F05",
+      "title": "Implement extension device linking and revocation",
+      "repository": "ferro",
+      "lane": "hosted-identity",
+      "depends_on": [
+        "F04",
+        "A03"
+      ],
+      "owns": [
+        "internal/hosted/devices/link.go",
+        "internal/hosted/devices/registry.go",
+        "internal/hosted/devices/link_test.go"
+      ],
+      "steps": [
+        "Implement frozen first-party code/PKCE exchange, exact extension redirect allowlist and atomic consumption.",
+        "Issue scoped device credential once; bind Chrome session nonce and account/device metadata.",
+        "Wire device revoke/list and lost-exchange relink behavior."
+      ],
+      "acceptance": [
+        "Wrong verifier/extension/account, reused/expired code fail; link response never logs secret; old device cannot reply after revoke."
+      ],
+      "verification": "go test ./internal/hosted/devices -run TestLink; two-process consume/revoke cases",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "F06",
+      "title": "Implement fenced pairing and command transport",
+      "repository": "ferro",
+      "lane": "hosted-browser",
+      "depends_on": [
+        "F02",
+        "F05"
+      ],
+      "owns": [
+        "internal/hosted/browser/",
+        "internal/hosted/commands/"
+      ],
+      "steps": [
+        "Implement explicit pair generation and account/device checks on next/reply; one active poll with bounded heartbeat.",
+        "Persist dispatch before send; validate command/task/worker epoch/origin/deadline on reply.",
+        "Handle duplicate/late/conflicting replies and response-loss uncertainty without redelivery."
+      ],
+      "acceptance": [
+        "No foreign/stale command delivery; pair change cannot interrupt dispatched action unnoticed; two replicas share authoritative state."
+      ],
+      "verification": "go test -race ./internal/hosted/browser/... ./internal/hosted/commands/... against PostgreSQL fault fixtures",
+      "reviewer": "security",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "F07",
+      "title": "Implement durable task admission and worker lifecycle",
+      "repository": "ferro",
+      "lane": "hosted-tasks",
+      "depends_on": [
+        "F02"
+      ],
+      "owns": [
+        "internal/hosted/tasks/",
+        "internal/hosted/events/"
+      ],
+      "steps": [
+        "Implement frozen task transitions, idempotent create/fingerprint, worker lease/epoch and bounded event log.",
+        "Add durable cancel/deadlines and actor-bound status/events.",
+        "Make worker loss before dispatch recoverable and after dispatch uncertain."
+      ],
+      "acceptance": [
+        "Concurrent duplicate creates produce one task; conflicting intents 409; stale worker cannot append/dispatch; cancel idempotent and cross-user denied."
+      ],
+      "verification": "go test -race ./internal/hosted/tasks/... ./internal/hosted/events/... using two-process crash fixtures",
+      "reviewer": "security",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "F08",
+      "title": "Adapt existing executor to hosted task and policy",
+      "repository": "ferro",
+      "lane": "hosted-browser",
+      "depends_on": [
+        "F06",
+        "F07"
+      ],
+      "owns": [
+        "internal/hosted/execution/",
+        "internal/hosted/driver/"
+      ],
+      "steps": [
+        "Implement PageDriver over durable command bridge and per-task isolated runner/snapshot context.",
+        "Preserve fresh target signatures, read-only gate, origin checks, bounded planner passes and uncertainty.",
+        "Wire human action confirmation; unsupported/ambiguous sensitive actions pause or refuse."
+      ],
+      "acceptance": [
+        "Never share model/page/snapshot state across accounts; malicious page/model output cannot widen authority; local executor regression remains green."
+      ],
+      "verification": "go test ./internal/hosted/execution/... ./internal/hosted/driver/...; actual Chrome fixture command flow Q01",
+      "reviewer": "security",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "F09",
+      "title": "Implement encrypted OpenRouter key lifecycle",
+      "repository": "ferro",
+      "lane": "hosted-model",
+      "depends_on": [
+        "F02"
+      ],
+      "owns": [
+        "internal/hosted/modelkeys/"
+      ],
+      "steps": [
+        "Use maintained envelope/KMS implementation and account/provider/version context.",
+        "Implement key presence, test, replace/delete and cache invalidation without returning raw key.",
+        "Bound use to configured OpenRouter endpoint and role-scoped KMS access."
+      ],
+      "acceptance": [
+        "Ciphertext swap across accounts fails; KMS/DB failure denies; logs/errors/exports contain no key; deleted/replaced key never reused."
+      ],
+      "verification": "go test ./internal/hosted/modelkeys/... including KMS-adapter contract and redaction fixtures",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "F10",
+      "title": "Wire bounded model client and provider errors",
+      "repository": "ferro",
+      "lane": "hosted-model",
+      "depends_on": [
+        "F09",
+        "F08"
+      ],
+      "owns": [
+        "internal/hosted/model/",
+        "internal/hosted/execution/model.go"
+      ],
+      "steps": [
+        "Resolve fixed OpenRouter base/model allowlist and decrypt only for authorized task.",
+        "Set timeout/token/cost ceilings, cancel propagation and redirect restrictions; reuse existing planner schema.",
+        "Map provider 401/429/5xx/timeouts to safe UI codes; redact page/model diagnostics."
+      ],
+      "acceptance": [
+        "No arbitrary outbound URL or key forwarded to another host; no idle model calls or automatic new task retry."
+      ],
+      "verification": "go test ./internal/hosted/model/... with redirect/SSRF/rate/timeout/cancel fixtures",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "F11",
+      "title": "Enforce paid-access policy at task admission",
+      "repository": "ferro",
+      "lane": "hosted-billing",
+      "depends_on": [
+        "A09",
+        "F07"
+      ],
+      "owns": [
+        "internal/hosted/entitlements/",
+        "internal/hosted/tasks/admission_billing.go"
+      ],
+      "steps": [
+        "Implement exact D07 subscription status/paid-through/freshness table outside AMSL.",
+        "Atomically combine account enabled, subscription, device, allowlist and task admission.",
+        "Keep billing/export routes available to unpaid accounts; define already-admitted task semantics."
+      ],
+      "acceptance": [
+        "Redirect/UI bypass cannot grant access; stale/failed reconcile cannot grant unbounded free service; period boundaries deterministic."
+      ],
+      "verification": "go test ./internal/hosted/entitlements/...; HTTP admission cases across all billing states",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "F12",
+      "title": "Add account quotas and abuse backpressure",
+      "repository": "ferro",
+      "lane": "hosted-tasks",
+      "depends_on": [
+        "F11"
+      ],
+      "owns": [
+        "internal/hosted/limits/",
+        "internal/hosted/tasks/admission_limits.go"
+      ],
+      "steps": [
+        "Implement transactionally reserved one-active-task/account and frozen per-account/global rate limits.",
+        "Bound queues/payloads/task steps and release reservations on terminal states/crash.",
+        "Return stable 429/Retry-After and enforce anonymous link/auth rate controls."
+      ],
+      "acceptance": [
+        "Two replicas cannot exceed account concurrency through races; disconnected/canceled tasks release reservations; memory/DB growth bounded."
+      ],
+      "verification": "go test -race ./internal/hosted/limits/... with shared-DB parallel admission",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "F13",
+      "title": "Implement export and durable account deletion",
+      "repository": "ferro",
+      "lane": "hosted-account",
+      "depends_on": [
+        "F04",
+        "F05",
+        "F09",
+        "A09",
+        "F12"
+      ],
+      "owns": [
+        "internal/hosted/account/",
+        "internal/hosted/retention/"
+      ],
+      "steps": [
+        "Require recent authentication; implement export without secrets and disable/revoke/cancel/key-delete workflow.",
+        "Reconcile billing cancellation before claiming final deletion; retry partial failures durably.",
+        "Implement TTL purge and restore-applied tombstones per approved retention."
+      ],
+      "acceptance": [
+        "No cross-account export; deleted account cannot run/relink; failed billing cancellation stays visible pending; backups cannot resurrect access."
+      ],
+      "verification": "go test ./internal/hosted/account/... ./internal/hosted/retention/... with provider/DB failure injection",
+      "reviewer": "security",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "F14",
+      "title": "Instrument redacted health and operational events",
+      "repository": "ferro",
+      "lane": "observability",
+      "depends_on": [
+        "F01",
+        "F07",
+        "A09"
+      ],
+      "owns": [
+        "internal/hosted/telemetry/",
+        "docs/operations/metrics.md"
+      ],
+      "steps": [
+        "Add structured allowlisted logs, request/task IDs and metrics for task state, reply uncertainty, reconcile backlog and auth failures.",
+        "Redact page text, prompt, key, URL query, headers and account email.",
+        "Bound labels/cardinality and document health checks and secret-free diagnostics."
+      ],
+      "acceptance": [
+        "Canary secrets and page content never appear in logs/traces/errors; metrics do not create unbounded account labels."
+      ],
+      "verification": "go test ./internal/hosted/telemetry/... with log/trace canary scan",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "F15",
+      "title": "Implement audited operator controls and kill switches",
+      "repository": "ferro",
+      "lane": "hosted-operations",
+      "depends_on": [
+        "F13",
+        "F14",
+        "F12"
+      ],
+      "owns": [
+        "cmd/ferro-cloud-admin/",
+        "internal/hosted/admin/",
+        ".github/workflows/operate.yml"
+      ],
+      "steps": [
+        "Implement narrowly scoped account-disable/device-revoke and global stop-admission/mutation controls using existing lifecycle services; no public admin HTTP endpoint.",
+        "Run commands through a protected maintenance workflow/task role with verified operator/deployment identity and append-only redacted audit event; no unaudited direct database edits.",
+        "Require explicit account/task targets and dry-run preview; exclude transcript export, provider-key retrieval, arbitrary SQL or impersonation."
+      ],
+      "acceptance": [
+        "Unprivileged runtime cannot invoke maintenance controls; targeted account revoke cancels its tasks and leaves others running.",
+        "Every maintenance mutation records actor/action/resource/result; kill switches stop new dispatch without deleting customer data."
+      ],
+      "verification": "go test ./internal/hosted/admin/... ./cmd/ferro-cloud-admin; protected workflow denied-path and qualification kill-switch drill",
+      "reviewer": "security",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "X01",
+      "title": "Separate local and hosted extension transports",
+      "repository": "ferro",
+      "lane": "extension",
+      "depends_on": [
+        "D05",
+        "D06"
+      ],
+      "owns": [
+        "extension/transport-local.js",
+        "extension/transport-hosted.js",
+        "extension/transport.test.cjs"
+      ],
+      "steps": [
+        "Define explicit mode/endpoint config with production HTTPS fixed allowlist and dev config separate.",
+        "Implement hosted poll/reply/status transport with auth, timeouts, version header and backoff.",
+        "Preserve local mode compatibility via adapter fixtures."
+      ],
+      "acceptance": [
+        "No arbitrary hosted base or credential fallback; local tests pass; one bounded poll/no idle task calls."
+      ],
+      "verification": "node --test extension/transport.test.cjs",
+      "reviewer": "standard",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "X02",
+      "title": "Implement extension sign-in and credential storage",
+      "repository": "ferro",
+      "lane": "extension",
+      "depends_on": [
+        "X01",
+        "F05"
+      ],
+      "owns": [
+        "extension/auth.js",
+        "extension/auth.test.cjs"
+      ],
+      "steps": [
+        "Use identity web flow with stable callback, random state and PKCE; exchange only approved endpoint.",
+        "Store device secret in trusted extension storage, isolate from page messages and clear on logout/revoke/expiry.",
+        "Expose linking/offline/relink UI states without copying tokens."
+      ],
+      "acceptance": [
+        "Wrong state/redirect/code denied; browser restart restores only allowed state; secrets never appear in content-script messages."
+      ],
+      "verification": "node --test extension/auth.test.cjs; real Chrome sign-in journey Q01",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "X03",
+      "title": "Implement explicit hosted pairing lifecycle",
+      "repository": "ferro",
+      "lane": "extension",
+      "depends_on": [
+        "X02",
+        "F06"
+      ],
+      "owns": [
+        "extension/pairing.js",
+        "extension/pairing.test.cjs"
+      ],
+      "steps": [
+        "Bind selected tab+session nonce+server generation; distinguish active Chrome tab from paired tab.",
+        "Handle navigation/close/discard/update/offline and refuse switch until stop/uncertainty resolved.",
+        "Show paired site consistently across side-panel tab navigation."
+      ],
+      "acceptance": [
+        "Switching tabs never silently changes authority; same numeric tab after restart cannot adopt old command/snapshot."
+      ],
+      "verification": "node --test extension/pairing.test.cjs; browser navigation/generation fixtures",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "X04",
+      "title": "Implement typed dispatch validation and dedup journal",
+      "repository": "ferro",
+      "lane": "extension",
+      "depends_on": [
+        "X03",
+        "F08"
+      ],
+      "owns": [
+        "extension/hosted-dispatch.js",
+        "extension/hosted-dispatch.test.cjs"
+      ],
+      "steps": [
+        "Validate packaged operation schema, origin/generation/deadline/target/confirmation before content dispatch.",
+        "Journal command in session storage before action; reject duplicate/conflicting command and stale worker epoch.",
+        "Package all executable code; no eval, remote script or arbitrary CDP pass-through."
+      ],
+      "acceptance": [
+        "Duplicate or lost replies never reexecute a mutation; worker restart stops with uncertainty; forged content messages cannot execute."
+      ],
+      "verification": "node --test extension/hosted-dispatch.test.cjs; actual Chrome crash/replay fixtures Q02",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "X05",
+      "title": "Minimize permissions and page data capture",
+      "repository": "ferro",
+      "lane": "extension",
+      "depends_on": [
+        "X04"
+      ],
+      "owns": [
+        "extension/permissions.js",
+        "extension/permissions.test.cjs",
+        "extension/adapter.js"
+      ],
+      "steps": [
+        "Implement optional explicit-origin grants and injection on approved paired pages; deny off-origin redirects before DOM capture.",
+        "Exclude password/OTP/payment fields and minimize snapshot content.",
+        "Validate frame/popup/file/canvas limitations and accurate error text."
+      ],
+      "acceptance": [
+        "Revoked host permission stops read/action; no background all-tabs scrape; local and hosted snapshot parity preserved."
+      ],
+      "verification": "node --test extension/permissions.test.cjs; browser permission/restricted-page tests",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "X06",
+      "title": "Wire trusted confirmation and cancellation UI",
+      "repository": "ferro",
+      "lane": "extension-ui",
+      "depends_on": [
+        "X04",
+        "D06"
+      ],
+      "owns": [
+        "extension/task-controls.js",
+        "extension/task-controls.test.cjs"
+      ],
+      "steps": [
+        "Render bounded task start consent and action-specific confirmation digest state.",
+        "Send confirmations only from trusted UI gestures; never from content/model messages.",
+        "Show cancel requested vs canceled vs uncertain; require inspect before retry."
+      ],
+      "acceptance": [
+        "Page cannot approve itself; old target/generation/expired confirmation rejected; double clicks not duplicate actions."
+      ],
+      "verification": "node --test extension/task-controls.test.cjs; real side-panel consent/cancel checks",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "X07",
+      "title": "Wire hosted side-panel states and account history",
+      "repository": "ferro",
+      "lane": "extension-ui",
+      "depends_on": [
+        "X05",
+        "X06",
+        "F10",
+        "F11"
+      ],
+      "owns": [
+        "extension/sidepanel.js",
+        "extension/sidepanel.html",
+        "extension/sidepanel.css",
+        "extension/history.js",
+        "extension/background.js"
+      ],
+      "steps": [
+        "Integrate auth/pair/model/paid/online states and server event cursors.",
+        "Retain floating glass design, keyboard/focus/reduced motion and bounded local archive partitioned by account.",
+        "Handle refresh/restart without resubmitting a task; show site/model/permission disclosure.",
+        "As sole extension composition owner, wire the packaged auth/transport/pairing/dispatch/control modules into background.js and the existing local flow; modules that are never called are unfinished."
+      ],
+      "acceptance": [
+        "No previous-account transcript leak; every error/revoke/payment/offline path has accurate actionable state.",
+        "Untrusted model/page/history rendering cannot execute HTML/JS or load remote tracking images; URLs are scheme-validated."
+      ],
+      "verification": "Hosted UI fixture tests; local side-panel regression and accessibility checks",
+      "reviewer": "coordinator",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "X08",
+      "title": "Build store-ready deterministic extension artifact",
+      "repository": "ferro",
+      "lane": "extension",
+      "depends_on": [
+        "X07",
+        "W03"
+      ],
+      "owns": [
+        "extension/manifest.json",
+        "scripts/package-extension.py",
+        "docs/store/"
+      ],
+      "steps": [
+        "Set stable publisher ID/version and minimal justified permissions; bundle all dependencies locally.",
+        "Generate clean ZIP from allowlisted files with hash and source SHA; exclude tests/dev URLs/secrets.",
+        "Prepare real screenshots/reviewer instructions and protocol compatibility table."
+      ],
+      "acceptance": [
+        "Artifact installs fresh/upgrades correctly; no remote executable content; permissions/privacy match actual code."
+      ],
+      "verification": "ZIP content/hash validation; unpacked install and upgrade tests; store-reviewed install at R02",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "W01",
+      "title": "Implement public website and onboarding shell",
+      "repository": "ferro",
+      "lane": "web",
+      "depends_on": [
+        "D05",
+        "D06"
+      ],
+      "owns": [
+        "web/templates/landing.html",
+        "web/templates/onboarding.html",
+        "web/static/onboarding.js",
+        "web/embed.go",
+        "internal/hosted/web/render.go"
+      ],
+      "steps": [
+        "Build product landing/onboarding routes from frozen UI states and actual supported features.",
+        "Guide sign-in -> subscription -> install -> connect -> key -> first task without requiring local Go.",
+        "Use fixture API client until real routes integrated; no hardcoded claims or live prices."
+      ],
+      "acceptance": [
+        "Keyboard/mobile/narrow viewport usable; no invented deployment/model/store status."
+      ],
+      "verification": "HTML/JS checks and deterministic UI fixture test",
+      "reviewer": "standard",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "W02",
+      "title": "Implement account and subscription management UI",
+      "repository": "ferro",
+      "lane": "web",
+      "depends_on": [
+        "W01",
+        "F04",
+        "A06",
+        "A09",
+        "F13"
+      ],
+      "owns": [
+        "web/templates/account.html",
+        "web/static/account.js",
+        "web/templates/billing.html",
+        "internal/hosted/web/routes.go"
+      ],
+      "steps": [
+        "Wire actual account/device revoke/model presence/export/delete and Stripe checkout/portal status.",
+        "Show deletion pending, past-due/expired/cancel-at-period-end and provider error recovery.",
+        "Never render raw provider key or trust querystring payment success.",
+        "Register page/API interaction routes through the coordinator-owned server root and embed templates/assets from the actual release binary."
+      ],
+      "acceptance": [
+        "Actual endpoint journey works; unpaid customers can manage/cancel/export; UI and server policy agree."
+      ],
+      "verification": "Website integration tests against real API and provider fixtures",
+      "reviewer": "coordinator",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "W03",
+      "title": "Write approved privacy, terms and support content",
+      "repository": "ferro",
+      "lane": "web",
+      "depends_on": [
+        "W02",
+        "D07",
+        "X05"
+      ],
+      "owns": [
+        "web/templates/privacy.html",
+        "web/templates/terms.html",
+        "web/templates/support.html",
+        "docs/store/disclosures.md"
+      ],
+      "steps": [
+        "Describe selected page/prompt flow, provider/key handling, consent, retention, deletion and unsupported automation.",
+        "Obtain owner review for price/tax/refund/support statements; prepare store questionnaire mappings.",
+        "Publish accurate incident/support contact and FAQ without private infrastructure details."
+      ],
+      "acceptance": [
+        "No mismatch among website, store and runtime; support links usable; legal/commercial owner signs evidence."
+      ],
+      "verification": "Content review plus link/HTML checks; no claim of legal approval by coding agent",
+      "reviewer": "maintainer",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "I01",
+      "title": "Create infrastructure project and artifact pipeline",
+      "repository": "ferro",
+      "lane": "infrastructure",
+      "depends_on": [
+        "F01",
+        "D07"
+      ],
+      "owns": [
+        "infra/Pulumi.yaml",
+        "infra/go.mod",
+        "infra/main.go",
+        "Dockerfile",
+        ".github/workflows/artifact.yml"
+      ],
+      "steps": [
+        "Define isolated qualification/production stack inputs and imports; reuse existing Actions before new AMSL wrapper.",
+        "Build non-root read-only image from reviewed source with SBOM, scans, signing and digest outputs.",
+        "Preserve least privilege and no secrets in image/build context."
+      ],
+      "acceptance": [
+        "Verified immutable digest tied to source; failed scan/test cannot promote; local/customer files excluded."
+      ],
+      "verification": "Container smoke test, scan/signature verification, Pulumi config validation",
+      "reviewer": "security",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "I02",
+      "title": "Compose network, HTTPS, compute and secrets",
+      "repository": "ferro",
+      "lane": "infrastructure",
+      "depends_on": [
+        "I01",
+        "A13",
+        "A16"
+      ],
+      "owns": [
+        "infra/network.go",
+        "infra/compute.go",
+        "infra/secrets.go",
+        "infra/dns.go",
+        "infra/observability.go"
+      ],
+      "steps": [
+        "Compose component outputs with ECS/ALB/ECR/KMS/Secrets Manager, explicit outbound access and private DB.",
+        "Define min/max/pools/draining/health, scoped runtime/migration roles, DNS/TLS and alarm destinations.",
+        "Produce resource/cost/import diff; no shared product staging or unrelated resource mutation."
+      ],
+      "acceptance": [
+        "Runtime cannot admin/migrate/read unrelated secrets; app connects through consumed component outputs; no public DB."
+      ],
+      "verification": "Pulumi mock/policy checks, reviewed live preview and priced resource list",
+      "reviewer": "security",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "I03",
+      "title": "Implement migration, deploy and rollback execution",
+      "repository": "ferro",
+      "lane": "delivery",
+      "depends_on": [
+        "A15",
+        "A19",
+        "I02",
+        "F14"
+      ],
+      "owns": [
+        "scripts/deploy-cloud.sh",
+        "scripts/migrate-cloud.sh",
+        "scripts/verify-release.sh",
+        "docs/operations/release.md"
+      ],
+      "steps": [
+        "Run one migration job under separate role, then deploy verified digest with environment concurrency lock.",
+        "Check rollout completion, public health and protocol compatibility; stop on failed gates.",
+        "Implement previous-image rollback and test schema backward compatibility."
+      ],
+      "acceptance": [
+        "Pulumi apply or image push alone never marks success; same release operator/lock spans deployment; rollback drills recorded."
+      ],
+      "verification": "Disposable qualification deploy/fail/rollback and old-image schema compatibility",
+      "reviewer": "security",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "Q01",
+      "title": "Verify two-user hosted end-to-end journey",
+      "repository": "ferro",
+      "lane": "qualification",
+      "depends_on": [
+        "F10",
+        "F12",
+        "X07",
+        "W02",
+        "I03",
+        "X08"
+      ],
+      "owns": [
+        "tests/hosted/e2e/",
+        "docs/launch/evidence/Q01.md"
+      ],
+      "steps": [
+        "Use two controlled Chrome profiles/users and real HTTPS/Google/provider qualification credentials.",
+        "Complete independent read-only and approved interaction tasks with no local Go; navigate, revoke and cancel.",
+        "Verify resource isolation across all routes and no key/page leakage in telemetry."
+      ],
+      "acceptance": [
+        "Readiness Gate 1 passed with real extension/API/DB/provider evidence; fixture-only results labeled separately."
+      ],
+      "verification": "FERRO_TEST_HOSTED=1 test harness; manual qualification scripts and sanitized results",
+      "reviewer": "independent-security",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "Q02",
+      "title": "Verify restart, replay and failure semantics",
+      "repository": "ferro",
+      "lane": "qualification",
+      "depends_on": [
+        "Q01"
+      ],
+      "owns": [
+        "tests/hosted/faults/",
+        "docs/launch/evidence/Q02.md"
+      ],
+      "steps": [
+        "Inject response loss/crashes at dispatch/reply/commit and extension worker/browser restart.",
+        "Test duplicate create/reply, stale lease/generation, revoke/cancel/deadline races and offline recovery.",
+        "Assert no automatic reexecution of delivered mutations and no cross-user result delivery."
+      ],
+      "acceptance": [
+        "Readiness Gate 3 fault cases pass; uncertainty surfaced consistently; no hidden retry queue."
+      ],
+      "verification": "Deterministic two-replica+Chrome fault suite and executed failure matrix",
+      "reviewer": "independent-security",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "Q03",
+      "title": "Verify full paid lifecycle and reconciliation",
+      "repository": "ferro",
+      "lane": "qualification",
+      "depends_on": [
+        "Q01",
+        "A09",
+        "W02"
+      ],
+      "owns": [
+        "tests/hosted/billing/",
+        "docs/launch/evidence/Q03.md"
+      ],
+      "steps": [
+        "Run Stripe test-mode checkout, duplicate/out-of-order/missing events, renewal failure, cancel, portal and deletion.",
+        "Verify two-instance checkout race and unknown result recovery; actual task admission follows committed projection.",
+        "Prepare separately approved bounded live payment/cancel/refund test for release owner."
+      ],
+      "acceptance": [
+        "Gate 2 test-mode evidence complete; live-payment evidence not claimed until observed; active/canceled/past_due behavior matches public policy."
+      ],
+      "verification": "Stripe CLI/test clocks where supported; API/UI task-admission integration suite",
+      "reviewer": "independent-security",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "Q04",
+      "title": "Verify retention, restore and key rotation",
+      "repository": "ferro",
+      "lane": "qualification",
+      "depends_on": [
+        "Q02",
+        "F13",
+        "A18"
+      ],
+      "owns": [
+        "tests/hosted/recovery/",
+        "docs/operations/recovery.md",
+        "docs/launch/evidence/Q04.md"
+      ],
+      "steps": [
+        "Restore isolated backup with KMS references and reapply deletion/revocation tombstones before traffic.",
+        "Measure RPO/RTO and verify TLS/runtime permission boundaries.",
+        "Rotate app/provider encryption secrets and reconcile canceled accounts without resurrection."
+      ],
+      "acceptance": [
+        "Recovery targets measured; no deleted/revoked account regains access; restore resources removed via IaC."
+      ],
+      "verification": "Timed restore and key-rotation drills with sanitized evidence",
+      "reviewer": "security",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "Q05",
+      "title": "Measure load, idle resource use and soak",
+      "repository": "ferro",
+      "lane": "qualification",
+      "depends_on": [
+        "Q02",
+        "F14"
+      ],
+      "owns": [
+        "tests/hosted/load/",
+        "docs/launch/evidence/Q05.md"
+      ],
+      "steps": [
+        "Run declared 100-device/25-task load, bounded global saturation and one-replica loss.",
+        "Measure idle extension vs baseline for 30min; run 24h bounded soak.",
+        "Record API/cancel latency, DB pools/queue bounds, uncertainty, cost and actual alerts."
+      ],
+      "acceptance": [
+        "Targets met or formally revised before release; no leak/unbounded growth; no invented performance comparison."
+      ],
+      "verification": "Versioned load/soak scripts; actual metrics/cost results; alert-delivery evidence",
+      "reviewer": "coordinator",
+      "estimated_agent_hours": "4-8",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "Q06",
+      "title": "Verify supported browsers and accessibility",
+      "repository": "ferro",
+      "lane": "qualification",
+      "depends_on": [
+        "X08",
+        "Q01"
+      ],
+      "owns": [
+        "tests/hosted/browser-matrix/",
+        "docs/launch/evidence/Q06.md"
+      ],
+      "steps": [
+        "Test fresh/upgrade/store-ID callbacks on macOS and Windows Chrome plus minimum fixture version.",
+        "Exercise keyboard, focus, screen reader status, contrast, reduced motion, zoom and narrow side panel.",
+        "Check restricted pages, closed/discarded tab, multiple windows, browser restart and unsupported capability messages."
+      ],
+      "acceptance": [
+        "Supported matrix documented honestly; no runtime authority switches with active tab; local mode still usable."
+      ],
+      "verification": "Browser matrix and accessibility checklist with versioned screenshots/results",
+      "reviewer": "coordinator",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": false
+    },
+    {
+      "id": "Q07",
+      "title": "Complete independent security and supply-chain review",
+      "repository": "ferro",
+      "lane": "qualification",
+      "depends_on": [
+        "Q02",
+        "Q03",
+        "Q04",
+        "Q06",
+        "F15"
+      ],
+      "owns": [
+        "docs/launch/evidence/Q07.md",
+        "docs/security/hosted-threat-model.md"
+      ],
+      "steps": [
+        "Independently review auth/linking/IDOR/CSRF/XSS/SSRF/prompt injection/payment/keys/fencing/IAM with denied-path tests.",
+        "Review package provenance, dependency/container scans, SBOM and public AMSL evidence.",
+        "Fix blocking findings and rerun affected consumer suites; record explicit accepted low risk only."
+      ],
+      "acceptance": [
+        "No open critical/high or medium affecting authority/data/payments/duplicate effects; exact candidate hashes reviewed."
+      ],
+      "verification": "Independent review report, exploit/regression tests and scan triage",
+      "reviewer": "independent-security",
+      "estimated_agent_hours": "6-12",
+      "status": "planned",
+      "gate": true
+    },
+    {
+      "id": "Q08",
+      "title": "Close AMSL adoption evidence and catalog",
+      "repository": "capabilities",
+      "lane": "coordinator",
+      "depends_on": [
+        "A03",
+        "A06",
+        "A09",
+        "A10",
+        "A12",
+        "A15",
+        "A18",
+        "Q01",
+        "Q03"
+      ],
+      "owns": [
+        "capabilities/",
+        "docs/evidence/",
+        "catalog.json"
+      ],
+      "steps": [
+        "Update each intended capability with actual implementation/version/tests and consumer verification limits.",
+        "Record extraction/adoption effort, removed duplication, regressions and second-consumer evidence.",
+        "Run schema/catalog checks and seek explicit maintainer lifecycle decision; no automatic stable promotion."
+      ],
+      "acceptance": [
+        "Every claimed component has real Ferro consumption; references are not mislabeled packages; public records sanitized."
+      ],
+      "verification": "python3 tools/catalog.py validation/generation using repository-documented commands; evidence review",
+      "reviewer": "maintainer",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": true
+    },
+    {
+      "id": "R01",
+      "title": "Complete support, policy and release rehearsal",
+      "repository": "ferro",
+      "lane": "release",
+      "depends_on": [
+        "Q03",
+        "Q04",
+        "Q05",
+        "Q06",
+        "W03",
+        "F15"
+      ],
+      "owns": [
+        "docs/operations/support.md",
+        "docs/operations/incident.md",
+        "docs/launch/evidence/R01.md"
+      ],
+      "steps": [
+        "Rehearse account/device revoke, billing correction, uncertain action, outage and deletion support.",
+        "Verify alert recipient delivery, scoped admin access, audit records and stop-admission/mutation switches.",
+        "Get owner signoff on commercial/retention/support content and prepared live qualification."
+      ],
+      "acceptance": [
+        "Operator can execute runbooks; no broad transcript/key access; critical alerts actually arrive."
+      ],
+      "verification": "Observed tabletop/safe-failure drill and owner signoff",
+      "reviewer": "maintainer",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": true
+    },
+    {
+      "id": "R02",
+      "title": "Submit and qualify public Chrome Web Store build",
+      "repository": "ferro",
+      "lane": "release",
+      "depends_on": [
+        "X08",
+        "Q06",
+        "W03",
+        "Q07"
+      ],
+      "owns": [
+        "docs/store/submission.md",
+        "docs/launch/evidence/R02.md"
+      ],
+      "steps": [
+        "Prepare exact ZIP/hash, listing assets, privacy/permission explanations and reviewer account/steps.",
+        "Submit through authorized publisher; track requested changes without mutating approved build silently.",
+        "Verify published store installation, sign-in callback and upgrade compatibility."
+      ],
+      "acceptance": [
+        "Submission != approval; public availability and exact artifact verified; runtime code policy and disclosures match behavior."
+      ],
+      "verification": "Store submission/approval IDs and actual published-install smoke test",
+      "reviewer": "maintainer",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": true
+    },
+    {
+      "id": "R03",
+      "title": "Deploy immutable candidate and verify public paid journey",
+      "repository": "ferro",
+      "lane": "release",
+      "depends_on": [
+        "Q07",
+        "Q08",
+        "R01",
+        "R02"
+      ],
+      "owns": [
+        "docs/launch/evidence/R03.md"
+      ],
+      "steps": [
+        "Deploy reviewed digest/config through authorized protected pipeline; no DNS/secret console drift.",
+        "Run full public new-customer and bounded authorized live-payment lifecycle through published extension.",
+        "Verify rollback/kill switches/metrics/support and retain exact artifact manifest."
+      ],
+      "acceptance": [
+        "All applicable readiness gates have observed evidence; real charge/cancel semantics verified when authorized; no unresolved launch blockers.",
+        "Deployed image and public extension match the artifacts independently reviewed in Q07; a material change restarts affected review/store gates.",
+        "Production Google consent accepts intended public users; test-only OAuth allowlists and development extension IDs are absent."
+      ],
+      "verification": "Public-domain smoke and paid-journey evidence; exact source/image/extension hashes",
+      "reviewer": "maintainer",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": true
+    },
+    {
+      "id": "R04",
+      "title": "Record public-launch readiness decision and handoff",
+      "repository": "ferro",
+      "lane": "coordinator",
+      "depends_on": [
+        "R03"
+      ],
+      "owns": [
+        "docs/launch/evidence/R04.md",
+        "docs/roadmap.md",
+        "README.md"
+      ],
+      "steps": [
+        "Audit every task and gate, resolved findings, adoption evidence and external approvals.",
+        "Write current installation/account/billing/support docs and explicit supported scope.",
+        "Hand operations owner the tested runbooks and schedule post-launch review."
+      ],
+      "acceptance": [
+        "No planned/skipped critical work presented as complete; public status and AMSL maturity distinguished."
+      ],
+      "verification": "Final evidence audit, link checks, plan graph validation and release-owner decision",
+      "reviewer": "maintainer",
+      "estimated_agent_hours": "2-6",
+      "status": "planned",
+      "gate": true
+    }
+  ]
+}

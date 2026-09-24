@@ -1,5 +1,7 @@
 # Work plan: ferro remote/extension execution backend (E12)
 
+Current planned work: [shared execution roadmap](execution-roadmap.md), [bounded bulk execution](plan-bulk-browser-execution.md), and [hosted launch through AMSL](launch/README.md). These remain planned; E12 history below is unchanged.
+
 ## Current implementation — 2026-09-22
 
 E12 is implemented, verified, and merged into local `main`. The original discovery below is historical; the missing driver, backend
@@ -483,3 +485,16 @@ started by installing this build.
 
 
 - [x] Local chat follow-up (codex): reproduce missing receivers in tabs opened before installation; verify readiness before pairing and attach when Chrome permits. Add regression coverage and update installed extension.
+
+### Hosted public launch through AMSL — 2026-09-24
+
+Owner: coordinator to assign. Status: planned; no hosted implementation or deployment claimed.
+
+- [x] Inspect relevant source on mini and MacBook and write the prescriptive launch/extraction plan.
+- [x] Define bounded agent task cards, dependency graph, ownership, acceptance criteria and launch gates.
+- [ ] Complete D01-D07 contract/provenance/owner gates before dependent implementation.
+- [ ] Implement justified AMSL components and verify real Ferro adoption, then qualify the hosted paid product.
+
+Execution source: [launch plan](launch/README.md), [task cards](launch/task-cards.md),
+[machine-readable DAG](launch/tasks.json), [launch gates](launch/readiness.md).
+Private source identities remain in ignored research notes; public AMSL contributions use sanitized evidence.

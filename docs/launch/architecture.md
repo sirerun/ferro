@@ -1,0 +1,94 @@
+# Hosted architecture and contracts to freeze
+
+These are prescriptive defaults. D04/D05 turn them into reviewed OpenAPI, JSON Schema, SQL migrations and Go interfaces before implementation agents start. Those committed artifacts, not prose guesses by individual agents, are the wire authority. Any change returns to the coordinator with all affected tasks listed.
+
+## Process, storage and deployment
+
+Add `cmd/ferro-cloud`; retain `cmd/ferro-mcp` unchanged as a supported local composition. Reuse `internal/core` planner/executor and `PageDriver` through a hosted adapter. Do not host the local `Owner` singleton, shared token, Unix leader election or local bbolt store as a multi-customer server.
+
+Use Go HTTP handlers and embedded HTML/templates/static JS for website/onboarding. Preserve the existing framework-free side panel. PostgreSQL is the authoritative store for principals, credentials, browser sessions, task metadata, leases, commands, billing state and rate-limit reservations. No Redis/Kafka/new generic job framework for v1. Two API/worker replicas share PostgreSQL; bounded long polling is the initial transport. Do not require sticky sessions or a worker to poll only its own in-memory queue.
+
+AWS profile: ECS Fargate tasks behind HTTPS ALB; private RDS PostgreSQL with TLS hostname/CA verification; ECR immutable images; Secrets Manager for deployment secrets; KMS for data encryption; CloudWatch for redacted metrics/logs. Separate migration job/role from runtime. Set min/max replicas and DB connection pools from the D07 budget; public qualification exercises two replicas and one replica loss. Use a new Ferro qualification stack, never reactivate another product's hibernated staging environment. Infrastructure is Pulumi/CI-owned; no ad hoc DNS/console drift.
+
+The application needs controlled outbound access to Google, OpenRouter and Stripe. Database security groups accept only runtime/migration roles' workloads. Runtime does not receive cloud admin credentials, ECR push, migration DDL, or arbitrary secret reads. Plan NAT/VPC endpoints and recurring costs explicitly; no implicit egress assumption. Health: `/livez` is process health; `/readyz` checks schema compatibility/DB without exposing credentials. Graceful shutdown stops admission, fences leases, cancels outstanding model requests, closes polls and marks dispatched commands uncertain; it must not silently resubmit tasks.
+
+## Principal and resource authority
+
+Internal trusted principal: `account_id`, `actor_id`, credential/session identifier, authentication time and server-derived scopes. One account per human for v1; no organizations/RBAC builder. API parameters never establish account ownership. Every child resource has an account-bound foreign key; queries include `account_id` derived from authentication. Foreign resources return a uniform 404; invalid authentication 401; own resource without permission 403. Account disable/deletion overrides any otherwise valid credential.
+
+Device credentials use existing AMSL `servicecred` semantics, backed by a tested PostgreSQL Store. Owner = account ID; resource = server-generated device ID; scopes are exact strings with no wildcard. Separate `browser:poll`, `browser:reply`, `task:create`, `task:read`, `task:cancel`, `browser:pair`, `model:manage` from web-only billing/account administration. Decide final names in D05, then freeze. Derive grant ceilings from trusted account/device policy. Never accept a caller-supplied ceiling. Verify durable revocation on every poll, reply, task and settings request; account status is a separate check. No global shared cloud bearer.
+
+Web login: Google OIDC using maintained libraries, authorization code flow, state/nonce and PKCE, fixed callback, issuer/audience/expiry checks. Key identities by issuer+subject, never auto-link by email. No Google browser-login cookies are transferred. Opaque web sessions use SCS with a PostgreSQL store; Secure/HttpOnly/__Host cookies, SameSite appropriate for login redirect, CSRF on state changes, rotated sessions after login, configurable idle and absolute expiry. Default 24h idle / 7d absolute. Google refresh tokens are unnecessary for sign-in-only; do not request offline access or store them. Server-side logout revokes the session; logout-all and account disable also revoke devices and stop tasks.
+
+Extension connection: `chrome.identity.launchWebAuthFlow`, registered stable extension ID and exact `chromiumapp.org` redirect. Backend web login creates a one-time, 60-second device authorization code bound to account, extension ID, state and PKCE S256 challenge; code is hashed at rest and atomically consumed with the verifier. Exchange returns the explicitly approved device credential once. A lost exchange response triggers revoke/relink rather than returning the secret again. Normal device lifetime 30 days, explicit revocation and expiry UI. Scope credential access to trusted extension contexts (`storage.local` restricted to TRUSTED_CONTEXTS); never content-script messages or sync storage. Device secrets are recoverable by the local OS/browser administrator; do not market extension storage as a hardware vault. Linking code is not itself a bearer credential. No arbitrary redirect/base URL, wildcard extension Origin or ambient cookie-based browser command endpoint.
+
+## Proposed API v1
+
+D05 must specify request/response fields, status codes, body limits, actor classes, ownership checks, idempotency, all enums and examples for every route below. No mutation on GET.
+
+| Routes | Actor | Meaning |
+|---|---|---|
+| `/auth/login`, `/auth/callback`, POST `/auth/logout`, POST `/auth/logout-all` | web | Login and session lifecycle |
+| POST `/v1/device-links`, POST `/v1/device-links/exchange` | web / PKCE proof | One-time approval and device credential issuance |
+| GET `/v1/me`, GET `/v1/devices`, DELETE `/v1/devices/{id}` | web; read-only self subset for device | Account/device status and revoke |
+| PUT/DELETE `/v1/devices/{id}/pairing` | owning device | Explicit one-tab pairing and generation change |
+| GET `/v1/devices/{id}/commands/next` | owning device | Bounded 20s poll; 204 heartbeat, 200 one command |
+| POST `/v1/devices/{id}/commands/{command_id}/reply` | owning device | Validated fenced reply; duplicates return prior acknowledgment |
+| POST `/v1/tasks`, GET `/v1/tasks/{id}`, GET `/v1/tasks/{id}/events` | web/own device | Durable create/status and cursor-based bounded event polling |
+| POST `/v1/tasks/{id}/cancel` | owning account/device | Idempotent durable cancellation |
+| POST `/v1/tasks/{id}/confirmations/{id}` | own device UI only | Human approval bound to one action digest and current generation |
+| GET/PUT/DELETE `/v1/model-settings` | web/own device | Key presence/model selection; write-only provider key |
+| GET/PUT `/v1/origins` | web/own device | Exact-origin grants, never supplied by model |
+| POST `/v1/billing/checkout`, POST `/v1/billing/portal`, GET `/v1/billing/status` | web | Subscription UI integration; server-configured price/return URLs |
+| POST `/v1/webhooks/stripe` | verified provider | Signature-checked durable inbox; never browser credentials |
+| POST `/v1/account/export`, DELETE `/v1/account` | recent web login | Export and durable deletion lifecycle |
+
+Error envelope: `{code, message, request_id, retryable}`; optional task/command IDs, no stack, secrets or raw page data. 409 = active lease/conflicting idempotency/generation; 410 = expired link; 413 = bounded input; 429 includes Retry-After; 503 = unavailable dependency. Exact billing/auth denial codes are visible actionable states. No automatic task POST retries with a new idempotency key.
+
+Default caps: prompt 16 KiB UTF-8, submitted history 64 KiB, snapshot/reply 256 KiB, HTTP body 512 KiB unless a smaller route bound applies. Depth and element limits apply before expensive decoding. Five-minute task timeout, three planning passes, sixty browser commands per task, single command in flight, model output/token limits explicitly configured. Limits are deployment-configured with startup validation and exposed safely in UI; rejected input is never partially executed.
+
+## Durable schema and ownership
+
+Coordinator owns `internal/hosted/contracts/`, OpenAPI and migration numbering. Workers submit additions there through that owner; no concurrent migration-number guessing.
+
+Tables: accounts; external_identities unique(issuer,subject); web_sessions (library-owned); device_links; devices; credentials (AMSL adapter); pairings; tasks; task_events; browser_commands; model_keys; allowed_origins; usage_reservations; billing_customers; checkout_attempts; provider_events; subscription_projections; billing_reconcile_jobs; account_deletions; security_audit. Define explicit unique account/device/task constraints, timestamps, expiry and indexes. Do not store Chrome cookies, website credentials, raw payment data or password input values.
+
+Tasks unique(account_id,client_request_id) plus hash of immutable intent. Same key+same intent returns the existing task; same key+different intent is 409. Reservation and admission are one transaction. Persist task policy snapshot including allowlist, interaction mode, paired device/generation and allowed model. Decreasing permissions/revocation takes effect for remaining commands; increasing permissions never widens an existing task. All clock decisions use server time, with extension monotonic local time only for its own timeout.
+
+## Task and command state machines
+
+Task: `queued -> running -> succeeded | failed | canceled | outcome_uncertain`. `running -> cancel_requested -> canceled | outcome_uncertain`. Durable transition CAS includes worker lease epoch. Any worker can cancel; only the current lease holder can dispatch. Heartbeat 5s, worker lease 20s. A lost worker with a dispatched command becomes uncertain; it is never automatically rerun. A queued task with no dispatched commands may be claimed after lease expiry. Event sequence is monotonically increasing per task, append-only and bounded by retention.
+
+Pairing: device ID + Chrome session nonce + local tab ID + server generation + allowed-origin set. The session nonce changes after browser/extension session restart; numeric tab ID is not a durable browser identity. Re-pairing requires no active task/command, except an explicit stop-and-inspect flow. Server serializes pair/disconnect/task admission. A switch increments generation and invalidates snapshots and confirmations. Another device cannot impersonate the same pairing. Website navigation causes a fresh snapshot; an off-allowlist redirect blocks further operations before DOM is read or actions run.
+
+Command envelope: protocol version, command ID, task ID, device ID, account-derived binding (not trusted from body), generation, worker epoch, per-task sequence, issued/deadline timestamps, exact origin, typed op/payload, snapshot ID/target signature, interaction policy and optional confirmation digest. No JavaScript source, arbitrary CDP method, arbitrary fetch, remote HTML or module URL in the vocabulary.
+
+Persist command and CAS dispatch before returning a poll response. If response is lost, the command is potentially executed: mark uncertain after deadline, never place it back in a replayable queue. Expired/fenced/foreign replies cannot advance a task. Duplicate identical replies acknowledge without applying twice; conflicting duplicates reject. The extension journals command ID+generation+state in session storage before action. A duplicate cannot execute again. Restart during a dispatched action invalidates the session and requires fresh pairing; do not resume from a guessed DOM state. Document at-most-once dispatch attempts and uncertain outcomes, not exactly-once browser effects.
+
+Read-only ops: snapshot/extract, scroll and allowlisted navigation. Clicking, filling, selecting and key input are mutation-capable. For mutation mode, validate target signature and fresh page generation immediately before dispatch; a stale target fails instead of retargeting. Block password/OTP/payment-card input and credential-form extraction. Prompt injection is untrusted page text: it cannot invoke APIs, change origin grants, read provider keys, enable interaction mode or approve actions. Confirmation tokens bind exact op+payload hash+target+origin+generation, expire after 60s, are consumed once and originate only from a trusted side-panel UI gesture. For ambiguous submit/send/delete/purchase effects, pause for user takeover; no classifier-only “safe to send” guarantee.
+
+## Billing contracts and Ferro policy
+
+Stripe SDK owns transport/signature primitives; AMSL owns proven durable coordination. Platform billing credentials never use a customer's connected Stripe credentials. Price ID, currency, success/cancel URLs and plan entitlement come only from approved server configuration. Refuse checkout for an active subscription and return a portal route. One active checkout attempt per account, stable payload fingerprint and provider idempotency key. A new intentional attempt differs from a retry; stale/unknown outcomes are reconciled before a new provider create. Never blindly replay beyond the provider's retention window.
+
+Webhook verifies raw bounded body with the SDK, separates test/live/account context, durably records before acknowledgment, schedules per-customer reconciliation and acknowledges duplicates. Retrieve current provider state under serialized/fenced reconciliation; do not use event-created timestamp as a global revision. Unmatched events remain pending for retry, not silently marked applied. Commit projection+inbox state atomically. Scheduled reconciliation repairs missing events, retries transient failures and alarms on backlog. No provider network call inside an unbounded DB transaction; use leases+epochs and compare-before-commit. Source of paid access is the committed projection with a bounded freshness policy, never the checkout redirect.
+
+Ferro v1 proposed policy: active subscription and enabled account admit tasks; cancel-at-period-end remains active until verified paid-through boundary. Unpaid/incomplete/past_due/paused/canceled states deny new tasks and retain access to account/billing/export. No free trial or implicit grace in v1 unless D07 changes this table. A task already admitted may finish within its five-minute limit after ordinary billing expiry; account/device revocation cancels it immediately (already-dispatched effects remain uncertain). Stale billing projection older than 24h triggers revalidation before admission; provider failure returns billing-unavailable, not arbitrary free access. Cancellation/refund/deletion policies must match approved public text and provider behavior.
+
+## Keys, privacy, reliability
+
+Hosted model endpoint is fixed to OpenRouter HTTPS; allowlisted model IDs. No user URL, localhost, RFC1918, metadata endpoint, cross-host auth forwarding or provider redirect. Store BYOK material via an established envelope-encryption/KMS library with account/provider/key-version authenticated context. Never invent crypto. Replacement/deletion invalidates caches and deletes access to old key versions; KMS/storage failure denies calls. Key test endpoint returns only success/error category. LLM traffic necessarily includes selected page text and prompt; disclose this before first task and provide per-site controls.
+
+Local chat archive remains bounded and isolated by signed-in account; switching accounts clears visible previous history until the matching archive is selected. Server task content is encrypted transient data, default deletion within 24h after terminal state; snapshot replies use encrypted short-lived handoff storage so a different replica can consume them, and are deleted after consumption or within five minutes. No retained snapshot archive; other reply content expires with the task. Keep metadata-only operational events 30d by default, security events 90d; billing records follow owner-approved obligations. These are D07 policy defaults, not legal conclusions. Scrub URL query/fragment, page text, keys, headers, emails and prompts from logs/traces/errors.
+
+Deletion is a durable workflow: recent-auth confirmation -> disable admission -> revoke devices/sessions -> cancel work -> stop recurring billing via reconciled provider request -> delete keys and content -> record minimal required billing/security tombstone. Retry provider failures durably; never claim deletion complete while renewal remains scheduled. Backups age out under published policy; restore reapplies deletion/revocation tombstones before traffic. Exports exclude secrets and unrelated accounts.
+
+Launch operational targets: p95 non-model API <500ms at declared 25 concurrent tasks / 100 connected extensions; idle extension no model calls, screenshot loops or background DOM scans; <=1 long-poll per device with 1-30s jittered backoff; active cancel stops new dispatch within 2s p95 under healthy network (dispatched work is not undoable). Recovery targets RPO <=15min, RTO <=4h demonstrated by restore drill. Treat these as acceptance targets until measured, never current claims.
+
+## UI rendering and configuration boundaries
+
+Treat all page text, model responses, history and provider errors as untrusted text. Render with textContent or a reviewed sanitizer; no raw HTML, remote image loads, executable links or event attributes. Validate navigation/link schemes and use noopener for new tabs. Add CSP for web and extension documents; API responses are no-store and CORS admits only the configured web origin and exact approved extension origins where needed. CORS is not authentication. Never log auth codes, token-bearing callback URLs or a complete request body.
+
+Qualification uses separate test clients/secrets/provider modes; production startup rejects test credentials/config markers where detectable. Google OAuth consent must be usable by intended public users, not only an allowlisted testing account. The published extension ID and backend redirect allowlist must match the approved artifact; dev extension IDs never become a wildcard production grant.
+
+Operator controls use a separate, audited maintenance command and protected workflow/task role, not a public admin endpoint or shared database password. Runtime cannot invoke it. Scope commands to explicit accounts/devices and global admission/mutation switches with dry-run and redacted audit. No arbitrary SQL, transcript extraction, key retrieval or user impersonation. D05 freezes this contract; F15 implements it before operations rehearsal.
