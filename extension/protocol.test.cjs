@@ -110,6 +110,74 @@ test('hosted cold start wakes, retries 503 readiness, then pairs after authentic
   assert.equal(stored.browserId,'browser-context-default-1234');
 });
 
+test('hosted readiness reasserts wake after a draining sleep can undo the first wake',async()=>{
+  let wakes=0,statuses=0;
+  const {context,listeners,clock}=fakeClockWorker(async(url)=>{
+    const path=new URL(url).pathname;
+    if(path.endsWith('/wake')){wakes++;return {ok:true,status:202};}
+    if(path.endsWith('/chat/status')){
+      statuses++;
+      return wakes < 2
+        ? {ok:false,status:503}
+        : {ok:true,status:200,json:async()=>({busy:false,leased:false,paired_tab:null})};
+    }
+    if(path.endsWith('/pair'))return {ok:true,status:204};
+    throw new Error(`unexpected request ${path}`);
+  });
+  context.ensureContentReady=async()=>{};context.startPolling=()=>{};context.restoreSidePanelAccess=async()=>{};
+  const response=await connectHosted(listeners);
+  assert.equal(response.ok,true);
+  assert.equal(wakes,2);
+  assert.ok(clock.now-1000>=15000);
+  assert.ok(statuses>=2);
+});
+
+test('explicit same-pair hosted reconnect restarts polling without replaying actions',async()=>{
+  const connection={base:'https://ferro.sire.run/bridge',token:'pilot-token',browserId:'browser-context-default-1234',tabId:42};
+  let started=0,actions=0;
+  const {context,listeners}=worker({fetch:async(url)=>{
+    const path=new URL(url).pathname;
+    if(path.endsWith('/wake'))return {ok:true,status:202};
+    if(path.endsWith('/chat/status'))return {ok:true,status:200,json:async()=>({busy:false,leased:false,paired_tab:'browser-context-default-1234.42'})};
+    if(path.endsWith('/pair'))return {ok:true,status:204};
+    throw new Error(`unexpected request ${path}`);
+  }});
+  context.chrome.storage.session.get=async()=>({connection});
+  context.ensureContentReady=async()=>{};context.startPolling=()=>{started++;};context.restoreSidePanelAccess=async()=>{};
+  context.handleAction=async()=>{actions++;};
+  const response=await connectHosted(listeners);
+  assert.equal(response.ok,true);
+  assert.equal(started,1);
+  assert.equal(actions,0);
+});
+
+test('background hosted recovery does not cancel an explicit connection workflow',async()=>{
+  const oldConnection={base:'https://ferro.sire.run/bridge',token:'pilot-token',browserId:'browser-context-default-1234',tabId:41};
+  let releaseWake,wakeStarted,wakes=0;
+  const started=new Promise(resolve=>{wakeStarted=resolve;});
+  const pendingWake=new Promise(resolve=>{releaseWake=resolve;});
+  let stored=oldConnection;
+  const {context,listeners}=worker({fetch:async(url)=>{
+    const path=new URL(url).pathname;
+    if(path.endsWith('/wake')){wakes++;wakeStarted();return pendingWake;}
+    if(path.endsWith('/chat/status'))return {ok:true,status:200,json:async()=>({busy:false,leased:false,paired_tab:null})};
+    if(path.endsWith('/pair'))return {ok:true,status:204};
+    return {ok:true,status:204};
+  }});
+  context.chrome.storage.session.get=async()=>({connection:stored});
+  context.chrome.storage.session.set=async value=>{stored=value.connection;};
+  context.ensureContentReady=async()=>{};context.startPolling=()=>{};context.restoreSidePanelAccess=async()=>{};
+  context.connection=oldConnection;
+  const manual=connectHosted(listeners,{tabId:42});
+  await started;
+  const recovered=await vm.runInContext('recoverHostedConnection(connection, 7)',context);
+  assert.equal(recovered,false);
+  assert.equal(wakes,1);
+  releaseWake({ok:true,status:202});
+  assert.equal((await manual).ok,true);
+  assert.equal(stored.tabId,42);
+});
+
 test('invalid hosted token fails at wake without retry or credential disclosure',async()=>{
   let requests=0;
   const {context,listeners}=worker({fetch:async(_url,options)=>{requests++;assert.equal(options.headers.Authorization,'Bearer secret-token');return {ok:false,status:401,text:async()=> 'secret-token echoed'};}});

@@ -40,6 +40,7 @@ const HOSTED_BROWSER_ID_KEY = 'hostedBrowserIdentity';
 const HOSTED_WAKE_TIMEOUT_MS = 5000;
 const HOSTED_COLD_START_BUDGET_MS = 180000;
 const HOSTED_READINESS_RETRY_MS = 2500;
+const HOSTED_WAKE_RETRY_MS = 15000;
 
 function validBridgeBase(base) {
   return /^http:\/\/(127\.0\.0\.1|localhost):[0-9]+$/.test(base) || base === HOSTED_BRIDGE_BASE;
@@ -55,6 +56,7 @@ function sleep(ms) {
 let connectionWorkflowGeneration = 0;
 let connectionWorkflowAbort = null;
 let connectionWorkflowTargetKey = null;
+let explicitConnectionWorkflowGeneration = null;
 let hostedConnectionCommitQueue = Promise.resolve();
 
 function hostedTargetKey(connection) {
@@ -128,6 +130,7 @@ async function wakeHostedService(connection, generation, signal) {
 }
 
 async function waitForHostedReadiness(connection, generation, signal, deadline) {
+  let nextWakeAt = Date.now() + HOSTED_WAKE_RETRY_MS;
   while (Date.now() < deadline) {
     assertConnectionWorkflow(generation, signal);
     try {
@@ -140,7 +143,15 @@ async function waitForHostedReadiness(connection, generation, signal, deadline) 
     }
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
-    await workflowAwait(sleepWithSignal(Math.min(HOSTED_READINESS_RETRY_MS, remaining), signal), generation, signal);
+    if (Date.now() >= nextWakeAt) {
+      // A previous draining instance may finish after the initial wake and
+      // turn desired capacity back to zero. Reassert the same authorized wake
+      // while waiting; this never pairs or retries a browser action.
+      await workflowAwait(wakeHostedService(connection, generation, signal), generation, signal);
+      nextWakeAt = Date.now() + HOSTED_WAKE_RETRY_MS;
+    }
+    const untilWake = Math.max(1, nextWakeAt - Date.now());
+    await workflowAwait(sleepWithSignal(Math.min(HOSTED_READINESS_RETRY_MS, remaining, untilWake), signal), generation, signal);
   }
   assertConnectionWorkflow(generation, signal);
   throw new Error('Hosted service did not become ready within 180 seconds.');
@@ -201,6 +212,10 @@ async function storeHostedConnection(connection, generation, signal, pairCreated
 }
 
 async function recoverHostedConnection(connection, loopId) {
+  // Poll recovery is background maintenance. It must not supersede an
+  // explicit popup/panel connection workflow, which may be awaiting user
+  // confirmation or hosted readiness for another tab.
+  if (explicitConnectionWorkflowGeneration === connectionWorkflowGeneration) return false;
   const {generation, controller} = beginConnectionWorkflow(connection);
   const {signal} = controller;
   try {
@@ -271,8 +286,10 @@ async function connectHosted(message, sender, generation, signal) {
     if (!response.ok) throw new Error(`Pairing failed (HTTP ${response.status}).`);
     if (!hadLocalConnection) {
       await storeHostedConnection(c, generation, signal, true);
-      startPolling();
     }
+    // A retained pairing can outlive a failed reply loop. Explicit reconnect
+    // safely restarts polling without replaying the already executed action.
+    startPolling();
     try { await workflowAwait(restoreSidePanelAccess(), generation, signal); }
     catch (error) { if (signal.aborted || generation !== connectionWorkflowGeneration) throw error; }
     return {ok:true, browserId:c.browserId};
@@ -719,6 +736,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       try {
         if (senderIsNotExtensionPage(sender)) throw new Error('pair using the extension popup or side panel');
         const workflow = beginConnectionWorkflow(message.connection);
+        explicitConnectionWorkflowGeneration = workflow.generation;
         if (message.connection?.base === HOSTED_BRIDGE_BASE) {
           const response = await connectHosted(message, sender, workflow.generation, workflow.controller.signal);
           assertConnectionWorkflow(workflow.generation, workflow.controller.signal);
@@ -832,7 +850,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         sendResponse({ error: message });
       }
-    })();
+    })().finally(() => {
+      if (explicitConnectionWorkflowGeneration === connectionWorkflowGeneration) explicitConnectionWorkflowGeneration = null;
+    });
     return true;
   }
 
