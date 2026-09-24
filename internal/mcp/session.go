@@ -50,6 +50,7 @@ func (o *Owner) lease(who, tool string, args json.RawMessage) (string, bool, err
 	if time.Now().After(o.leaseUntil) {
 		o.leaseOwner = ""
 		o.snap = nil
+		o.snapGeneration = 0
 		o.extracted = map[string]any{}
 	}
 	if o.leaseOwner != "" && o.leaseOwner != who {
@@ -58,6 +59,7 @@ func (o *Owner) lease(who, tool string, args json.RawMessage) (string, bool, err
 	if tool == "release_tab" {
 		o.leaseOwner = ""
 		o.snap = nil
+		o.snapGeneration = 0
 		o.extracted = map[string]any{}
 		return `{"status":"released"}`, false, nil
 	}

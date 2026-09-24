@@ -162,11 +162,11 @@ async function launchChrome({ windowSize = [1280, 3000], extraArgs = [] } = {}) 
     browserPending.delete(m.id);clearTimeout(p.timer);
     if (m.error) p.reject(new Error(m.error.message));else p.resolve(m.result);
   });
-  function browserSend(method,params) {
+  function browserSend(method,params,sessionId) {
     const id = ++browserID;
     return new Promise((resolve,reject) => {
       const timer=setTimeout(()=>{browserPending.delete(id);reject(new Error(`${method} timed out`));},10000);
-      browserPending.set(id,{resolve,reject,timer});browserWS.send(JSON.stringify({id,method,params}));
+      browserPending.set(id,{resolve,reject,timer});browserWS.send(JSON.stringify({id,method,params,sessionId}));
     });
   }
 

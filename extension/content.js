@@ -13,6 +13,10 @@
  * action background.js hands it via chrome.tabs.sendMessage.
  */
 (() => {
+  // Pair-time attachment may overlap Chrome's normal document_idle injection.
+  // Exactly one listener may execute each command in this isolated world.
+  if (globalThis.__ferroContentInstalled) return;
+  globalThis.__ferroContentInstalled = true;
   try {
     chrome.runtime.sendMessage({ type: 'ferro-content-ready' });
   } catch (_) {
@@ -21,7 +25,7 @@
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type === 'ferro-ping') { sendResponse({ready:true}); return false; }
+    if (message?.type === 'ferro-ping') { sendResponse({ready:typeof globalThis.FerroAdapter?.perform === 'function'}); return false; }
     if (!message || message.type !== 'ferro-perform') return false;
     globalThis.FerroAdapter.perform(message.action)
       .then(sendResponse)

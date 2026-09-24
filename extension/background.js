@@ -38,8 +38,6 @@ const POLL_ERROR_BACKOFF_MS = 2000; // bridge unreachable (laptop asleep, etc.)
 const NAV_TIMEOUT_MS = 20000;
 const CONTENT_READY_TIMEOUT_MS = 8000;
 const NAV_SETTLE_MS = 250; // mirrors WaitStrategy's default SettleDebounce
-const SEND_RETRY_ATTEMPTS = 5;
-const SEND_RETRY_DELAY_MS = 300;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -181,17 +179,36 @@ async function waitForContentReady(tabId, timeoutMs) {
   throw new Error('content script did not become ready after navigation');
 }
 
-async function sendToContent(tabId, message) {
-  let lastError;
-  for (let attempt = 0; attempt < SEND_RETRY_ATTEMPTS; attempt++) {
+// Static content scripts do not attach to documents opened before installation.
+// Prepare only the requested tab, before dispatching any action. Coalesce
+// concurrent preparation and never retry a possibly delivered browser input.
+const preparingTabs = new Map();
+async function ensureContentReady(tabId) {
+  if (preparingTabs.has(tabId)) return preparingTabs.get(tabId);
+  const prepare = (async () => {
+    const tab = await chrome.tabs.get(tabId);
+    if (!/^https?:\/\//.test(tab.url || '')) throw new Error('Choose a normal website tab; Chrome internal pages cannot be controlled.');
     try {
-      return await chrome.tabs.sendMessage(tabId, message);
-    } catch (error) {
-      lastError = error;
-      await sleep(SEND_RETRY_DELAY_MS);
+      if ((await chrome.tabs.sendMessage(tabId, {type:'ferro-ping'}, {frameId:0}))?.ready) return;
+    } catch (_) { /* an existing document may not have a receiver yet */ }
+    try {
+      await chrome.scripting.executeScript({target:{tabId, frameIds:[0]}, files:['adapter.js','content.js']});
+    } catch (_) {
+      throw new Error('Ferro cannot attach to this page. Click the Ferro toolbar icon on the website tab and reconnect, or refresh that tab. Chrome internal pages, the Web Store and built-in PDF pages are not supported.');
     }
-  }
-  throw new Error(`could not reach the paired tab's content script: ${lastError?.message || 'unknown error'}`);
+    if (!(await chrome.tabs.sendMessage(tabId, {type:'ferro-ping'}, {frameId:0}))?.ready) {
+      throw new Error('The page is not ready for Ferro. Refresh the website tab and reconnect.');
+    }
+  })().catch(error => { error.code = 'page_unavailable'; throw error; });
+  preparingTabs.set(tabId, prepare);
+  try { await prepare; } finally { preparingTabs.delete(tabId); }
+}
+
+async function sendToContent(tabId, message) {
+  await ensureContentReady(tabId);
+  // A failure after this send may mean input happened and the response was
+  // lost. Surface uncertainty instead of blindly sending the action again.
+  return chrome.tabs.sendMessage(tabId, message, {frameId:0});
 }
 
 // ---------------------------------------------------------------------
@@ -281,10 +298,13 @@ async function pollLoop(myGeneration) {
         const result = await handleAction(connection.tabId, activeAction);
         reply = { id: next.id, ...result };
       } catch (error) {
-        reply = { id: next.id, code: 'outcome_uncertain', error: error.message };
+        reply = { id: next.id, code: error.code || 'outcome_uncertain', error: error.message };
       }
-      activeAction = null;
-      await postReply(connection.base, connection.token, reply);
+      try {
+        await postReply(connection.base, connection.token, reply);
+      } finally {
+        activeAction = null;
+      }
     } catch (error) {
       // Transport failure (bridge not running, laptop asleep, network
       // hiccup) -- distinct from a "blocked" page: nothing gets POSTed
@@ -314,29 +334,92 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.type === 'ferro-connect') {
     (async () => {
+      let previous = null;
+      let restartPreviousPoll = false;
       try {
-        // Pairing may only be requested by our own popup, never page content.
-        if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) throw new Error('pair using the extension popup');
+        if (activeAction) throw new Error('A browser action is still running. Stop it before reconnecting.');
+        // Pairing may only be requested by our own popup or panel, never page content.
+        if (sender.id !== chrome.runtime.id || ![chrome.runtime.getURL('popup.html'), chrome.runtime.getURL('sidepanel.html')].includes(sender.url)) throw new Error('pair using the extension popup or side panel');
         const c = message.connection;
         if (!/^http:\/\/(127\.0\.0\.1|localhost):[0-9]+$/.test(c.base)) throw new Error('use a local bridge URL');
+        if (!Number.isInteger(c.tabId) || c.tabId < 0) throw new Error('Choose a website tab to connect.');
+        await ensureContentReady(c.tabId);
+        previous = await getConnection();
+        if (previous && previous.base === c.base && previous.token === c.token && previous.tabId === c.tabId) {
+          sendResponse({ ok: true });
+          return;
+        }
+        if (previous) {
+          if (activeAction) throw new Error('A browser action is still running. Stop it before reconnecting.');
+          stopPolling();
+          restartPreviousPoll = true;
+        }
+        if (previous && previous.tabId !== c.tabId) {
+          const disconnected = await fetch(`${previous.base}/disconnect`, {
+            method:'POST',
+            headers:{Authorization:`Bearer ${previous.token}`,'X-Ferro-Tab-Id':String(previous.tabId)},
+            signal:AbortSignal.timeout(5000),
+          });
+          if (!disconnected.ok) {
+            throw new Error(`Could not release the previous tab: HTTP ${disconnected.status}`);
+          }
+        }
         const response = await fetch(`${c.base}/pair`, { method: 'POST', headers: { Authorization: `Bearer ${c.token}`, 'X-Ferro-Tab-Id': String(c.tabId) }, signal: AbortSignal.timeout(5000) });
-        if (!response.ok) throw new Error(`Pairing failed: HTTP ${response.status}`);
+        if (!response.ok) {
+          const detail = (await response.text()).trim();
+          const retry = response.status === 409 ? ' Retry after the previous tab’s action or poll has stopped.' : '';
+          throw new Error(`Pairing failed: ${detail || `HTTP ${response.status}`}.${retry}`);
+        }
         await chrome.storage.session.set({ connection: c });
+        restartPreviousPoll = false;
         startPolling();
         sendResponse({ ok: true });
-      } catch (error) { sendResponse({ error: error.message }); }
+      } catch (error) {
+        let message = error.message;
+        if (restartPreviousPoll) {
+          try {
+            const restored = await fetch(`${previous.base}/pair`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${previous.token}`, 'X-Ferro-Tab-Id': String(previous.tabId) },
+              signal: AbortSignal.timeout(5000),
+            });
+            if (!restored.ok) message += ` The previous tab could not be restored (HTTP ${restored.status}).`;
+          } catch (restoreError) {
+            message += ` The previous tab could not be restored: ${restoreError.message}.`;
+          }
+          startPolling();
+        }
+        sendResponse({ error: message });
+      }
     })();
     return true;
   }
 
   if (message.type === 'ferro-disconnect') {
     (async () => {
-      if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) { sendResponse({error:'disconnect using the popup'}); return; }
-      stopPolling();
+      if (sender.id !== chrome.runtime.id || ![chrome.runtime.getURL('popup.html'), chrome.runtime.getURL('sidepanel.html')].includes(sender.url)) { sendResponse({error:'disconnect using the popup'}); return; }
+      if (activeAction) { sendResponse({error:'A browser action is still running. Wait for it to finish before disconnecting.'}); return; }
       const c = await getConnection();
+      stopPolling();
+      let warning = '';
+      try {
+        if (c) {
+          const response = await fetch(`${c.base}/disconnect`, { method:'POST', headers:{Authorization:`Bearer ${c.token}`, 'X-Ferro-Tab-Id':String(c.tabId)}, signal:AbortSignal.timeout(5000) });
+          if (!response.ok) {
+            const detail = (await response.text()).trim();
+            if (response.status === 409) {
+              startPolling();
+              sendResponse({error:`Disconnect failed: ${detail || `HTTP ${response.status}`}`});
+              return;
+            }
+            warning = `The bridge did not confirm disconnect (HTTP ${response.status}).`;
+          }
+        }
+      } catch (error) {
+        warning = `The bridge could not confirm disconnect: ${error.message}`;
+      }
       await chrome.storage.session.remove('connection');
-      try { if (c) await fetch(`${c.base}/disconnect`, { method:'POST', headers:{Authorization:`Bearer ${c.token}`, 'X-Ferro-Tab-Id':String(c.tabId)}, signal:AbortSignal.timeout(5000) }); } catch (_) {}
-      sendResponse({ ok:true });
+      sendResponse({ ok:true, warning });
     })();
     return true;
   }
@@ -372,3 +455,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.storage.session.get('connection').then(({ connection }) => {
   if (connection) startPolling();
 });
+
+// Chrome owns the panel frame; the extension renders only its contents.
+chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});

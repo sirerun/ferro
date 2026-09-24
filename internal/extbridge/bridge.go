@@ -67,6 +67,10 @@ type pendingAction struct {
 // Option configures a Bridge at construction time.
 type Option func(*Bridge)
 
+// WithChatHandler mounts the local, bearer-authenticated side-panel API.
+// Configure before Start; the handler never receives unauthenticated requests.
+func WithChatHandler(h http.Handler) Option { return func(b *Bridge) { b.chat = h } }
+
 // WithToken sets the bearer token both endpoints require, instead of
 // generating a random one. Mainly useful for tests that need a known token.
 func WithToken(token string) Option {
@@ -87,18 +91,21 @@ type Bridge struct {
 	token       string
 	pollTimeout time.Duration
 
-	mu         sync.Mutex
-	lastSeen   time.Time
-	generation uint64
-	pairedTab  string                // "" until the first /next request pairs
-	waiting    map[string]chan Reply // action id -> the Enqueue call awaiting its reply
-	queue      chan *pendingAction   // actions waiting to be handed to /next
+	mu          sync.Mutex
+	lastSeen    time.Time
+	generation  uint64
+	pairedTab   string                // "" until the first /next request pairs
+	activePolls map[string]int        // live /next requests by tab
+	waiting     map[string]chan Reply // action id -> the Enqueue call awaiting its reply
+	dispatched  map[string]bool       // actions handed to the extension but not yet replied
+	queue       chan *pendingAction   // actions waiting to be handed to /next
 
 	// srv and ln back Start/Stop; the HTTP wiring itself (handlers, routing,
 	// auth) lives in server.go, kept separate from the queue/pairing logic
 	// above.
-	srv *http.Server
-	ln  net.Listener
+	chat http.Handler
+	srv  *http.Server
+	ln   net.Listener
 }
 
 // New constructs a Bridge, generating a random bearer token unless
@@ -108,6 +115,8 @@ func New(opts ...Option) (*Bridge, error) {
 	b := &Bridge{
 		pollTimeout: defaultPollTimeout,
 		waiting:     make(map[string]chan Reply),
+		dispatched:  make(map[string]bool),
+		activePolls: make(map[string]int),
 		queue:       make(chan *pendingAction, defaultQueueCapacity),
 	}
 	for _, opt := range opts {
@@ -135,22 +144,77 @@ func (b *Bridge) PairedTab() string {
 	return b.pairedTab
 }
 
-// pair records tabID as the active pairing if none is active yet, or
-// confirms tabID matches the existing pairing. It returns an error — meant
-// to surface as 409 Conflict — when a different tab is already paired.
+// Generation returns the current pairing generation. Snapshot refs are valid
+// only for the generation in which they were captured.
+func (b *Bridge) Generation() uint64 {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.generation
+}
+
+// pair records the tabID reported by a poll, pairing it if none is active and
+// replacing an inactive tab. It returns an error when another tab still has
+// a live poll.
 func (b *Bridge) pair(tabID string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	return b.pairLocked(tabID)
+}
+
+// pairExplicit starts a fresh extension control session, including when
+// Chrome reuses the previous numeric tab id after restarting.
+func (b *Bridge) pairExplicit(tabID string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.pairedTab == tabID {
+		if b.hasDispatchedLocked() {
+			return fmt.Errorf("tab %q has an action in progress; wait for it to finish before reconnecting", tabID)
+		}
+		b.resetPairingLocked()
+	}
+	return b.pairLocked(tabID)
+}
+
+func (b *Bridge) pairLocked(tabID string) error {
+	// Chrome clears storage.session when it restarts or reloads an extension.
+	// If the old extension no longer has a live poll, replace it immediately.
+	// Otherwise preserve the active pairing until it disconnects.
+	if b.pairedTab != "" && b.pairedTab != tabID {
+		if b.activePolls[b.pairedTab] > 0 || b.hasDispatchedLocked() {
+			return fmt.Errorf("tab %q is already paired; disconnect it or wait for its current action or poll to stop", b.pairedTab)
+		}
+		b.resetPairingLocked()
+	} else if b.pairedTab != "" && b.activePolls[b.pairedTab] == 0 && !b.hasDispatchedLocked() && time.Since(b.lastSeen) >= 45*time.Second {
+		// A restarted Chrome may reuse a numeric tab id; force refs to be
+		// reacquired even when the id happens to match.
+		b.resetPairingLocked()
+	}
 	if b.pairedTab == "" {
 		b.pairedTab = tabID
 		b.lastSeen = time.Now()
 		return nil
 	}
-	if b.pairedTab != tabID {
-		return fmt.Errorf("tab %q is already paired; only one active pairing is allowed at a time", b.pairedTab)
-	}
 	b.lastSeen = time.Now()
 	return nil
+}
+
+func (b *Bridge) hasDispatchedLocked() bool { return len(b.dispatched) > 0 }
+
+func (b *Bridge) resetPairingLocked() {
+	b.pairedTab = ""
+	b.generation++
+	for id, ch := range b.waiting {
+		ch <- Reply{Code: "disconnected", Error: "extension disconnected; inspect the page before retrying"}
+		delete(b.waiting, id)
+		delete(b.dispatched, id)
+	}
+	for {
+		select {
+		case <-b.queue:
+		default:
+			return
+		}
+	}
 }
 
 // Enqueue queues action for delivery to the paired extension's next GET
@@ -179,6 +243,7 @@ func (b *Bridge) Enqueue(ctx context.Context, action Command) (Reply, error) {
 	case <-ctx.Done():
 		b.mu.Lock()
 		delete(b.waiting, id)
+		delete(b.dispatched, id)
 		b.mu.Unlock()
 		return Reply{}, ctx.Err()
 	}
@@ -189,6 +254,7 @@ func (b *Bridge) Enqueue(ctx context.Context, action Command) (Reply, error) {
 	case <-ctx.Done():
 		b.mu.Lock()
 		delete(b.waiting, id)
+		delete(b.dispatched, id)
 		delivered := pa.delivered
 		b.mu.Unlock()
 		if delivered {
@@ -206,6 +272,7 @@ func (b *Bridge) deliver(id string, reply Reply) bool {
 	ch, ok := b.waiting[id]
 	if ok {
 		delete(b.waiting, id)
+		delete(b.dispatched, id)
 	}
 	b.mu.Unlock()
 	if !ok {
@@ -246,5 +313,14 @@ func (b *Bridge) Pin(ctx context.Context) context.Context {
 	b.mu.Lock()
 	generation := b.generation
 	b.mu.Unlock()
+	return context.WithValue(ctx, pairingKey{}, pairingPin{b, generation})
+}
+
+// PinGeneration binds a call to a previously observed pairing generation.
+// A mismatch is rejected by Enqueue before an action reaches Chrome.
+func (b *Bridge) PinGeneration(ctx context.Context, generation uint64) context.Context {
+	if _, ok := ctx.Value(pairingKey{}).(pairingPin); ok {
+		return ctx
+	}
 	return context.WithValue(ctx, pairingKey{}, pairingPin{b, generation})
 }

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ferro</title><link rel="stylesheet" href="glass-chat.css"><link rel="stylesheet" href="sidepanel.css">
+<script src="sidepanel.js" defer></script>
+</head>
+<body>
+<header><span class="brand-mark" aria-label="Ferro"><img src="icons/ferro-mark.svg" alt=""></span><strong>Ferro</strong><span id="connection-state">Not connected</span><button id="settings-toggle" class="quiet" aria-label="Open settings" title="Settings">⚙</button></header>
+<nav class="conversation-nav" aria-label="Chat history"><select id="chat-picker" aria-label="Choose a conversation"></select><button id="new-chat" type="button" title="New chat" aria-label="New chat">+</button></nav>
+<section id="settings" hidden aria-label="Settings">
+ <div class="settings-title"><h2>Make yourself at home</h2><button id="settings-close" class="quiet" aria-label="Close settings">×</button></div>
+ <form id="connection-form">
+  <h3>Your Chrome tab</h3>
+  <label for="base">Local service</label><input id="base" value="http://127.0.0.1:4175" required>
+  <label for="token">Pairing token</label><input id="token" type="password" autocomplete="off" placeholder="Paste from bridge-token">
+  <p class="hint">Start ferro-mcp with the extension backend. Copy the token from ~/.ferro-mcp/bridge-token. It stays in Chrome's session memory.</p>
+  <div class="actions"><button type="submit">Connect current tab</button><button id="disconnect" type="button">Disconnect</button></div>
+ </form>
+ <form id="model-form">
+  <h3>Your model</h3>
+  <label for="model-url">API base URL</label><input id="model-url" type="url" value="https://openrouter.ai/api/v1" required>
+  <label for="model">Model ID</label><input id="model" placeholder="Provider/model ID" required>
+  <label for="api-key">API key</label><input id="api-key" type="password" autocomplete="off" placeholder="Enter your provider key">
+  <label class="check"><input type="checkbox" id="clear-key">Remove saved key</label>
+  <p class="hint">The key is saved in a private file by the Go service. Tasks, page data and recent chat context go to this provider. Model usage may incur charges.</p>
+  <button type="submit">Save model</button>
+ </form>
+ <form id="origins-form">
+  <h3>Allowed websites</h3>
+  <label for="origins">One exact origin per line</label><textarea id="origins" rows="3" placeholder="https://example.com"></textarea>
+  <p class="hint">Permission to use Ferro on these sites. This does not authorize sending messages or making purchases.</p>
+  <button type="submit">Save websites</button>
+ </form>
+ <h3>Appearance & history</h3>
+ <label for="frame-color">Match Chrome's frame</label><div class="actions"><input id="frame-color" type="color" aria-label="Panel background color"><button id="reset-color" type="button">Use system color</button></div>
+ <p class="hint">Choose your frame color for a continuous background. Chat is stored on this device, separate from the repository.</p>
+ <div class="actions"><button id="export" type="button">Export chat</button><button id="clear" type="button">Clear chat</button></div>
+</section>
+<main class="glass-chat" aria-label="Chat with Ferro">
+ <div class="gc-stream" tabindex="0" aria-label="Conversation"><div id="messages" class="gc-messages" role="log" aria-live="polite" aria-relevant="additions"></div></div>
+ <form id="composer" class="gc-composer">
+  <textarea id="message" rows="1" maxlength="6000" aria-label="Your task" placeholder="What would you like to get done?" required></textarea>
+  <button id="send" class="gc-send" type="submit" aria-label="Run task">↑</button>
+ </form>
+ <div class="gc-meta"><label class="check" title="Off: read, extract, navigate and scroll only. On: the task can also click, type, select and press keys."><input id="interactions" type="checkbox">Allow interactions</label><button id="stop" type="button" hidden>Stop task</button><button id="history-toggle" class="gc-plain" type="button" aria-pressed="false">Full history</button></div>
+</main>
+<p id="notice" class="notice" role="status"></p>
+</body></html>

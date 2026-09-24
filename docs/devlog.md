@@ -142,3 +142,66 @@ full browser-enabled Go race suite, and all four Node extension tests pass.
 
 Claude re-reviewed the fixes and reported all four resolved with no remaining
 concrete findings. The reviewed branch was fast-forwarded into local main.
+
+
+## 2026-09-22 — Standalone local Chrome chat
+
+Implemented the supplied floating Glass Chat design in Chrome's side panel,
+with a frame-colored light/dark background and custom theme color. Model setup,
+explicit tab pairing, exact-origin policy editing, bounded chat retention,
+export and cancellation are wired to the existing Go executor. The default
+read-only driver prevents clicks, typing, selection and key presses even when
+the model requests them. Interaction mode remains explicitly selectable.
+
+Validation: full Go build/vet, full browser-enabled race suite and all four
+Node extension tests passed. Real Chrome UI tests exercise settings and model
+authentication, read-only refusal, successful interaction and extraction,
+chat reload, HTML-as-text rendering, active provider cancellation and denial
+of cancellation by a different session. Targeted browser/race tests passed
+again after adding API-key redaction for provider errors; the test endpoint
+intentionally echoes its fixture key and the transcript receives [redacted].
+
+Installed a local extension-backend build, with a launcher and setup guide.
+The default bridge port was occupied by an existing local dashboard; this
+installation uses port 4175 with matching launcher/panel defaults. Owner status
+confirmed the service running on loopback with no tab paired. No real profile was driven, no live model key was selected, and
+no research campaign or outbound action was executed. Human extension loading
+and provider/source qualification remain explicit acceptance steps.
+
+The shared build lease found at verification had expired and predated the
+machine's latest boot; no matching build process remained. It was released
+with the canonical compare-and-swap primitive before acquiring our own lease.
+Ajent inbox/search/diagnose continued returning HTTP 409; local repository
+inspection and tests supplied the evidence.
+
+
+## 2026-09-22 — Receiver missing on pre-existing Chrome tabs
+
+Reproduced the operator's exact "Receiving end does not exist" failure by
+opening a fixture tab before installing the extension. The previous test opened
+its tab after installation and missed this lifecycle. Pairing had only checked
+the Go bridge; it could report success without any page receiver.
+
+Pairing now pings the top-frame receiver, injects the packaged adapter/relay
+using Chrome scripting permission when absent, and verifies readiness before
+claiming a connection. Injection still requires existing host or activeTab
+authority; restricted pages return actionable errors. The relay is idempotent
+when programmatic and document-idle injection overlap. Concurrent preparation
+shares one injection. Readiness is checked before commands, and actual input
+is sent once: a lost response no longer causes blind repeated input.
+
+The pre-install-tab browser regression failed before the fix and passed after.
+Targeted browser/race and Node checks cover the existing extension path,
+attachment, denied access, injection coalescing and one-time command dispatch.
+The installed extension files are updated separately from the running Go
+service; Chrome must reload the extension to activate the changed manifest.
+
+
+## 2026-09-22 — Cursor focus mark as Ferro logo
+
+Created a cyan cursor-focus mark from a center dot, segmented aiming ring and
+pointer tail, echoing Ox's animated target cursor. Added PNG sizes for Chrome's
+manifest/action icons and retained the generated PNG master plus an SVG for UI
+use. The side-panel wordmark pulses a light outer ring; reduced-motion settings
+disable that animation. The old extension popup shares the mark. Updated the
+extension version so Chrome recognizes the UI/icon change.

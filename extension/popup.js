@@ -33,6 +33,7 @@ document.getElementById('connect').onclick = async () => {
 };
 
 document.getElementById('disconnect').onclick = async () => {
-  await chrome.runtime.sendMessage({ type: 'ferro-disconnect' });
-  status.textContent = 'Disconnected.';
+  const response = await chrome.runtime.sendMessage({ type: 'ferro-disconnect' });
+  if (response?.error) { status.textContent = response.error; return; }
+  status.textContent = response?.warning ? `Disconnected locally. ${response.warning}` : 'Disconnected.';
 };

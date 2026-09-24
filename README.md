@@ -276,7 +276,7 @@ Environment variables:
 | `FERRO_MCP_LLM_API_KEY` | API key, if the endpoint needs one |
 | `FERRO_MCP_CHROME_USER_DATA_DIR` | Chrome profile directory. Default `$FERRO_MCP_HOME/chrome-profile` |
 | `FERRO_MCP_CHROME_PROFILE_DIRECTORY` | Chrome's `--profile-directory` value, for a user data dir holding more than one profile |
-| `FERRO_MCP_START_URL` | Optional initial navigation when the owner starts |
+| `FERRO_MCP_START_URL` | Optional initial navigation for the `cdp` backend; ignored by `extension` |
 | `FERRO_MCP_HEADLESS` | `true` to run headless (default `false`) |
 | `FERRO_MCP_CACHE_PATH` | Resolution/replay cache path (see Replay and extraction, above) |
 | `FERRO_MCP_MAX_REPAIRS` | Per-task repair budget (default 2) |
@@ -335,6 +335,19 @@ profile, not just configuration.
 | `DESIGN.md` | Package split, principles, known sharp edges |
 | `conversation.md` | The design conversation and RFC the code grew from |
 
+## Standalone Chrome chat
+
+Use Ferro directly from a Chrome side panel: connect a tab, configure your model
+provider, and describe the work. The floating Glass Chat interface runs against
+the local Go service, with saved chat/export, cancellation and default read-only
+execution. Switch among saved conversations in the panel; they stay in this
+Chrome profile. Ferro operates on one explicitly paired tab at a time. No Claude
+Code or Codex session is required.
+
+See [Standalone Chrome chat](docs/local-chat.md) for installation and a first
+research-to-draft session. This is a local prototype, not the hosted multi-user
+product. The side panel is separate from the AMSL credential review branch.
+
 ## Your existing Chrome session
 
 The `extension` backend works inside a tab in your normal Chrome profile, using
@@ -357,11 +370,17 @@ containing the exact origins you want to authorize, for example:
 
 Open `chrome://extensions` in the Chrome profile you use, enable Developer mode,
 and choose **Load unpacked**, selecting this checkout's `extension/` directory.
-Reload the website tab if it was open before installing the extension. Open the
-Ferro extension popup on that tab, enter `http://127.0.0.1:4173` and the token from
-`~/.ferro-mcp/bridge-token`, and choose **Connect this tab**. The service writes
-that token to a private file; it never prints it. Keep Chrome and the tab open.
-Disconnect before pairing a different tab. Chrome restart requires pairing again.
+Ferro checks and attaches its page receiver when you pair, including tabs opened
+before installation. If Chrome denies attachment, click Ferro on that website
+tab and reconnect, or refresh the tab. Open the side panel's Settings on the
+website tab you want to use, enter the service URL and the token from
+`~/.ferro-mcp/bridge-token`, and choose **Connect current tab**. Connecting a
+different tab releases the prior pairing first; only one tab is controlled at a
+time. The token stays in Chrome's session storage, so pair again after Chrome
+restarts. Pairing replaces the previous tab when its poll has ended; if an
+action reply is still pending, the server rejects the switch and the panel shows
+the response. Wait for the action to finish, then retry. The service writes the
+token to a private file and never prints it.
 
 Configure a local MCP client to run the same binary with
 `FERRO_MCP_BACKEND=extension` and the same `FERRO_MCP_HOME`. It will relay to the
@@ -468,9 +487,10 @@ Two rules for contributors, both recorded in `docs/adr/`:
 
 ## Limitations
 
-- Element targeting resolves refs to CSS selectors by signature. Identical
-  elements under different headings can collide; the repairer and the
-  resolution cache mitigate this but do not eliminate it.
+- The `cdp` backend resolves refs to CSS selectors by signature. The extension
+  backend uses a unique DOM path and checks the live tag, role, accessible name,
+  text and link path against the snapshot before acting; a stale target is
+  rejected and can be repaired from a fresh snapshot.
 - The snapshot is text only. Canvas-heavy or image-driven pages are out of
   scope for now.
 - No anti-bot evasion beyond standard launch flags.
