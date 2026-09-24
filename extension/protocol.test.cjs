@@ -202,17 +202,20 @@ test('popup status distinguishes live and stale pairing without revealing the to
   assert.equal(live.connected,true);
 });
 
-test('startup repairs disabled panel overrides without changing pairing', async () => {
-  const {context}=worker();
-  const options=[];
-  let behavior;
-  context.chrome.sidePanel={setOptions:async value=>options.push(value),setPanelBehavior:async value=>{behavior=value;}};
-  context.chrome.tabs.query=async()=>[{id:42},{id:43}];
-  context.chrome.storage.session.set=async()=>{throw new Error('Panel recovery must not change pairing');};
-  await vm.runInContext('restoreSidePanelAccess()',context);
-  assert.equal(behavior.openPanelOnActionClick,true);
-  assert.deepEqual(options.map(x=>x.tabId),[undefined,42,43]);
-  assert.ok(options.every(x=>x.enabled && x.path==='sidepanel.html'));
+test('only the paired tab gets a panel; other tabs retain the connection popup', async () => {
+ const {context}=worker();await vm.runInContext('panelUpdate',context);
+ const options=[],popups=[];let behavior;
+ context.chrome.sidePanel={setOptions:async value=>options.push(value),setPanelBehavior:async value=>{behavior=value;}};
+ context.chrome.action={setPopup:async value=>popups.push(value)};
+ context.chrome.tabs.query=async()=>[{id:42},{id:43}];
+ context.chrome.storage.session.get=async()=>({connection:{tabId:42}});
+ await vm.runInContext('restoreSidePanelAccess()',context);
+ assert.equal(behavior.openPanelOnActionClick,true);
+ assert.deepEqual(options.map(x=>[x.tabId,x.enabled]),[[undefined,false],[42,true],[43,false]]);
+ assert.deepEqual(popups.map(x=>[x.tabId,x.popup]),[[42,''],[43,'popup.html']]);
+ options.length=0;context.chrome.storage.session.get=async()=>({});
+ await vm.runInContext('restoreSidePanelAccess()',context);
+ assert.ok(options.every(x=>!x.enabled));
 });
 
 for (const busy of [false,true]) test(`lost Chrome pairing state: connect recovers only when idle (busy=${busy})`,async()=>{
@@ -246,15 +249,12 @@ test('lost local pairing asks for confirmation before releasing service pairing'
  assert.equal(response.requiresConfirmation,true);assert.deepEqual(routes,['/chat/status']);
 });
 
-test('disconnect closes the panel without disabling toolbar access',async()=>{
- const {context}=worker();const calls=[];
- context.chrome.sidePanel={close:async value=>calls.push(['close',value.tabId]),setOptions:async()=>{throw new Error('Must not disable panel');}};
- await vm.runInContext('closeDisconnectedPanel(41)',context);
- assert.deepEqual(calls,[['close',41]]);
-});
-test('older Chrome fallback restores availability after hiding a panel',async()=>{
- const {context}=worker();const calls=[];
- context.chrome.sidePanel={setOptions:async value=>calls.push(value.enabled)};
- await vm.runInContext('closeDisconnectedPanel(41)',context);
- assert.deepEqual(calls,[false,true]);
+test('trusted popup switch reuses the stored token without returning it',async()=>{
+ const previous={base:'http://127.0.0.1:4175',token:'saved-token',tabId:41};let stored=previous;const auth=[];
+ const {context,listeners}=worker({fetch:async(url,opts)=>{auth.push(opts.headers.Authorization);return {ok:true,status:204};}});
+ context.ensureContentReady=async()=>{};context.startPolling=()=>{};
+ context.chrome.storage.session.get=async()=>({connection:stored});context.chrome.storage.session.set=async v=>{stored=v.connection};
+ const response=await new Promise(resolve=>listeners[0]({type:'ferro-connect',connection:{base:previous.base,tabId:42},confirmDisconnectTab:'41'},{id:'test-extension',url:'chrome-extension://test-extension/popup.html'},resolve));
+ assert.equal(response.ok,true);assert.equal(stored.token,'saved-token');assert.equal(stored.tabId,42);
+ assert.ok(auth.every(x=>x==='Bearer saved-token'));assert.equal(JSON.stringify(response).includes('saved-token'),false);
 });

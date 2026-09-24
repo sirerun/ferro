@@ -348,7 +348,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (activeAction) throw new Error('A browser action is still running. Stop it before reconnecting.');
         // Pairing may only be requested by our own popup or panel, never page content.
         if (sender.id !== chrome.runtime.id || ![chrome.runtime.getURL('popup.html'), chrome.runtime.getURL('sidepanel.html')].includes(sender.url)) throw new Error('pair using the extension popup or side panel');
-        const c = message.connection;
+        const c = {...message.connection};
+        if (!c.token) {
+          const stored = await chrome.storage.session.get(['connection','bridgeCredentials']);
+          const saved = stored.connection || stored.bridgeCredentials;
+          if (saved?.base === c.base) c.token = saved.token;
+        }
+        if (!c.token) throw new Error('Enter the pairing token once to connect this Chrome session.');
         if (!/^http:\/\/(127\.0\.0\.1|localhost):[0-9]+$/.test(c.base)) throw new Error('use a local bridge URL');
         if (!Number.isInteger(c.tabId) || c.tabId < 0) throw new Error('Choose a website tab to connect.');
         await ensureContentReady(c.tabId);
@@ -369,9 +375,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         if (previous && previous.base === c.base && previous.token === c.token && previous.tabId === c.tabId) {
           if (!hadLocalConnection) {
-            await chrome.storage.session.set({connection:c});
+            await chrome.storage.session.set({connection:c,bridgeCredentials:{base:c.base,token:c.token}});
             startPolling();
           }
+          await restoreSidePanelAccess();
           sendResponse({ ok: true });
           return;
         }
@@ -400,13 +407,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           const retry = response.status === 409 ? ' Retry after the previous tab’s action or poll has stopped.' : '';
           throw new Error(`Pairing failed: ${detail || `HTTP ${response.status}`}.${retry}`);
         }
-        await chrome.storage.session.set({ connection: c });
+        await chrome.storage.session.set({ connection: c, bridgeCredentials:{base:c.base,token:c.token} });
         restartPreviousPoll = false;
         lastPollSuccessAt = Date.now();
         lastPollError = "";
         startPolling();
+        await restoreSidePanelAccess();
         sendResponse({ ok: true });
-        if (previous && previous.tabId !== c.tabId) void closeDisconnectedPanel(previous.tabId);
       } catch (error) {
         let message = error.message;
         if (restartPreviousPoll) {
@@ -432,13 +439,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     (async () => {
       if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) { sendResponse({error:'read status using the popup'}); return; }
       const c = await getConnection();
+      const {bridgeCredentials} = await chrome.storage.session.get('bridgeCredentials');
       sendResponse(c ? {
         configured: true,
         connected: !lastPollError && Date.now() - lastPollSuccessAt < 45000,
         base: c.base,
         tabId: c.tabId,
         transportError: lastPollError,
-      } : { configured: false, connected: false });
+      } : { configured: false, connected: false, base:bridgeCredentials?.base, credentialsAvailable:!!bridgeCredentials });
     })();
     return true;
   }
@@ -467,8 +475,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         warning = `The bridge could not confirm disconnect: ${error.message}`;
       }
       await chrome.storage.session.remove('connection');
+      await restoreSidePanelAccess();
       sendResponse({ ok:true, warning });
-      if (c) void closeDisconnectedPanel(c.tabId);
     })();
     return true;
   }
@@ -505,44 +513,29 @@ chrome.storage.session.get('connection').then(({ connection }) => {
   if (connection) startPolling();
 });
 
-// Panel visibility is independent of browser-task pairing. Older local builds
-// disabled the panel per tab during handoff; repair those overrides on startup.
-async function restoreSidePanelAccess() {
-  if (!chrome.sidePanel) return;
-  await chrome.sidePanel.setOptions({path:'sidepanel.html', enabled:true});
-  await chrome.sidePanel.setPanelBehavior({openPanelOnActionClick:true});
-  const tabs = await chrome.tabs.query({});
-  await Promise.all(tabs.filter(tab => Number.isInteger(tab.id)).map(async tab => {
-    try {
-      await chrome.sidePanel.setOptions({tabId:tab.id, path:'sidepanel.html', enabled:true});
-    } catch (error) {
-      // A tab may close between the query and this call.
-      console.warn('Could not restore Ferro panel for tab', tab.id, error);
-    }
-  }));
+// Serialize visibility updates and read the latest pairing inside the queue.
+// A worker restart must never re-enable panels on unrelated tabs.
+let panelUpdate = Promise.resolve();
+function restoreSidePanelAccess() {
+  panelUpdate = panelUpdate.catch(() => {}).then(async () => {
+    if (!chrome.sidePanel) return;
+    const connection = await getConnection();
+    await chrome.sidePanel.setOptions({path:'sidepanel.html', enabled:false});
+    await chrome.sidePanel.setPanelBehavior({openPanelOnActionClick:true});
+    const tabs = await chrome.tabs.query({});
+    await Promise.all(tabs.filter(tab => Number.isInteger(tab.id)).map(async tab => {
+      const paired = tab.id === connection?.tabId;
+      try {
+        await chrome.sidePanel.setOptions({tabId:tab.id, path:'sidepanel.html', enabled:paired});
+        await chrome.action?.setPopup({tabId:tab.id, popup:paired ? '' : 'popup.html'});
+      } catch (error) {
+        console.warn('Could not update Ferro panel for tab', tab.id, error);
+      }
+    }));
+  });
+  return panelUpdate;
 }
 void restoreSidePanelAccess().catch(error => console.error('Could not initialize Ferro side panel', error));
-
-// Closing the UI must not disable Chrome's built-in toolbar entry point.
-async function closeDisconnectedPanel(tabId) {
-  if (!chrome.sidePanel) return;
-  try {
-    if (chrome.sidePanel.close) {
-      try {
-        await chrome.sidePanel.close({tabId});
-        return;
-      } catch (_) {
-        // A global panel or a closed tab may not have a tab-specific panel.
-      }
-    }
-    // Chrome <141 has no close API. Hide this tab's panel temporarily, then
-    // restore availability so its next toolbar click can open it normally.
-    try {
-      await chrome.sidePanel.setOptions({tabId, path:'sidepanel.html', enabled:false});
-    } finally {
-      await chrome.sidePanel.setOptions({tabId, path:'sidepanel.html', enabled:true});
-    }
-  } catch (error) {
-    console.warn('Could not close disconnected Ferro panel', error);
-  }
-}
+chrome.storage.onChanged?.addListener((changes, area) => {
+  if (area === 'session' && changes.connection) void restoreSidePanelAccess().catch(console.error);
+});

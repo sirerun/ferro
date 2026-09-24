@@ -10,6 +10,8 @@ const status = document.getElementById('status');
 const toggle = document.getElementById('connection-toggle');
 const baseInput = document.getElementById('base');
 const tokenInput = document.getElementById('token');
+const openChat = document.getElementById('open-chat');
+let activeTab = null;
 let connection = null;
 let actionError = '';
 let pending = false;
@@ -23,18 +25,21 @@ async function refreshStatus() {
     if (request !== statusRequest) return;
     if (!response || response.error) throw new Error(response?.error || 'Could not read Ferro status.');
     connection = response;
+    activeTab = tab;
+    openChat.hidden = !response.configured || tab?.id !== response.tabId;
     if (response.configured) {
       baseInput.value = response.base;
       baseInput.disabled = true;
       tokenInput.disabled = true;
-      toggle.textContent = 'Disconnect';
+      toggle.textContent = tab?.id === response.tabId ? 'Disconnect' : 'Connect this tab';
       const tabLabel = tab?.id === response.tabId ? 'this tab' : 'another tab';
       status.textContent = response.connected
         ? `Connected to ${tabLabel} through ${response.base}.`
         : `Trying to reconnect to ${tabLabel} through ${response.base}. ${response.transportError || 'The bridge has not answered recently.'} Disconnect to change the bridge URL.`;
     } else {
-      baseInput.disabled = false;
-      tokenInput.disabled = false;
+      if (response.base) baseInput.value = response.base;
+      baseInput.disabled = !!response.credentialsAvailable;
+      tokenInput.disabled = !!response.credentialsAvailable;
       toggle.textContent = 'Connect this tab';
       status.textContent = 'Disconnected. Open the tab you want Ferro to use, then connect it.';
     }
@@ -55,22 +60,22 @@ toggle.onclick = async () => {
   toggle.disabled = true;
   actionError = '';
   try {
-    if (connection?.configured) {
+    const [tab] = await chrome.tabs.query({ active:true, currentWindow:true });
+    if (connection?.configured && connection.tabId === tab?.id) {
       const response = await chrome.runtime.sendMessage({ type: 'ferro-disconnect' });
       if (!response || response.error) throw new Error(response?.error || 'Disconnect failed.');
       tokenInput.value = '';
       if (response.warning) actionError = `Disconnected locally. ${response.warning}`;
     } else {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       if (!tab || !/^https?:\/\//.test(tab.url || '')) {
         throw new Error('Open the http(s) tab you want Ferro to drive first.');
       }
       const base = baseInput.value.trim().replace(/\/+$/, '');
-      const token = tokenInput.value.trim();
+      const token = connection?.configured || connection?.credentialsAvailable ? '' : tokenInput.value.trim();
       if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(base)) {
         throw new Error('Bridge URL must be http://127.0.0.1:<port>. Check ferro-mcp status for the port.');
       }
-      if (!token) throw new Error('Enter the pairing token from the local bridge-token file.');
+      if (!token && !connection?.configured && !connection?.credentialsAvailable) throw new Error('Enter the pairing token from the local bridge-token file.');
       let response = await chrome.runtime.sendMessage({
         type: 'ferro-connect', connection: { base, token, tabId: tab.id },
       });
@@ -80,6 +85,8 @@ toggle.onclick = async () => {
         if (response?.requiresConfirmation) throw new Error('The paired tab changed. Connect again to confirm.');
       }
       if (!response || response.error) throw new Error(response?.error || 'Connect failed.');
+      tokenInput.value = '';
+      actionError = 'Connected. Click Open chat to continue.';
     }
   } catch (error) {
     actionError = error.message || String(error);
@@ -87,6 +94,12 @@ toggle.onclick = async () => {
     pending = false;
     await refreshStatus();
   }
+};
+
+openChat.onclick = () => {
+  if (activeTab?.id !== connection?.tabId || !connection?.configured) return;
+  // Must be called directly from this click, before any async operation.
+  chrome.sidePanel.open({tabId:activeTab.id}).then(() => window.close()).catch(error => { status.textContent = error.message; });
 };
 
 refreshStatus();
