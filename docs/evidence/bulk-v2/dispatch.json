@@ -3,11 +3,11 @@
   "coordinator": "codex@ferro",
   "base_sha": "38516376385f33f17fccc6079f1e0de65a5c967e",
   "contract_sha": "ec3b05d2bbdf682abee7e11364f3864aea9c6700",
-  "updated_at": "2026-09-24T20:29:51.899904+00:00",
+  "updated_at": "2026-09-24T20:40:15.374937+00:00",
   "gate_state": {
     "G00": "accepted_with_G05_reconciliation",
     "G01": "accepted",
-    "G02": "not_started",
+    "G02": "coordinator_design_and_integration_in_progress",
     "G03": "not_started"
   },
   "sessions": [
@@ -90,7 +90,7 @@
       ]
     }
   ],
-  "next_action": "Merge reviewed foundation PR16. Then dispatch L06 and L08 against revision2 CONTRACT_SHA, complete G02 composition, L09 fixtures and L10 documentation, and qualify G03 before installation or live use.",
+  "next_action": "Finish L06/L08, integrate G02 and qualify usable local runtime; assess separate private hosted pilot without duplicating AMSL auth/user/billing.",
   "verification": {
     "command": "GOWORK=off FERRO_TEST_BROWSER=1 go test -race ./...; GOWORK=off go vet ./...; python3 docs/contracts/check_bulk_v2.py; python3 docs/contracts/check_bulk_lock.py",
     "core": "passed",
@@ -171,13 +171,15 @@
     },
     {
       "id": "L06",
-      "state": "queued",
+      "state": "running",
       "model": "gpt-6-luna",
-      "base_sha": "ec3b05d2bbdf682abee7e11364f3864aea9c6700",
+      "base_sha": "9ddb9c9685c9ac6fd32e3e5a1d36c53d1be6778b",
       "contract_sha": "ec3b05d2bbdf682abee7e11364f3864aea9c6700",
-      "branch": null,
-      "agent": null,
-      "implementation_contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed"
+      "branch": "codex/bulk-v2-l06-r2",
+      "agent": "/root/contract_final_fix",
+      "implementation_contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "worktree": "../ferro-bulk-v2-l06-r2",
+      "started_at": "2026-09-24T20:40:15.374937+00:00"
     },
     {
       "id": "L07",
@@ -195,13 +197,15 @@
     },
     {
       "id": "L08",
-      "state": "queued",
+      "state": "running",
       "model": "gpt-6-luna",
-      "base_sha": "ec3b05d2bbdf682abee7e11364f3864aea9c6700",
+      "base_sha": "9ddb9c9685c9ac6fd32e3e5a1d36c53d1be6778b",
       "contract_sha": "ec3b05d2bbdf682abee7e11364f3864aea9c6700",
-      "branch": null,
-      "agent": null,
-      "implementation_contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed"
+      "branch": "codex/bulk-v2-l08-r2",
+      "agent": "/root/contract_review",
+      "implementation_contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+      "worktree": "../ferro-bulk-v2-l08-r2",
+      "started_at": "2026-09-24T20:40:15.374937+00:00"
     },
     {
       "id": "L09",
@@ -274,5 +278,44 @@
     ],
     "candidate_sha": "ec3b05d2bbdf682abee7e11364f3864aea9c6700"
   },
-  "previous_contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed"
+  "previous_contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
+  "reservations": [
+    {
+      "owner": "coordinator",
+      "task": "G02",
+      "paths": [
+        "internal/mcp/owner.go",
+        "internal/mcp/server.go",
+        "internal/mcp/task_runtime_v2.go",
+        "internal/mcp/task_runtime_v2_test.go",
+        "docs/**"
+      ],
+      "base_sha": "9ddb9c9",
+      "release": "reviewed integration"
+    },
+    {
+      "owner": "Luna core runtime",
+      "task": "G02 core",
+      "paths": [
+        "internal/core/runner.go",
+        "internal/core/repair.go",
+        "internal/core/task_execution_v2.go",
+        "internal/core/task_execution_v2_test.go"
+      ],
+      "release": "accepted cherry-pick"
+    },
+    {
+      "owner": "headless Luna private pilot",
+      "task": "private-hosted-pilot",
+      "paths": [
+        "internal/mcp/hosted.go",
+        "internal/mcp/hosted_test.go",
+        "cmd/ferro-cloud/**",
+        "extension/**",
+        "deploy/private-pilot/**"
+      ],
+      "base_sha": "9ddb9c9",
+      "release": "reviewed integration; no other composition roots"
+    }
+  ]
 }
