@@ -38,8 +38,10 @@ async function refreshStatus() {
         : `Trying to reconnect to ${tabLabel} through ${response.base}. ${response.transportError || 'The bridge has not answered recently.'} Disconnect to change the bridge URL.`;
     } else {
       if (response.base) baseInput.value = response.base;
-      baseInput.disabled = !!response.credentialsAvailable;
-      tokenInput.disabled = !!response.credentialsAvailable;
+      // Saved credentials are reused only when their bridge URL matches. Keep
+      // these editable so a user can replace an old URL or enter a new token.
+      baseInput.disabled = false;
+      tokenInput.disabled = false;
       toggle.textContent = 'Connect this tab';
       status.textContent = 'Disconnected. Open the tab you want Ferro to use, then connect it.';
     }
@@ -71,11 +73,12 @@ toggle.onclick = async () => {
         throw new Error('Open the http(s) tab you want Ferro to drive first.');
       }
       const base = baseInput.value.trim().replace(/\/+$/, '');
-      const token = connection?.configured || connection?.credentialsAvailable ? '' : tokenInput.value.trim();
+      const canReuseCredentials = !!(connection?.configured || connection?.credentialsAvailable) && connection.base === base;
+      const token = canReuseCredentials ? '' : tokenInput.value.trim();
       if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(base)) {
         throw new Error('Bridge URL must be http://127.0.0.1:<port>. Check ferro-mcp status for the port.');
       }
-      if (!token && !connection?.configured && !connection?.credentialsAvailable) throw new Error('Enter the pairing token from the local bridge-token file.');
+      if (!token && !canReuseCredentials) throw new Error('Enter the pairing token from the local bridge-token file.');
       let response = await chrome.runtime.sendMessage({
         type: 'ferro-connect', connection: { base, token, tabId: tab.id },
       });
@@ -86,7 +89,7 @@ toggle.onclick = async () => {
       }
       if (!response || response.error) throw new Error(response?.error || 'Connect failed.');
       tokenInput.value = '';
-      actionError = 'Connected. Click Open chat to continue.';
+      actionError = response.warning || 'Connected. Click Open chat to continue.';
     }
   } catch (error) {
     actionError = error.message || String(error);

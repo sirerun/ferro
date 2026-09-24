@@ -378,8 +378,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             await chrome.storage.session.set({connection:c,bridgeCredentials:{base:c.base,token:c.token}});
             startPolling();
           }
-          await restoreSidePanelAccess();
-          sendResponse({ ok: true });
+          let warning = '';
+          try { await restoreSidePanelAccess(); } catch (error) {
+            console.error('Could not update Ferro side panel after reconnect', error);
+            warning = `The browser connection succeeded, but the side panel could not be updated: ${error.message}`;
+          }
+          sendResponse({ ok: true, warning });
           return;
         }
         if (previous && message.confirmDisconnectTab !== String(previous.tabId)) {
@@ -412,8 +416,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         lastPollSuccessAt = Date.now();
         lastPollError = "";
         startPolling();
-        await restoreSidePanelAccess();
-        sendResponse({ ok: true });
+        let warning = '';
+        try { await restoreSidePanelAccess(); } catch (error) {
+          console.error('Could not update Ferro side panel after pairing', error);
+          warning = `The browser connection succeeded, but the side panel could not be updated: ${error.message}`;
+        }
+        sendResponse({ ok: true, warning });
       } catch (error) {
         let message = error.message;
         if (restartPreviousPoll) {
@@ -475,7 +483,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         warning = `The bridge could not confirm disconnect: ${error.message}`;
       }
       await chrome.storage.session.remove('connection');
-      await restoreSidePanelAccess();
+      try { await restoreSidePanelAccess(); } catch (error) {
+        console.error('Could not update Ferro side panel after disconnect', error);
+        warning = [warning, `The side panel could not be updated: ${error.message}`].filter(Boolean).join(' ');
+      }
       sendResponse({ ok:true, warning });
     })();
     return true;

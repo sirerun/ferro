@@ -66,6 +66,25 @@ test('stale pairing is visible and can still be disconnected', async () => {
   assert.equal(elements['connection-toggle'].textContent, 'Connect this tab');
 });
 
+test('disconnected saved credentials leave bridge fields editable', async () => {
+  const { elements } = popup({ configured: false, connected: false, base: 'http://127.0.0.1:4175', credentialsAvailable: true });
+  await settle();
+  assert.equal(elements.base.value, 'http://127.0.0.1:4175');
+  assert.equal(elements.base.disabled, false);
+  assert.equal(elements.token.disabled, false);
+});
+
+test('changing bridge URL uses the newly entered token', async () => {
+  const { elements, messages } = popup({ configured: false, connected: false, base: 'http://127.0.0.1:4175', credentialsAvailable: true });
+  await settle();
+  elements.base.value = 'http://127.0.0.1:4176';
+  elements.token.value = 'new-bridge-token';
+  await elements['connection-toggle'].onclick();
+  const connect = messages.find(message => message.type === 'ferro-connect');
+  assert.equal(connect.connection.base, 'http://127.0.0.1:4176');
+  assert.equal(connect.connection.token, 'new-bridge-token');
+});
+
 test('disconnected button pairs the active tab with the entered bridge', async () => {
   const { elements, messages } = popup({ configured: false, connected: false });
   await settle();
