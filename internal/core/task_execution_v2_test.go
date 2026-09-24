@@ -307,3 +307,24 @@ func TestFreshReplayOnlyDoesNotCacheLiteralDoneData(t *testing.T) {
 		t.Fatalf("second=%v metrics=%+v calls=%d err=%v", second, metrics, llm.calls, err)
 	}
 }
+
+func TestRunnerPreservesProviderDeadlineFromRepair(t *testing.T) {
+	driver := &driverFixture{fail: errors.New("element vanished")}
+	provider := &metadataClientSpyV2{err: fmt.Errorf("provider-private-detail: %w", context.DeadlineExceeded)}
+	client, err := NewBudgetedClientV2(provider, &budgetSpyV2{}, DefaultLimitsV2())
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := &Runner{LLM: client, Executor: NewExecutor(WaitStrategy{}).WithDriver(driver), MaxRepairs: 2}
+	plan := &Plan{Steps: []Action{{Kind: KindFill, Ref: 1, Text: "x"}, {Kind: KindDone, Result: "ok"}}}
+	_, _, runErr := r.executeWithRepairs(context.Background(), context.Background(), plan, &Snapshot{URL: "https://fixture.test", Elements: []Element{{Ref: 1, Tag: "input", Name: "q"}}}, 20, nil)
+	if runErr == nil || !errors.Is(runErr.Err, context.DeadlineExceeded) {
+		t.Fatalf("provider deadline classification lost: runErr=%v", runErr)
+	}
+	if provider.calls != 1 || driver.fills != 1 {
+		t.Fatalf("terminal provider deadline caused retry: provider calls=%d browser fills=%d", provider.calls, driver.fills)
+	}
+	if strings.Contains(runErr.Error(), "provider-private-detail") {
+		t.Fatalf("provider detail leaked: %v", runErr)
+	}
+}
