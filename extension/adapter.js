@@ -61,6 +61,42 @@
   const visible = (el) =>
     !!el && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden';
 
+  function toWellFormed(value) {
+    const text = String(value);
+    if (typeof text.toWellFormed === 'function') return text.toWellFormed();
+    let result = '';
+    for (let i = 0; i < text.length; i++) {
+      const code = text.charCodeAt(i);
+      if (code >= 0xd800 && code <= 0xdbff) {
+        const next = text.charCodeAt(i + 1);
+        if (next >= 0xdc00 && next <= 0xdfff) result += text[i] + text[++i];
+        else result += '\ufffd';
+      } else if (code >= 0xdc00 && code <= 0xdfff) result += '\ufffd';
+      else result += text[i];
+    }
+    return result;
+  }
+
+  function truncateSnapshotText(value, ellipsis = false) {
+    let text = toWellFormed(value);
+    if (text.length > 80) text = text.slice(0, 80) + (ellipsis ? '…' : '');
+    return toWellFormed(text);
+  }
+
+  function snapshotName(el) {
+    let name = el.getAttribute('aria-label') || el.getAttribute('placeholder') || '';
+    if (!name && ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName) && el.id) {
+      const label = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
+      if (label) name = label.innerText.trim();
+    }
+    return truncateSnapshotText(name);
+  }
+
+  function snapshotText(el) {
+    const heading = /^H[1-4]$/.test(el.tagName);
+    return truncateSnapshotText(heading ? el.innerText : (el.innerText || '').trim(), true);
+  }
+
   // ---------------------------------------------------------------------
   // takeSnapshot: faithful port of internal/core/snapshot.go's snapshotJS
   // (the DOM walk) plus TakeSnapshot's Go-side ref-numbering/truncation.
@@ -113,17 +149,10 @@
       // sticky headers).
       if (rect.bottom < -50 || rect.top > innerHeight + 50) continue;
 
-      // accessible name: label[for], aria-label, placeholder, innerText --
-      // first hit wins.
-      let name = el.getAttribute('aria-label') || el.getAttribute('placeholder') || '';
-      if (!name && (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA')) {
-        if (el.id) {
-          const lbl = document.querySelector('label[for="' + CSS.escape(el.id) + '"]');
-          if (lbl) name = lbl.innerText.trim();
-        }
-      }
-      let text = isHeading ? el.innerText : (el.innerText || '').trim();
-      if (text.length > 80) text = text.slice(0, 80) + '…';
+      // accessible name and compact text use the same normalization as the
+      // execution-time signature check in mustFind().
+      const name = snapshotName(el);
+      const text = snapshotText(el);
       if (!name && !text && !el.getAttribute('aria-labelledby')) continue; // unlabeled, skip
 
       let href = '';
@@ -134,7 +163,7 @@
       const item = {
         tag: tag.toLowerCase(),
         role: role,
-        name: name.slice(0, 80),
+        name: name,
         text: text,
         href: href,
       };
@@ -249,12 +278,8 @@
     if (!el) throw new Error(`no element matches ${JSON.stringify(selector)}`);
     if (document.querySelectorAll(selector).length !== 1) throw new Error('ambiguous selector; refusing to choose an arbitrary element');
     if (expected) {
-      let name = el.getAttribute('aria-label') || el.getAttribute('placeholder') || '';
-      if (!name && ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName) && el.id) {
-        name = document.querySelector(`label[for="${CSS.escape(el.id)}"]`)?.innerText.trim() || '';
-      }
-      let text = /^H[1-4]$/.test(el.tagName) ? el.innerText : (el.innerText || '').trim();
-      if (text.length > 80) text = text.slice(0, 80) + '…';
+      const name = snapshotName(el);
+      const text = snapshotText(el);
       const href = el.tagName === 'A' && el.getAttribute('href') ? new URL(el.getAttribute('href'), location.href).pathname : '';
       if (el.tagName.toLowerCase() !== expected.tag ||
           (el.getAttribute('role') || '') !== (expected.role || '') ||

@@ -138,10 +138,18 @@ func (b *Bridge) handleNext(w http.ResponseWriter, r *http.Request) {
 			if generation != b.generation || b.pairedTab != tabID {
 				// A long poll from the previous tab may still be unwinding after
 				// disconnect. Preserve commands queued for the new generation.
+				requeued := false
 				if pa.generation == b.generation && b.pairedTab != "" {
-					b.queue <- pa
+					select {
+					case b.queue <- pa:
+						requeued = true
+					default:
+					}
 				}
 				b.mu.Unlock()
+				if !requeued {
+					b.deliver(pa.id, Reply{Code: "pairing_changed", Error: "pairing changed before dispatch"})
+				}
 				http.Error(w, "pairing changed", 409)
 				return
 			}

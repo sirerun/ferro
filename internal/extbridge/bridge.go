@@ -165,6 +165,9 @@ func (b *Bridge) pairExplicit(tabID string) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if b.pairedTab == tabID {
+		if len(b.waiting) > 0 {
+			return fmt.Errorf("tab %q has an action in progress; wait for it to finish before reconnecting", tabID)
+		}
 		b.resetPairingLocked()
 	}
 	return b.pairLocked(tabID)
@@ -175,8 +178,8 @@ func (b *Bridge) pairLocked(tabID string) error {
 	// If the old extension no longer has a live poll, replace it immediately.
 	// Otherwise preserve the active pairing until it disconnects.
 	if b.pairedTab != "" && b.pairedTab != tabID {
-		if b.activePolls[b.pairedTab] > 0 {
-			return fmt.Errorf("tab %q is already paired; disconnect it or wait for its poll to stop", b.pairedTab)
+		if b.activePolls[b.pairedTab] > 0 || len(b.waiting) > 0 {
+			return fmt.Errorf("tab %q is already paired; disconnect it or wait for its current action or poll to stop", b.pairedTab)
 		}
 		b.resetPairingLocked()
 	} else if b.pairedTab != "" && b.activePolls[b.pairedTab] == 0 && time.Since(b.lastSeen) >= 45*time.Second {

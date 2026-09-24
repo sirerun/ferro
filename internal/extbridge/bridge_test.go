@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -60,6 +61,105 @@ func TestPairExplicitRefreshesSameTabGeneration(t *testing.T) {
 	}
 }
 
+func TestPairExplicitDoesNotResetInFlightAction(t *testing.T) {
+	b, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.pair("tab-1"); err != nil {
+		t.Fatal(err)
+	}
+	b.mu.Lock()
+	b.waiting["active"] = make(chan Reply, 1)
+	oldGeneration := b.generation
+	b.mu.Unlock()
+	if err := b.pairExplicit("tab-1"); err == nil {
+		t.Fatal("explicit reconnect reset an in-flight action")
+	}
+	if got := b.Generation(); got != oldGeneration {
+		t.Fatalf("generation = %d, want unchanged %d", got, oldGeneration)
+	}
+}
+
+func TestPairDoesNotTakeOverWhileActionIsWaiting(t *testing.T) {
+	b, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.pair("old-tab"); err != nil {
+		t.Fatal(err)
+	}
+	b.mu.Lock()
+	b.waiting["active"] = make(chan Reply, 1)
+	b.mu.Unlock()
+	if err := b.pair("new-tab"); err == nil {
+		t.Fatal("pair replaced a tab with an action still in progress")
+	}
+	if got := b.PairedTab(); got != "old-tab" {
+		t.Fatalf("paired tab = %q, want old-tab", got)
+	}
+}
+
+func TestOldPollRequeuesNewGenerationCommand(t *testing.T) {
+	b, err := New(WithToken("test-token"), WithPollTimeout(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.pairExplicit("old-tab"); err != nil {
+		t.Fatal(err)
+	}
+	oldReq := httptest.NewRequest(http.MethodGet, "http://ferro/next", nil)
+	oldReq.Header.Set("Authorization", "Bearer test-token")
+	oldReq.Header.Set(TabIDHeader, "old-tab")
+	oldRec := httptest.NewRecorder()
+	oldDone := make(chan struct{})
+	go func() { b.handleNext(oldRec, oldReq); close(oldDone) }()
+	deadline := time.Now().Add(time.Second)
+	for {
+		b.mu.Lock()
+		polling := b.activePolls["old-tab"] > 0
+		b.mu.Unlock()
+		if polling {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("old poll did not start")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	disconnectReq := httptest.NewRequest(http.MethodPost, "http://ferro/disconnect", nil)
+	disconnectReq.Header.Set("Authorization", "Bearer test-token")
+	disconnectReq.Header.Set(TabIDHeader, "old-tab")
+	b.handleDisconnect(httptest.NewRecorder(), disconnectReq)
+	if err := b.pairExplicit("new-tab"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	enqueued := make(chan error, 1)
+	go func() {
+		_, err := b.Enqueue(ctx, Command{Op: "click", Selector: "#new"})
+		enqueued <- err
+	}()
+	select {
+	case <-oldDone:
+	case <-time.After(time.Second):
+		t.Fatal("old poll did not stop after pairing changed")
+	}
+	if oldRec.Code != http.StatusConflict {
+		t.Fatalf("old poll status = %d, want 409", oldRec.Code)
+	}
+	newReq := httptest.NewRequest(http.MethodGet, "http://ferro/next", nil)
+	newReq.Header.Set("Authorization", "Bearer test-token")
+	newReq.Header.Set(TabIDHeader, "new-tab")
+	newRec := httptest.NewRecorder()
+	b.handleNext(newRec, newReq)
+	if newRec.Code != http.StatusOK {
+		t.Fatalf("new poll status = %d, want 200; body=%s", newRec.Code, newRec.Body.String())
+	}
+	cancel()
+	<-enqueued
+}
+
 func TestPair_SecondDifferentTabRejected(t *testing.T) {
 	b, err := New()
 	if err != nil {
@@ -87,9 +187,7 @@ func TestPair_ReplacesStalePairing(t *testing.T) {
 	if err := b.pair("old-tab"); err != nil {
 		t.Fatal(err)
 	}
-	ch := make(chan Reply, 1)
 	b.mu.Lock()
-	b.waiting["pending"] = ch
 	b.lastSeen = time.Now().Add(-46 * time.Second)
 	oldGeneration := b.generation
 	b.mu.Unlock()
@@ -102,9 +200,6 @@ func TestPair_ReplacesStalePairing(t *testing.T) {
 	if b.generation != oldGeneration+1 {
 		t.Fatalf("generation = %d, want %d", b.generation, oldGeneration+1)
 	}
-	if got := <-ch; got.Code != "disconnected" {
-		t.Fatalf("pending call reply = %+v, want disconnected", got)
-	}
 }
 
 func TestPair_ReplacesInactivePairingImmediatelyAndDrainsQueue(t *testing.T) {
@@ -115,9 +210,7 @@ func TestPair_ReplacesInactivePairingImmediatelyAndDrainsQueue(t *testing.T) {
 	if err := b.pair("old-tab"); err != nil {
 		t.Fatal(err)
 	}
-	ch := make(chan Reply, 1)
 	b.mu.Lock()
-	b.waiting["queued"] = ch
 	b.queue <- &pendingAction{id: "queued", generation: b.generation}
 	oldGeneration := b.generation
 	b.mu.Unlock()
@@ -129,9 +222,6 @@ func TestPair_ReplacesInactivePairingImmediatelyAndDrainsQueue(t *testing.T) {
 	}
 	if b.generation != oldGeneration+1 {
 		t.Fatalf("generation = %d, want %d", b.generation, oldGeneration+1)
-	}
-	if got := <-ch; got.Code != "disconnected" {
-		t.Fatalf("pending call reply = %+v, want disconnected", got)
 	}
 	if got := len(b.queue); got != 0 {
 		t.Fatalf("queued stale actions = %d, want 0", got)

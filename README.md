@@ -378,8 +378,8 @@ website tab you want to use, enter the service URL and the token from
 different tab releases the prior pairing first; only one tab is controlled at a
 time. The token stays in Chrome's session storage, so pair again after Chrome
 restarts. Pairing replaces the previous tab when its poll has ended; if its poll
-is still shutting down, the panel shows that server response and asks you to
-retry. The service writes the token to a private file and never prints it.
+or action is still shutting down, the panel shows the server response and asks
+you to retry. The service writes the token to a private file and never prints it.
 
 Configure a local MCP client to run the same binary with
 `FERRO_MCP_BACKEND=extension` and the same `FERRO_MCP_HOME`. It will relay to the

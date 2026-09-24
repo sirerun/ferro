@@ -342,7 +342,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!Number.isInteger(c.tabId) || c.tabId < 0) throw new Error('Choose a website tab to connect.');
         await ensureContentReady(c.tabId);
         previous = await getConnection();
+        if (previous && previous.base === c.base && previous.token === c.token && previous.tabId === c.tabId) {
+          sendResponse({ ok: true });
+          return;
+        }
         if (previous) {
+          if (activeAction) throw new Error('A browser action is still running. Stop it before reconnecting.');
           stopPolling();
           restartPreviousPoll = true;
         }
@@ -359,7 +364,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const response = await fetch(`${c.base}/pair`, { method: 'POST', headers: { Authorization: `Bearer ${c.token}`, 'X-Ferro-Tab-Id': String(c.tabId) }, signal: AbortSignal.timeout(5000) });
         if (!response.ok) {
           const detail = (await response.text()).trim();
-          const retry = response.status === 409 ? ' Retry after the previous tab’s poll has stopped.' : '';
+          const retry = response.status === 409 ? ' Retry after the previous tab’s action or poll has stopped.' : '';
           throw new Error(`Pairing failed: ${detail || `HTTP ${response.status}`}.${retry}`);
         }
         await chrome.storage.session.set({ connection: c });

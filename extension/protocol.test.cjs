@@ -97,6 +97,21 @@ test('switching tabs releases the old pairing before pairing the new tab',async(
   assert.equal(started,1);
 });
 
+test('reconnecting the exact current tab does not interrupt a poll or action',async()=>{
+  const connection={base:'http://127.0.0.1:4173',token:'token',tabId:41};
+  const {context,listeners}=worker({fetch:async()=>{throw new Error('unexpected fetch')}});
+  context.chrome.storage.session.get=async()=>({connection});
+  context.ensureContentReady=async()=>{};
+  let stopped=0,started=0;
+  context.stopPolling=()=>{stopped++};
+  context.startPolling=()=>{started++};
+  const response=await new Promise(resolve=>listeners[0]({type:'ferro-connect',connection},{id:'test-extension',url:'chrome-extension://test-extension/sidepanel.html'},resolve));
+  assert.equal(response.ok,true);
+  assert.equal(response.error,undefined);
+  assert.equal(stopped,0);
+  assert.equal(started,0);
+});
+
 test('failed tab switch restores the previous pairing and resumes polling',async()=>{
   const previous={base:'http://127.0.0.1:4173',token:'old-token',tabId:41};
   let stored=previous;

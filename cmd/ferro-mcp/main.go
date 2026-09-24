@@ -135,6 +135,7 @@ func serve(daemon bool) error {
 			select {
 			case <-finished:
 			case <-leader.StopRequested():
+				cancel()
 				return nil
 			case <-ctx.Done():
 				return nil
