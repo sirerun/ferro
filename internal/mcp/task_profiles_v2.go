@@ -40,6 +40,9 @@ func NewProfileResolverV2(source ProfileSourceV2, credentials CredentialResolver
 }
 
 func (r *profileResolverV2) Resolve(ctx context.Context, name string) (ResolvedProfileV2, error) {
+	if err := ctx.Err(); err != nil {
+		return ResolvedProfileV2{}, err
+	}
 	if !validTaskIDV2(name) {
 		return ResolvedProfileV2{}, fmt.Errorf("invalid profile name")
 	}
@@ -47,6 +50,9 @@ func (r *profileResolverV2) Resolve(ctx context.Context, name string) (ResolvedP
 	if err != nil {
 		// The source may contain arbitrary private diagnostics. Never expose them.
 		return ResolvedProfileV2{}, fmt.Errorf("profile %q is unavailable", name)
+	}
+	if err := ctx.Err(); err != nil {
+		return ResolvedProfileV2{}, err
 	}
 	profile = cloneProfileV2(profile)
 	if profile.Name != name {
@@ -60,7 +66,7 @@ func (r *profileResolverV2) Resolve(ctx context.Context, name string) (ResolvedP
 	if strings.TrimSpace(profile.Model) == "" || profile.Model != strings.TrimSpace(profile.Model) {
 		return ResolvedProfileV2{}, fmt.Errorf("invalid profile configuration")
 	}
-	if !utf8Valid([]byte(profile.Model)) || !utf8Valid([]byte(profile.CredentialRef)) || profile.CredentialRef == "" {
+	if !utf8Valid([]byte(profile.Model)) || !utf8Valid([]byte(profile.CredentialRef)) {
 		return ResolvedProfileV2{}, fmt.Errorf("invalid profile configuration")
 	}
 	if err := profile.Limits.ValidateV2(); err != nil {
@@ -70,13 +76,19 @@ func (r *profileResolverV2) Resolve(ctx context.Context, name string) (ResolvedP
 	if err != nil || !isLowerSHA256V2(profile.Revision) || profile.Revision != wantRevision {
 		return ResolvedProfileV2{}, fmt.Errorf("invalid profile revision")
 	}
-	credential, err := r.credentials.ResolveCredential(ctx, profile.CredentialRef)
-	if err != nil {
-		// Credential store errors may contain the reference or secret.
-		return ResolvedProfileV2{}, fmt.Errorf("profile credential is unavailable")
-	}
-	if credential == "" {
-		return ResolvedProfileV2{}, fmt.Errorf("profile credential is unavailable")
+	credential := ""
+	if profile.CredentialRef != "" {
+		if err := ctx.Err(); err != nil {
+			return ResolvedProfileV2{}, err
+		}
+		credential, err = r.credentials.ResolveCredential(ctx, profile.CredentialRef)
+		if err != nil {
+			// Credential store errors may contain the reference or secret.
+			return ResolvedProfileV2{}, fmt.Errorf("profile credential is unavailable")
+		}
+		if credential == "" {
+			return ResolvedProfileV2{}, fmt.Errorf("profile credential is unavailable")
+		}
 	}
 	return ResolvedProfileV2{
 		Profile: cloneProfileV2(profile), Endpoint: profile.Endpoint,
@@ -91,7 +103,7 @@ func NewLegacyProfileV2(name, endpoint, model, credentialRef string, limits core
 		return ProfileV2{}, fmt.Errorf("unsupported legacy profile name")
 	}
 	normalizedEndpoint, err := normalizeProfileEndpointV2(endpoint)
-	if err != nil || strings.TrimSpace(model) == "" || model != strings.TrimSpace(model) || credentialRef == "" || !utf8Valid([]byte(model)) || !utf8Valid([]byte(credentialRef)) {
+	if err != nil || strings.TrimSpace(model) == "" || model != strings.TrimSpace(model) || !utf8Valid([]byte(model)) || !utf8Valid([]byte(credentialRef)) {
 		return ProfileV2{}, fmt.Errorf("invalid legacy profile configuration")
 	}
 	if err := limits.ValidateV2(); err != nil {

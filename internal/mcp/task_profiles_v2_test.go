@@ -122,6 +122,76 @@ func TestProfilesV2_LegacyMapping(t *testing.T) {
 	}
 }
 
+func TestProfilesV2_NoKeyLegacyProfile(t *testing.T) {
+	profile, err := NewLegacyProfileV2("legacy-mcp", "http://localhost:8080/v1", "local-model", "", core.DefaultLimitsV2())
+	if err != nil {
+		t.Fatal(err)
+	}
+	credentialCalls := 0
+	resolver, err := NewProfileResolverV2(profileSourceFuncV2(func(context.Context, string) (ProfileV2, error) {
+		return profile, nil
+	}), credentialResolverFuncV2(func(context.Context, string) (string, error) {
+		credentialCalls++
+		return "unexpected", nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := resolver.Resolve(context.Background(), "legacy-mcp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Credential != "" || resolved.Profile.CredentialRef != "" || credentialCalls != 0 {
+		t.Fatalf("no-key profile credential=%q ref=%q lookups=%d", resolved.Credential, resolved.Profile.CredentialRef, credentialCalls)
+	}
+}
+
+func TestProfilesV2_CanceledContextStopsLookup(t *testing.T) {
+	profile, err := NewLegacyProfileV2("legacy-mcp", "https://example.com", "model", "ref", core.DefaultLimitsV2())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceCalls, credentialCalls := 0, 0
+	resolver, err := NewProfileResolverV2(profileSourceFuncV2(func(context.Context, string) (ProfileV2, error) {
+		sourceCalls++
+		return profile, nil
+	}), credentialResolverFuncV2(func(context.Context, string) (string, error) {
+		credentialCalls++
+		return "secret", nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := resolver.Resolve(ctx, "legacy-mcp"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled context error=%v", err)
+	}
+	if sourceCalls != 0 || credentialCalls != 0 {
+		t.Fatalf("lookups with pre-canceled context: source=%d credential=%d", sourceCalls, credentialCalls)
+	}
+
+	ctx, cancel = context.WithCancel(context.Background())
+	defer cancel()
+	resolver, err = NewProfileResolverV2(profileSourceFuncV2(func(context.Context, string) (ProfileV2, error) {
+		sourceCalls++
+		cancel()
+		return profile, nil
+	}), credentialResolverFuncV2(func(context.Context, string) (string, error) {
+		credentialCalls++
+		return "secret", nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := resolver.Resolve(ctx, "legacy-mcp"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("context canceled by source error=%v", err)
+	}
+	if sourceCalls != 1 || credentialCalls != 0 {
+		t.Fatalf("lookups after source canceled context: source=%d credential=%d", sourceCalls, credentialCalls)
+	}
+}
+
 func TestProfilesV2_SecretRedaction(t *testing.T) {
 	secret := "private-token-value"
 	profile, err := NewLegacyProfileV2("legacy-mcp", "https://example.com", "model", "private-reference", core.DefaultLimitsV2())
