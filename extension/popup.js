@@ -7,33 +7,82 @@
  * is configured on the Go side (T12.1) and simply typed in here.
  */
 const status = document.getElementById('status');
+const toggle = document.getElementById('connection-toggle');
+const baseInput = document.getElementById('base');
+const tokenInput = document.getElementById('token');
+let connection = null;
+let actionError = '';
+let pending = false;
+let statusRequest = 0;
 
-document.getElementById('connect').onclick = async () => {
+async function refreshStatus() {
+  const request = ++statusRequest;
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab || !/^https?:\/\//.test(tab.url || '')) {
-      throw new Error('Open the http(s) tab you want ferro to drive first.');
+    const response = await chrome.runtime.sendMessage({ type: 'ferro-status' });
+    if (request !== statusRequest) return;
+    if (!response || response.error) throw new Error(response?.error || 'Could not read Ferro status.');
+    connection = response;
+    if (response.configured) {
+      baseInput.value = response.base;
+      baseInput.disabled = true;
+      tokenInput.disabled = true;
+      toggle.textContent = 'Disconnect';
+      const tabLabel = tab?.id === response.tabId ? 'this tab' : 'another tab';
+      status.textContent = response.connected
+        ? `Connected to ${tabLabel} through ${response.base}.`
+        : `Trying to reconnect to ${tabLabel} through ${response.base}. ${response.transportError || 'The bridge has not answered recently.'} Disconnect to change the bridge URL.`;
+    } else {
+      baseInput.disabled = false;
+      tokenInput.disabled = false;
+      toggle.textContent = 'Connect this tab';
+      status.textContent = 'Disconnected. Open the tab you want Ferro to use, then connect it.';
     }
-    const base = document.getElementById('base').value.trim().replace(/\/+$/, '');
-    const token = document.getElementById('token').value.trim();
-    if (!/^https?:\/\/127\.0\.0\.1(:\d+)?$|^https?:\/\/localhost(:\d+)?$/.test(base)) {
-      throw new Error('Bridge URL must be a loopback address (http://127.0.0.1:<port>).');
-    }
-    if (!token) throw new Error('Enter the pairing token the local bridge-token file.');
-
-    const response = await chrome.runtime.sendMessage({
-      type: 'ferro-connect',
-      connection: { base, token, tabId: tab.id },
-    });
-    if (!response || response.error) throw new Error(response?.error || 'connect failed');
-    status.textContent = `Connected to tab "${tab.title || tab.url}". Keep it open; a CAPTCHA or login page stops the task until you clear it and retry.`;
   } catch (error) {
-    status.textContent = error.message;
+    if (request !== statusRequest) return;
+    status.textContent = error.message || String(error);
+    toggle.textContent = 'Connection unavailable';
+    toggle.disabled = true;
+    return;
+  }
+  if (actionError) status.textContent = actionError + " " + status.textContent;
+  toggle.disabled = pending;
+}
+
+toggle.onclick = async () => {
+  if (pending) return;
+  pending = true;
+  toggle.disabled = true;
+  actionError = '';
+  try {
+    if (connection?.configured) {
+      const response = await chrome.runtime.sendMessage({ type: 'ferro-disconnect' });
+      if (!response || response.error) throw new Error(response?.error || 'Disconnect failed.');
+      tokenInput.value = '';
+      if (response.warning) actionError = `Disconnected locally. ${response.warning}`;
+    } else {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab || !/^https?:\/\//.test(tab.url || '')) {
+        throw new Error('Open the http(s) tab you want Ferro to drive first.');
+      }
+      const base = baseInput.value.trim().replace(/\/+$/, '');
+      const token = tokenInput.value.trim();
+      if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(base)) {
+        throw new Error('Bridge URL must be http://127.0.0.1:<port>. Check ferro-mcp status for the port.');
+      }
+      if (!token) throw new Error('Enter the pairing token from the local bridge-token file.');
+      const response = await chrome.runtime.sendMessage({
+        type: 'ferro-connect', connection: { base, token, tabId: tab.id },
+      });
+      if (!response || response.error) throw new Error(response?.error || 'Connect failed.');
+    }
+  } catch (error) {
+    actionError = error.message || String(error);
+  } finally {
+    pending = false;
+    await refreshStatus();
   }
 };
 
-document.getElementById('disconnect').onclick = async () => {
-  const response = await chrome.runtime.sendMessage({ type: 'ferro-disconnect' });
-  if (response?.error) { status.textContent = response.error; return; }
-  status.textContent = response?.warning ? `Disconnected locally. ${response.warning}` : 'Disconnected.';
-};
+refreshStatus();
+setInterval(refreshStatus, 2000);

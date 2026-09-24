@@ -185,3 +185,19 @@ test('reinjecting the content relay never duplicates command listeners',async()=
   await new Promise(resolve=>listeners[0]({type:'ferro-perform',action:{}},{},resolve));
   assert.equal(actions,1);
 });
+
+test('popup status distinguishes live and stale pairing without revealing the token', async()=>{
+  const connection={base:'http://127.0.0.1:4175',token:'private-token',tabId:42};
+  const {context,listeners}=worker();
+  context.testConnection=connection;
+  vm.runInContext('chrome.storage.session.get = async () => ({connection: testConnection})',context);
+  const sender={id:'test-extension',url:'chrome-extension://test-extension/popup.html'};
+  const ask=()=>new Promise(resolve=>listeners[0]({type:'ferro-status'},sender,resolve));
+  const stale=await ask();
+  assert.equal(stale.configured,true);
+  assert.equal(stale.connected,false);
+  assert.equal(JSON.stringify(stale).includes('private-token'),false);
+  vm.runInContext('lastPollSuccessAt = Date.now()',context);
+  const live=await ask();
+  assert.equal(live.connected,true);
+});

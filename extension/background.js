@@ -280,6 +280,8 @@ async function postReply(base, token, reply) {
 let loopGeneration = 0;
 let activeAction = null;
 let pendingPoll = null;
+let lastPollSuccessAt = 0;
+let lastPollError = "";
 
 async function pollLoop(myGeneration) {
   while (loopGeneration === myGeneration) {
@@ -291,6 +293,8 @@ async function pollLoop(myGeneration) {
     try {
       const next = await fetchNext(connection.base, connection.token, connection.tabId);
       if (loopGeneration !== myGeneration) return; // paired out from under us
+      lastPollSuccessAt = Date.now();
+      lastPollError = "";
       if (!next) continue;
       let reply;
       try {
@@ -306,6 +310,8 @@ async function pollLoop(myGeneration) {
         activeAction = null;
       }
     } catch (error) {
+      if (loopGeneration !== myGeneration) return;
+      lastPollError = error.message || String(error);
       // Transport failure (bridge not running, laptop asleep, network
       // hiccup) -- distinct from a "blocked" page: nothing gets POSTed
       // here because there is no request id to reply to. Back off and
@@ -324,6 +330,8 @@ function startPolling() {
 function stopPolling() {
   pendingPoll?.abort();
   loopGeneration++; // orphans any in-flight pollLoop invocation
+  lastPollSuccessAt = 0;
+  lastPollError = "";
 }
 
 // ---------------------------------------------------------------------
@@ -372,6 +380,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         await chrome.storage.session.set({ connection: c });
         restartPreviousPoll = false;
+        lastPollSuccessAt = Date.now();
+        lastPollError = "";
         startPolling();
         sendResponse({ ok: true });
       } catch (error) {
@@ -391,6 +401,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         }
         sendResponse({ error: message });
       }
+    })();
+    return true;
+  }
+
+  if (message.type === 'ferro-status') {
+    (async () => {
+      if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html')) { sendResponse({error:'read status using the popup'}); return; }
+      const c = await getConnection();
+      sendResponse(c ? {
+        configured: true,
+        connected: !lastPollError && Date.now() - lastPollSuccessAt < 45000,
+        base: c.base,
+        tabId: c.tabId,
+        transportError: lastPollError,
+      } : { configured: false, connected: false });
     })();
     return true;
   }
