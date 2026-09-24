@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestPrepareCredentialCopiesPrivateTokenFile(t *testing.T) {
@@ -199,5 +200,27 @@ func TestPrepareCredentialValuePersistsPrivateValueAndRejectsConflict(t *testing
 	}
 	if err := prepareCredentialInput("", "0123456789abcdef0123456789abcde\n", filepath.Join(dir, "newline")); err == nil {
 		t.Fatal("newline token value was accepted")
+	}
+}
+
+func TestHostedRequestDeadlineIncludesQueueButExemptsEventStream(t *testing.T) {
+	for _, tc := range []struct {
+		method, path string
+		bounded      bool
+	}{
+		{"POST", "/mcp", true}, {"POST", "/bridge/chat/run", true}, {"GET", "/bridge/next", true}, {"GET", "/mcp", false},
+	} {
+		t.Run(tc.method+tc.path, func(t *testing.T) {
+			h := boundHostedRequests(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+				deadline, ok := r.Context().Deadline()
+				if ok != tc.bounded {
+					t.Fatalf("bounded=%v want=%v", ok, tc.bounded)
+				}
+				if ok && (time.Until(deadline) > 50*time.Second || time.Until(deadline) < 49*time.Second) {
+					t.Fatal("unexpected deadline")
+				}
+			}))
+			h.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(tc.method, "http://ferro.sire.run"+tc.path, nil))
+		})
 	}
 }

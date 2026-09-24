@@ -94,6 +94,7 @@ func run() (runErr error) {
 	cfg.Backend = "extension"
 	cfg.BridgeAddr = "127.0.0.1:0"
 	cfg.Remote = false
+	cfg.BlockTimeout = 45 * time.Second
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	owner, err := fmcp.NewOwner(ctx, cfg)
@@ -110,7 +111,23 @@ func run() (runErr error) {
 	if err != nil {
 		return err
 	}
-	server := &http.Server{Addr: listenAddr, Handler: trustedProxyHTTPS(handler, trustedProxies), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
+	var publicHandler http.Handler = trustedProxyHTTPS(handler, trustedProxies)
+	var lifecycleErr <-chan error
+	if serviceARN := os.Getenv("FERRO_CLOUD_ECS_SERVICE_ARN"); serviceARN != "" {
+		controller, err := newECSIdleController(ctx, serviceARN, os.Getenv("AWS_REGION"), os.Getenv("ECS_AGENT_URI"))
+		if err != nil {
+			return fmt.Errorf("configure container lifecycle: %w", err)
+		}
+		lifecycle, err := fmcp.NewHostedLifecycle(owner, publicHandler, controller, fmcp.HostedLifecycleOptions{})
+		if err != nil {
+			return fmt.Errorf("configure idle lifecycle: %w", err)
+		}
+		publicHandler = lifecycle.Handler()
+		done := make(chan error, 1)
+		lifecycleErr = done
+		go func() { done <- lifecycle.Run(ctx) }()
+	}
+	server := &http.Server{Addr: listenAddr, Handler: boundHostedRequests(publicHandler), ReadTimeout: 10 * time.Second, ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10}
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- server.ListenAndServe() }()
 	log.Printf("ferro-cloud: private pilot listening behind HTTPS proxy on %s", listenAddr)
@@ -123,6 +140,15 @@ func run() (runErr error) {
 			return fmt.Errorf("shutdown hosted server: %w", err)
 		}
 		return nil
+	case err := <-lifecycleErr:
+		stop()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		shutdownErr := server.Shutdown(shutdownCtx)
+		if shutdownErr != nil {
+			_ = server.Close()
+		}
+		return errors.Join(err, shutdownErr)
 	case err := <-serveErr:
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
@@ -361,4 +387,19 @@ func requestHostIsIP(hostport string) bool {
 	}
 	ip, err := netip.ParseAddr(host)
 	return err == nil && ip.Zone() == ""
+}
+
+// ALB has a shared 60-second idle timeout. Bound queued requests as well as
+// active execution, leaving time for durable finalization and the response.
+// MCP's optional GET event stream carries no executing browser task.
+func boundHostedRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/mcp" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), 50*time.Second)
+		defer cancel()
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }

@@ -156,7 +156,13 @@ func (o *Owner) resolveTaskProfileV2(ctx context.Context, name string) (Resolved
 	if m.APIKey != "" {
 		ref = "configured-key"
 	}
-	p, err := NewLegacyProfileV2(name, m.BaseURL, m.Model, ref, core.DefaultLimitsV2())
+	limits := core.DefaultLimitsV2()
+	// A deployment's transport deadline also bounds the published execution
+	// profile, so receipts and profile revisions describe the real ceiling.
+	if o.cfg.BlockTimeout > 0 && o.cfg.BlockTimeout.Milliseconds() < limits.RuntimeMS {
+		limits.RuntimeMS = o.cfg.BlockTimeout.Milliseconds()
+	}
+	p, err := NewLegacyProfileV2(name, m.BaseURL, m.Model, ref, limits)
 	if err != nil {
 		return ResolvedProfileV2{}, fmt.Errorf("profile unavailable; configure the model first")
 	}
