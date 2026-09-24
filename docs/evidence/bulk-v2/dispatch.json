@@ -3,7 +3,7 @@
   "coordinator": "codex@ferro",
   "base_sha": "38516376385f33f17fccc6079f1e0de65a5c967e",
   "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
-  "updated_at": "2026-09-24T18:51:22.347459+00:00",
+  "updated_at": "2026-09-24T19:43:05.810332+00:00",
   "gate_state": {
     "G00": "accepted_with_G05_reconciliation",
     "G01": "accepted",
@@ -90,20 +90,22 @@
       ]
     }
   ],
-  "next_action": "Review L03 correction, L04 policy and L07 receipts; dispatch remaining packets against frozen contract; G02 wiring follows component acceptance.",
+  "next_action": "Complete fresh second-round review and final combined tests, then merge PR16 foundation components. L06/L08-L10 and G02 runtime remain pending.",
   "verification": {
-    "command": "GOWORK=off go test ./internal/core ./internal/llm ./internal/mcp",
+    "command": "GOWORK=off go test -race ./...; GOWORK=off go vet ./...; python3 docs/contracts/check_bulk_v2.py",
     "core": "passed",
     "llm": "passed",
     "mcp": "passed",
     "fixture_checker": "passed",
     "lock": "18 file hashes verified; revision 1",
-    "lease": "acquired and released"
+    "lease": "acquired and released",
+    "candidate_sha": "ddf556cde6c73a1b5c8fc6655a3773d7245cb43d",
+    "scope": "Foundation and legacy regression tests; no v2 runtime or paid/live qualification"
   },
   "packets": [
     {
       "id": "L01",
-      "state": "accepted",
+      "state": "integrated_pending_final_review",
       "model": "gpt-6-luna",
       "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
@@ -115,7 +117,7 @@
     },
     {
       "id": "L02",
-      "state": "accepted",
+      "state": "integrated_pending_final_review",
       "model": "gpt-6-luna",
       "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
@@ -128,7 +130,7 @@
     },
     {
       "id": "L03",
-      "state": "accepted",
+      "state": "integrated_pending_final_review",
       "model": "gpt-6-luna",
       "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
@@ -140,21 +142,27 @@
     },
     {
       "id": "L04",
-      "state": "running",
+      "state": "integrated_pending_final_review",
       "model": "gpt-6-luna",
       "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "branch": "codex/bulk-v2-l04",
-      "agent": "/root/contract_final_fix"
+      "agent": "/root/contract_final_fix",
+      "commit_sha": "643569d91f91562ea69350f46970acf701c79116",
+      "integration_sha": "9ca445d",
+      "tests": "Worker focused and full package tests passed; combined coordinator race suite, vet and contract fixtures passed."
     },
     {
       "id": "L05",
-      "state": "running",
+      "state": "integrated_pending_final_review",
       "model": "gpt-6-luna",
       "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "branch": "codex/bulk-v2-l05",
-      "agent": "/root/contract_review"
+      "agent": "/root/contract_review",
+      "commit_sha": "f7e4aca79c3de36619bf4bb89f72360c641bcd69",
+      "integration_sha": "310bdd0",
+      "tests": "Worker focused and full package tests passed; combined coordinator race suite, vet and contract fixtures passed."
     },
     {
       "id": "L06",
@@ -167,13 +175,16 @@
     },
     {
       "id": "L07",
-      "state": "running",
+      "state": "integrated_pending_final_review",
       "model": "gpt-6-luna",
       "base_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "contract_sha": "e59b496e5228ce6b8f5cc62dbcd3a19ecb00b4ed",
       "branch": "codex/bulk-v2-l07",
       "agent": "headless codex exec",
-      "pid": 54714
+      "pid": 54714,
+      "commit_sha": "08df3f6e09dde2988497109892878279783cb41a",
+      "integration_sha": "ddf556c",
+      "tests": "Worker focused and full package tests passed; combined coordinator race suite, vet and contract fixtures passed."
     },
     {
       "id": "L08",
@@ -202,5 +213,26 @@
       "branch": null,
       "agent": null
     }
-  ]
+  ],
+  "review": {
+    "candidate_sha": "ddf556cde6c73a1b5c8fc6655a3773d7245cb43d",
+    "state": "second_round_changes_requested",
+    "sessions": [
+      "fresh headless Codex Bugbot",
+      "fresh headless Codex receipt/policy review"
+    ],
+    "claude_attempt": "Opus 5.5 returned weekly usage-limit error before code review; replaced by fresh Codex",
+    "corrected_candidate_sha": "3240172dc0886db9e5c2bf79be24ee996fa3668b",
+    "distinct_findings": 8,
+    "correction_commits": [
+      "45fc961",
+      "3240172"
+    ],
+    "final_review": "fresh headless Codex GPT-6-Astra, separate detached worktree",
+    "second_round_findings": [
+      "serialized result expansion can break reopen",
+      "request schema escaping changes admission limits",
+      "cost opt-out still decodes provider cost extensions"
+    ]
+  }
 }

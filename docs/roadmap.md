@@ -88,10 +88,10 @@ outside this change. See ADR 008 and README's setup sections.
   `FERRO_MCP_MAX_ELEMENTS`) is reachable from `main`.
 
 ## In progress
-- (none)
+- Bulk-browser foundation review — coordinator, 2026-09-24: contract, profiles, usage accounting, budgets, read-only driver, schemas and receipts; PR #16. Runtime wiring and live qualification are still pending.
 
 ## In flight
-- (none)
+- [PR #16](https://github.com/sirerun/ferro/pull/16): bounded-task foundation components, under fresh headless review; no installed-service changes.
 
 ## Planned
 - E9's T9.6 (trim redundant planner-prompt prose) still open, small and
