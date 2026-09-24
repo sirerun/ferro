@@ -1,0 +1,41 @@
+{
+  "schema": "ferro.bulk-dispatch/v1",
+  "coordinator": "codex@ferro",
+  "base_sha": "38516376385f33f17fccc6079f1e0de65a5c967e",
+  "contract_sha": null,
+  "updated_at": "2026-09-24T17:49:27.807615+00:00",
+  "gate_state": {
+    "G00": "in_progress",
+    "G01": "candidate_only",
+    "L01-L10": "blocked_on_reviewed_contract"
+  },
+  "sessions": [
+    {
+      "task": "g01",
+      "pid": 18522,
+      "model": "gpt-6-luna",
+      "state": "running",
+      "worktree": "../ferro-bulk-v2-g01",
+      "branch": "codex/bulk-v2-g01",
+      "scope": "G01 candidate types, validation, fixtures; not accepted contract"
+    },
+    {
+      "task": "baseline",
+      "pid": 18523,
+      "model": "gpt-6-luna",
+      "state": "running",
+      "worktree": "../ferro-bulk-v2-baseline",
+      "branch": "codex/bulk-v2-baseline",
+      "scope": "G00 read-only baseline evidence"
+    },
+    {
+      "task": "docs",
+      "pid": 18524,
+      "model": "gpt-6-luna",
+      "state": "running",
+      "worktree": "../ferro-bulk-v2-docs",
+      "branch": "codex/bulk-v2-docs",
+      "scope": "Reviewed Zatiti companion integration"
+    }
+  ]
+}
