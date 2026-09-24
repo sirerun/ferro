@@ -3,10 +3,10 @@
   "coordinator": "codex@ferro",
   "base_sha": "38516376385f33f17fccc6079f1e0de65a5c967e",
   "contract_sha": null,
-  "updated_at": "2026-09-24T17:49:27.807615+00:00",
+  "updated_at": "2026-09-24T18:07:36.939234+00:00",
   "gate_state": {
     "G00": "accepted_with_release_reconciliation_pending",
-    "G01": "candidate_corrections_in_progress",
+    "G01": "integrated_candidate_awaiting_combined_tests_and_review",
     "L01-L10": "blocked_on_reviewed_contract"
   },
   "sessions": [
@@ -45,7 +45,7 @@
       "pid": 42544,
       "session_id": "01a0d48e-7a73-7e81-b081-064b6d22203b",
       "model": "gpt-6-luna",
-      "state": "running",
+      "state": "integrated_pending_review",
       "branch": "codex/bulk-v2-core-contract",
       "worktree": "../ferro-bulk-v2-core-contract",
       "base_sha": "b7f577b",
@@ -53,14 +53,17 @@
         "internal/core/task_contract_v2.go",
         "internal/core/task_contract_v2_test.go"
       ],
-      "scope": "G01 coordinator-directed corrections; not independent contract acceptance"
+      "scope": "G01 coordinator-directed corrections; not independent contract acceptance",
+      "commit_sha": "c7bd8be0ad742428b895fc30abebc54b41f842a5",
+      "integration_sha": "78bfbf9",
+      "tests": "Agent reported full internal/core pass; coordinator combined suite not run: build lease held by another lane"
     },
     {
       "task": "wire-contract",
       "pid": 42545,
       "session_id": "01a0d48e-7a6e-7d73-ad27-41779fedb300",
       "model": "gpt-6-luna",
-      "state": "running",
+      "state": "integrated_pending_review",
       "branch": "codex/bulk-v2-wire-contract",
       "worktree": "../ferro-bulk-v2-wire-contract",
       "base_sha": "b7f577b",
@@ -70,7 +73,11 @@
         "docs/contracts/bulk-v2/*.json",
         "docs/contracts/check_bulk_v2.py"
       ],
-      "scope": "G01 coordinator-directed corrections; not independent contract acceptance"
+      "scope": "G01 coordinator-directed corrections; not independent contract acceptance",
+      "commit_sha": "82631f486521e3ef00b316f45e49a0ceaf7ea15c",
+      "integration_sha": "1e0e031",
+      "tests": "Agent demonstrated request-field and secret serialization regressions; combined package validation pending shared build lease"
     }
-  ]
+  ],
+  "next_action": "Acquire available build lease, run combined core/llm/mcp tests and fixture checker, review contract and lock before L01-L10 dispatch. No runtime code references Zatiti in added contract files."
 }
