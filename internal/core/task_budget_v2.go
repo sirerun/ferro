@@ -240,7 +240,7 @@ func (b *taskBudgetV2) AdmitAction(ctx context.Context) error {
 	if err := b.contextError(ctx); err != nil {
 		return err
 	}
-	if !b.now().Before(b.deadline) || b.snapshot.Actions >= b.limits.Actions {
+	if !b.now().Before(b.deadline) || b.overrun || b.snapshot.Actions >= b.limits.Actions {
 		return ErrBudgetExhaustedV2
 	}
 	next, ok := addNonnegativeV2(b.snapshot.Actions, 1)

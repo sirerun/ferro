@@ -274,6 +274,12 @@ func TestBudgetV2_ReportedOverEstimateBlocksLaterAdmission(t *testing.T) {
 	if _, err := budget.Admit(context.Background(), budgetKindExtractionV2, 0, 1); !errors.Is(err, ErrBudgetExhaustedV2) {
 		t.Fatalf("admission after actual overrun: got %v, want exhausted", err)
 	}
+	if err := budget.AdmitAction(context.Background()); !errors.Is(err, ErrBudgetExhaustedV2) {
+		t.Fatalf("action admission after actual overrun: got %v, want exhausted", err)
+	}
+	if got := budget.Snapshot().Actions; got != 0 {
+		t.Fatalf("overrun action admission changed action count to %d", got)
+	}
 }
 
 func TestBudgetV2_SnapshotDeepCopy(t *testing.T) {
