@@ -481,5 +481,20 @@ chrome.storage.session.get('connection').then(({ connection }) => {
   if (connection) startPolling();
 });
 
-// Chrome owns the panel frame; the extension renders only its contents.
-chrome.sidePanel?.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+// Panel visibility is independent of browser-task pairing. Older local builds
+// disabled the panel per tab during handoff; repair those overrides on startup.
+async function restoreSidePanelAccess() {
+  if (!chrome.sidePanel) return;
+  await chrome.sidePanel.setOptions({path:'sidepanel.html', enabled:true});
+  await chrome.sidePanel.setPanelBehavior({openPanelOnActionClick:true});
+  const tabs = await chrome.tabs.query({});
+  await Promise.all(tabs.filter(tab => Number.isInteger(tab.id)).map(async tab => {
+    try {
+      await chrome.sidePanel.setOptions({tabId:tab.id, path:'sidepanel.html', enabled:true});
+    } catch (error) {
+      // A tab may close between the query and this call.
+      console.warn('Could not restore Ferro panel for tab', tab.id, error);
+    }
+  }));
+}
+void restoreSidePanelAccess().catch(error => console.error('Could not initialize Ferro side panel', error));

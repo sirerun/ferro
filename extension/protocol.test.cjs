@@ -201,3 +201,16 @@ test('popup status distinguishes live and stale pairing without revealing the to
   const live=await ask();
   assert.equal(live.connected,true);
 });
+
+test('startup repairs disabled panel overrides without changing pairing', async () => {
+  const {context}=worker();
+  const options=[];
+  let behavior;
+  context.chrome.sidePanel={setOptions:async value=>options.push(value),setPanelBehavior:async value=>{behavior=value;}};
+  context.chrome.tabs.query=async()=>[{id:42},{id:43}];
+  context.chrome.storage.session.set=async()=>{throw new Error('Panel recovery must not change pairing');};
+  await vm.runInContext('restoreSidePanelAccess()',context);
+  assert.equal(behavior.openPanelOnActionClick,true);
+  assert.deepEqual(options.map(x=>x.tabId),[undefined,42,43]);
+  assert.ok(options.every(x=>x.enabled && x.path==='sidepanel.html'));
+});
