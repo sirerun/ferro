@@ -1,0 +1,9 @@
+.git
+.git/**
+**/.DS_Store
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*_test.go
+**/node_modules
