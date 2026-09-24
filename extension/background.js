@@ -353,8 +353,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!Number.isInteger(c.tabId) || c.tabId < 0) throw new Error('Choose a website tab to connect.');
         await ensureContentReady(c.tabId);
         previous = await getConnection();
+        const hadLocalConnection = !!previous;
+        if (!previous) {
+          const statusResponse = await fetch(`${c.base}/chat/status`, {
+            method:'POST', headers:{Authorization:`Bearer ${c.token}`, 'Content-Type':'application/json', 'X-Ferro-Chat-Session':'extension-pairing-recovery'},
+            body:'{}', signal:AbortSignal.timeout(5000),
+          });
+          if (!statusResponse.ok) throw new Error('Could not check the existing pairing. Retry when the service is available.');
+          const state = await statusResponse.json();
+          if (state.busy !== false || state.leased !== false) throw new Error('A task or agent lease is still running. Stop it before connecting another tab.');
+          if (state.paired_tab) {
+            if (!/^[0-9]+$/.test(state.paired_tab)) throw new Error('Invalid pairing status from the service.');
+            previous = {base:c.base, token:c.token, tabId:Number(state.paired_tab)};
+          }
+        }
         if (previous && previous.base === c.base && previous.token === c.token && previous.tabId === c.tabId) {
+          if (!hadLocalConnection) {
+            await chrome.storage.session.set({connection:c});
+            startPolling();
+          }
           sendResponse({ ok: true });
+          return;
+        }
+        if (previous && message.confirmDisconnectTab !== String(previous.tabId)) {
+          sendResponse({requiresConfirmation:true, pairedTab:String(previous.tabId)});
           return;
         }
         if (previous) {

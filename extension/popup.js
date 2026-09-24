@@ -71,9 +71,14 @@ toggle.onclick = async () => {
         throw new Error('Bridge URL must be http://127.0.0.1:<port>. Check ferro-mcp status for the port.');
       }
       if (!token) throw new Error('Enter the pairing token from the local bridge-token file.');
-      const response = await chrome.runtime.sendMessage({
+      let response = await chrome.runtime.sendMessage({
         type: 'ferro-connect', connection: { base, token, tabId: tab.id },
       });
+      if (response?.requiresConfirmation) {
+        if (!confirm('Disconnect the current tab and connect this one?')) { actionError = 'Connection unchanged.'; return; }
+        response = await chrome.runtime.sendMessage({type:'ferro-connect', connection:{base,token,tabId:tab.id}, confirmDisconnectTab:response.pairedTab});
+        if (response?.requiresConfirmation) throw new Error('The paired tab changed. Connect again to confirm.');
+      }
       if (!response || response.error) throw new Error(response?.error || 'Connect failed.');
     }
   } catch (error) {

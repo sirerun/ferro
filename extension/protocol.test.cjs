@@ -87,7 +87,7 @@ test('switching tabs releases the old pairing before pairing the new tab',async(
   let stopped=0,started=0;
   context.stopPolling=()=>{stopped++};
   context.startPolling=()=>{started++};
-  const response=await new Promise(resolve=>listeners[0]({type:'ferro-connect',connection:{...previous,tabId:42}},{id:'test-extension',url:'chrome-extension://test-extension/sidepanel.html'},resolve));
+  const response=await new Promise(resolve=>listeners[0]({type:'ferro-connect',confirmDisconnectTab:'41',connection:{...previous,tabId:42}},{id:'test-extension',url:'chrome-extension://test-extension/sidepanel.html'},resolve));
   assert.equal(response.ok,true);
   assert.deepEqual(requests.map(r=>[new URL(r.url).pathname,r.method,r.tab]),[
     ['/disconnect','POST','41'],['/pair','POST','42'],
@@ -154,7 +154,7 @@ test('failed tab switch restores the previous pairing and resumes polling',async
   let stopped=0,started=0;
   context.stopPolling=()=>{stopped++};
   context.startPolling=()=>{started++};
-  const response=await new Promise(resolve=>listeners[0]({type:'ferro-connect',connection:{...previous,tabId:42}},{id:'test-extension',url:'chrome-extension://test-extension/sidepanel.html'},resolve));
+  const response=await new Promise(resolve=>listeners[0]({type:'ferro-connect',confirmDisconnectTab:'41',connection:{...previous,tabId:42}},{id:'test-extension',url:'chrome-extension://test-extension/sidepanel.html'},resolve));
   assert.match(response.error,/Pairing failed: access denied/);
   assert.deepEqual(requests.map(r=>[new URL(r.url).pathname,r.method,r.tab]),[
     ['/disconnect','POST','41'],['/pair','POST','42'],['/pair','POST','41'],
@@ -213,4 +213,35 @@ test('startup repairs disabled panel overrides without changing pairing', async 
   assert.equal(behavior.openPanelOnActionClick,true);
   assert.deepEqual(options.map(x=>x.tabId),[undefined,42,43]);
   assert.ok(options.every(x=>x.enabled && x.path==='sidepanel.html'));
+});
+
+for (const busy of [false,true]) test(`lost Chrome pairing state: connect recovers only when idle (busy=${busy})`,async()=>{
+  const requests=[];let stored=null;
+  const {context,listeners}=worker({fetch:async(url,options)=>{
+    const route=new URL(url).pathname;requests.push([route,options.headers['X-Ferro-Tab-Id']]);
+    if(route==='/chat/status')return {ok:true,json:async()=>({paired_tab:'41',busy,leased:false})};
+    if(route==='/pair' && requests.length===1)return {ok:false,status:409,text:async()=> 'already paired'};
+    return {ok:true,status:204};
+  }});
+  context.ensureContentReady=async()=>{};context.startPolling=()=>{};
+  context.chrome.storage.session.set=async value=>{stored=value.connection};
+  const response=await new Promise(resolve=>listeners[0]({type:'ferro-connect',confirmDisconnectTab:'41',connection:{base:'http://127.0.0.1:4175',token:'token',tabId:42}},{id:'test-extension',url:'chrome-extension://test-extension/sidepanel.html'},resolve));
+  if(busy){assert.match(response.error,/running|busy/);assert.equal(stored,null);assert.equal(requests.some(x=>x[0]==='/disconnect'),false);}
+  else {assert.equal(response.ok,true);assert.equal(stored.tabId,42);assert.deepEqual(requests.map(x=>x[0]),['/chat/status','/disconnect','/pair']);assert.equal(requests[1][1],'41');}
+});
+
+test('switching an existing pairing requires confirmation before any disconnect',async()=>{
+ const previous={base:'http://127.0.0.1:4175',token:'token',tabId:41};
+ const {context,listeners}=worker({fetch:async()=>{throw new Error('Must not contact service before confirmation');}});
+ context.chrome.storage.session.get=async()=>({connection:previous});context.ensureContentReady=async()=>{};
+ const response=await new Promise(resolve=>listeners[0]({type:'ferro-connect',connection:{...previous,tabId:42}},{id:'test-extension',url:'chrome-extension://test-extension/sidepanel.html'},resolve));
+ assert.equal(response.requiresConfirmation,true);assert.equal(response.pairedTab,'41');
+});
+
+test('lost local pairing asks for confirmation before releasing service pairing',async()=>{
+ const routes=[];
+ const {context,listeners}=worker({fetch:async(url)=>{routes.push(new URL(url).pathname);return {ok:true,json:async()=>({paired_tab:'41',busy:false,leased:false})};}});
+ context.ensureContentReady=async()=>{};
+ const response=await new Promise(resolve=>listeners[0]({type:'ferro-connect',connection:{base:'http://127.0.0.1:4175',token:'token',tabId:42}},{id:'test-extension',url:'chrome-extension://test-extension/sidepanel.html'},resolve));
+ assert.equal(response.requiresConfirmation,true);assert.deepEqual(routes,['/chat/status']);
 });
