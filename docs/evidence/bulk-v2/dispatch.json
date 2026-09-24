@@ -3,10 +3,10 @@
   "coordinator": "codex@ferro",
   "base_sha": "38516376385f33f17fccc6079f1e0de65a5c967e",
   "contract_sha": null,
-  "updated_at": "2026-09-24T18:07:36.939234+00:00",
+  "updated_at": "2026-09-24T18:12:19.153211+00:00",
   "gate_state": {
     "G00": "accepted_with_release_reconciliation_pending",
-    "G01": "integrated_candidate_awaiting_combined_tests_and_review",
+    "G01": "combined_tests_found_test_fixture_defect",
     "L01-L10": "blocked_on_reviewed_contract"
   },
   "sessions": [
@@ -77,7 +77,24 @@
       "commit_sha": "82631f486521e3ef00b316f45e49a0ceaf7ea15c",
       "integration_sha": "1e0e031",
       "tests": "Agent demonstrated request-field and secret serialization regressions; combined package validation pending shared build lease"
+    },
+    {
+      "task": "test-correction",
+      "model": "gpt-6-luna",
+      "state": "running",
+      "pid": 69595,
+      "branch": "codex/bulk-v2-test-correction",
+      "owns": [
+        "internal/mcp/task_contract_v2_test.go"
+      ]
     }
   ],
-  "next_action": "Acquire available build lease, run combined core/llm/mcp tests and fixture checker, review contract and lock before L01-L10 dispatch. No runtime code references Zatiti in added contract files."
+  "next_action": "Review and integrate Luna test-fixture correction, rerun MCP/fixtures, complete contract review and lock before implementation packet dispatch.",
+  "verification": {
+    "command": "GOWORK=off go test ./internal/core ./internal/llm ./internal/mcp",
+    "core": "passed",
+    "llm": "passed",
+    "mcp": "failed: TestRequestV2CanonicalOriginsAndStartURL contains no-op replacement; correction assigned",
+    "lease": "acquired and released successfully"
+  }
 }
