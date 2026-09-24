@@ -16,6 +16,10 @@ let connection = null;
 let actionError = '';
 let pending = false;
 let statusRequest = 0;
+const HOSTED_BRIDGE_BASE = 'https://ferro.sire.run/bridge';
+function validBridgeBase(base) {
+  return /^http:\/\/(127\.0\.0\.1|localhost):[0-9]+$/.test(base) || base === HOSTED_BRIDGE_BASE;
+}
 
 async function refreshStatus() {
   const request = ++statusRequest;
@@ -75,10 +79,10 @@ toggle.onclick = async () => {
       const base = baseInput.value.trim().replace(/\/+$/, '');
       const canReuseCredentials = !!(connection?.configured || connection?.credentialsAvailable) && connection.base === base;
       const token = canReuseCredentials ? '' : tokenInput.value.trim();
-      if (!/^http:\/\/(127\.0\.0\.1|localhost):\d+$/.test(base)) {
-        throw new Error('Bridge URL must be http://127.0.0.1:<port>. Check ferro-mcp status for the port.');
+      if (!validBridgeBase(base)) {
+        throw new Error('Use http://127.0.0.1:<port> for a local bridge or https://ferro.sire.run/bridge for the hosted pilot.');
       }
-      if (!token && !canReuseCredentials) throw new Error('Enter the pairing token from the local bridge-token file.');
+      if (!token && !canReuseCredentials) throw new Error('Enter the pairing token provided for this bridge endpoint.');
       let response = await chrome.runtime.sendMessage({
         type: 'ferro-connect', connection: { base, token, tabId: tab.id },
       });

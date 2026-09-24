@@ -1,0 +1,27 @@
+[Unit]
+Description=Ferro private single-owner hosted pilot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ferro
+Group=ferro
+Environment=FERRO_MCP_HOME=/var/lib/ferro-cloud
+Environment=FERRO_CLOUD_PUBLIC_ORIGIN=https://ferro.sire.run
+Environment=FERRO_CLOUD_LISTEN_ADDR=127.0.0.1:8080
+EnvironmentFile=-/etc/ferro-cloud/private-pilot.env
+ExecStart=/usr/local/bin/ferro-cloud
+Restart=on-failure
+RestartSec=3
+UMask=0077
+StateDirectory=ferro-cloud
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/ferro-cloud
+
+[Install]
+WantedBy=multi-user.target

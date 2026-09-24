@@ -41,6 +41,27 @@ test('page content cannot pair a new tab',async()=>{
   assert.match(response.error,/popup/);
 });
 
+test('background accepts only local HTTP or the approved hosted HTTPS bridge', async()=>{
+  for (const [base, accepted] of [
+    ['http://127.0.0.1:4173', true],
+    ['http://localhost:4173', true],
+    ['https://ferro.sire.run/bridge', true],
+    ['http://ferro.sire.run/bridge', false],
+    ['https://ferro.sire.run/other', false],
+    ['https://remote.example/bridge', false],
+    ['http://remote.example:4173', false],
+  ]) {
+    let requests = 0;
+    const {context,listeners}=worker({fetch:async()=>{requests++;return {ok:true,status:200,json:async()=>({busy:false,leased:false,paired_tab:null}),text:async()=>''}}});
+    context.ensureContentReady=async()=>{};
+    const response=await new Promise(resolve=>listeners[0]({type:'ferro-connect',connection:{base,token:'fixture-token',tabId:42}},{id:'test-extension',url:'chrome-extension://test-extension/popup.html'},resolve));
+    assert.equal(!!response.ok,accepted,base);
+    if (!accepted) assert.match(response.error,/local bridge URL or https:\/\/ferro\.sire\.run\/bridge/);
+    assert.equal(requests,accepted ? 2 : 0,base);
+    context.stopPolling();
+  }
+});
+
 test('missing receiver is attached before a command, without retrying delivered input', async()=>{
   const {context}=worker();
   let ready=false, injections=0, inputs=0;

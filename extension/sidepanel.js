@@ -1,5 +1,9 @@
 'use strict';
 const $ = id => document.getElementById(id);
+const HOSTED_BRIDGE_BASE = 'https://ferro.sire.run/bridge';
+function validBridgeBase(base) {
+  return /^http:\/\/127\.0\.0\.1:\d+$/.test(base) || base === HOSTED_BRIDGE_BASE;
+}
 let connection = null;
 let session = '';
 let messages = [];
@@ -140,9 +144,9 @@ $('connection-form').onsubmit = async event => {
     if (!tab || !/^https?:\/\//.test(tab.url || '')) throw new Error('Open the website tab you want to work in first.');
     const base = $('base').value.trim().replace(/\/+$/, '');
     // Use the literal loopback host so the server can enforce its Host header.
-    if (!/^http:\/\/127\.0\.0\.1:\d+$/.test(base)) throw new Error('Use http://127.0.0.1:<port> for the local service.');
+    if (!validBridgeBase(base)) throw new Error('Use http://127.0.0.1:<port> for a local bridge or https://ferro.sire.run/bridge for the hosted pilot.');
     const token = $('token').value.trim() || connection?.token;
-    if (!token) throw new Error('Paste the pairing token from bridge-token.');
+    if (!token) throw new Error('Paste the pairing token provided for this bridge endpoint.');
     const next = {base, token, tabId:tab.id};
     let reply = await chrome.runtime.sendMessage({type:'ferro-connect', connection:next});
     if (reply?.requiresConfirmation) {

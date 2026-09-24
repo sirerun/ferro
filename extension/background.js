@@ -35,6 +35,11 @@
 
 const POLL_TIMEOUT_MS = 30000; // one long-poll GET at a time
 const POLL_ERROR_BACKOFF_MS = 2000; // bridge unreachable (laptop asleep, etc.)
+const HOSTED_BRIDGE_BASE = 'https://ferro.sire.run/bridge';
+
+function validBridgeBase(base) {
+  return /^http:\/\/(127\.0\.0\.1|localhost):[0-9]+$/.test(base) || base === HOSTED_BRIDGE_BASE;
+}
 const NAV_TIMEOUT_MS = 20000;
 const CONTENT_READY_TIMEOUT_MS = 8000;
 const NAV_SETTLE_MS = 250; // mirrors WaitStrategy's default SettleDebounce
@@ -355,7 +360,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           if (saved?.base === c.base) c.token = saved.token;
         }
         if (!c.token) throw new Error('Enter the pairing token once to connect this Chrome session.');
-        if (!/^http:\/\/(127\.0\.0\.1|localhost):[0-9]+$/.test(c.base)) throw new Error('use a local bridge URL');
+        if (!validBridgeBase(c.base)) throw new Error('Use a local bridge URL or https://ferro.sire.run/bridge.');
         if (!Number.isInteger(c.tabId) || c.tabId < 0) throw new Error('Choose a website tab to connect.');
         await ensureContentReady(c.tabId);
         previous = await getConnection();

@@ -12,9 +12,9 @@
  <div class="settings-title"><h2>Make yourself at home</h2><button id="settings-close" class="quiet" aria-label="Close settings">×</button></div>
  <form id="connection-form">
   <h3>Your Chrome tab</h3>
-  <label for="base">Local service</label><input id="base" value="http://127.0.0.1:4175" required>
+  <label for="base">Bridge endpoint</label><input id="base" value="http://127.0.0.1:4175" required>
   <label for="token">Pairing token</label><input id="token" type="password" autocomplete="off" placeholder="Paste from bridge-token">
-  <p class="hint">Start ferro-mcp with the extension backend. Copy the token from ~/.ferro-mcp/bridge-token. It stays in Chrome's session memory.</p>
+  <p class="hint">Use https://ferro.sire.run/bridge with your private pilot pairing token, or run a local extension backend. The token stays in Chrome's session memory.</p>
   <div class="actions"><button type="submit">Connect current tab</button><button id="disconnect" type="button">Disconnect</button></div>
  </form>
  <form id="model-form">
