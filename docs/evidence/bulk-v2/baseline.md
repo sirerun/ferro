@@ -6,7 +6,7 @@ not a contract approval, runtime qualification, or release record.
 
 ## Source and saved-work inventory
 
-Current `main` and this audit worktree both resolve to
+At the start of the audit, `main` and this audit worktree resolved to
 `38516376385f33f17fccc6079f1e0de65a5c967e` (2026-09-24). The main checkout has
 one untracked historical handoff, which was read as historical context and left
 untouched. This audit worktree began clean on `codex/bulk-v2-baseline`.
@@ -16,7 +16,7 @@ Other relevant worktrees and revisions at audit time:
 | Worktree/branch | Revision | Disposition |
 |---|---|---|
 | `codex/bulk-gate-correction` | `7515f6fbeac8d83127cba4df935caad45af7d97e` | Documentation correction; separate from runtime implementation. |
-| `codex/ferro-chat-polish` (remote ref) | `ea581c315e9c302c11fe6e4f8fee39edf7aaae23` | Known runtime fix branch; deliberately pending later release/reconciliation. Not merged or installed by this audit. |
+| `codex/ferro-chat-polish` (remote ref) | `ea581c315e9c302c11fe6e4f8fee39edf7aaae23` | Historical remote snapshot; do not treat it as the current runtime source or an assigned lane. |
 | `codex/amsl-credentials` | `f2d8244cb18fbf637326f2daf9cc7293b722219c` | Credential-adapter work remains a separate branch and separate reconciliation item. |
 | `codex/connection-prompts` | `a029906143907dd1e992a2f93b69946f9765412b` | Extension source comparison only; separate worktree. |
 | `codex/bulk-v2-docs` | `0b745b363d5108414aec7a505123dda1187202f9` | Documentation worktree. |
@@ -28,8 +28,7 @@ Other relevant worktrees and revisions at audit time:
 
 The main repository's only saved stash is `stash@{0}` at
 `1dee5406d606b50bdf699dcb68b31470981fab06`, described as preservation of
-original plan drafts before plan reconciliation. No separate Ferro archive
-directory was found among the sibling project directories inspected. The
+original plan drafts before plan reconciliation. Coordinator supplement: the existing `superseded-20260924-074111` archive under the private Ferro archive store preserves the earlier branch/worktree cleanup, including its README, bundle and file snapshots. It is outside the sibling-directory search performed by the audit worker. The
 historical handoff mentions an earlier `STASH` branch, but no current ref by
 that name was present; this report does not infer that the current stash is the
 same saved work.
@@ -114,7 +113,7 @@ audit. Do not dispatch L01-L10 based on this report.
 Reconciliation dispositions:
 
 1. Installed service and extension versus source: **pending later release
-   gate**. Preserve the installed build and runtime-fix branch; require explicit
+   gate**. Preserve the installed build and `codex/connection-prompts` runtime branch; require explicit
    source/package review before reconciliation or installation.
 2. Credential adapter: **separate branch and review path**. Do not fold it into
    the runtime-fix disposition or infer compatibility from its presence.
@@ -139,3 +138,5 @@ source tree cannot be reconstructed from the embedded revision. The
 connection-prompts worktree is a comparison candidate, not proof of the exact
 build inputs. This audit does not establish current live browser connectivity,
 behavior, usage, contract correctness, or release readiness.
+
+Coordinator boundary: the planning companion merged at `8fb2547` during this inventory. Its changes are documentation only; the artifact hashes remain a timestamped inventory, not a moving-main claim. G00 is accepted for contract preparation with installed reconciliation explicitly deferred to G05. G01 remains unaccepted.
