@@ -776,7 +776,7 @@ func TestReceiptsV2_UnicodeLineSeparatorDigestWithinWireBounds(t *testing.T) {
 	}
 }
 
-func TestReceiptsV2_DefaultsDoNotExpandWireSize(t *testing.T) {
+func TestReceiptsV2_WireSizeAndTypedSemanticLimits(t *testing.T) {
 	goal := strings.Repeat("g", 16384)
 	schemaPrefix, schemaSuffix := `{"type":"object","description":"`, `"}`
 	requestPrefix := `{"schema":"ferro.task/v2","task_id":"task_default_cap","goal":"` + goal + `","start_url":"https://example.com/start","model_profile":"profile","policy":{"mode":"read_only","origins":["https://example.com"]},"output_schema":`
@@ -813,11 +813,10 @@ func TestReceiptsV2_DefaultsDoNotExpandWireSize(t *testing.T) {
 	if _, err := ValidateTaskRequestV2(append(append([]byte(nil), raw...), ' ')); err == nil {
 		t.Fatal("request one byte over the wire limit was accepted")
 	}
-	oversizedDirect := validated
-	oversizedDirect.TaskID = "task_direct_oversized"
-	oversizedDirect.StartURL += strings.Repeat("x", 128)
-	if _, err := canonicalRequestDigestV2(oversizedDirect); err == nil {
-		t.Fatal("direct oversized admission request bypassed the original wire limit")
+	oversizedField := validated
+	oversizedField.Goal += "x"
+	if _, err := canonicalRequestDigestV2(oversizedField); err == nil {
+		t.Fatal("direct typed request bypassed the goal field limit")
 	}
 
 	withExplicitDefaults := validated
@@ -841,6 +840,51 @@ func TestReceiptsV2_DefaultsDoNotExpandWireSize(t *testing.T) {
 	invalidLimits.Limits.Actions = &negativeLimit
 	if _, err := canonicalRequestDigestV2(invalidLimits); err == nil {
 		t.Fatal("invalid nonempty limits bypassed request validation")
+	}
+}
+
+func TestReceiptsV2_UnicodeOriginNormalizationAtWireLimit(t *testing.T) {
+	goal := strings.Repeat("g", 16384)
+	origin := "https://Ⱥ.example"
+	schemaPrefix, schemaSuffix := `{"type":"object","description":"`, `"}`
+	description := strings.Repeat("d", 32018-len(schemaPrefix)-len(schemaSuffix))
+	startURL := origin + "/start"
+	buildRaw := func(start string) []byte {
+		return []byte(`{"schema":"ferro.task/v2","task_id":"task_unicode_origin","goal":"` + goal + `","start_url":"` + start + `","model_profile":"profile","policy":{"mode":"read_only","origins":["` + origin + `"]},"output_schema":` + schemaPrefix + description + schemaSuffix + `}`)
+	}
+	raw := buildRaw(startURL)
+	padding := 65536 - len(raw) + len(startURL) - len(origin+"/")
+	raw = buildRaw(origin + "/" + strings.Repeat("x", padding))
+	if len(raw) != 65536 {
+		t.Fatalf("Unicode-origin fixture is %d bytes, want 65536", len(raw))
+	}
+	validated, err := ValidateTaskRequestV2(raw)
+	if err != nil {
+		t.Fatalf("exact-limit Unicode-origin request rejected: %v", err)
+	}
+	if validated.Policy.Origins[0] != "https://ⱥ.example" {
+		t.Fatalf("origin was not normalized as expected: %q", validated.Policy.Origins[0])
+	}
+	typedUnnormalized := validated
+	typedUnnormalized.Policy = &TaskPolicyV2{Mode: "read_only", Origins: []string{origin}}
+	digest, err := canonicalRequestDigestV2(validated)
+	if err != nil {
+		t.Fatalf("normalized origin expansion invalidated request: %v", err)
+	}
+	unnormalizedDigest, err := canonicalRequestDigestV2(typedUnnormalized)
+	if err != nil || unnormalizedDigest != digest {
+		t.Fatalf("typed unnormalized origin digest=%q err=%v want %q", unnormalizedDigest, err, digest)
+	}
+	if typedUnnormalized.Policy.Origins[0] != origin {
+		t.Fatalf("digest mutated caller-owned policy origin to %q", typedUnnormalized.Policy.Origins[0])
+	}
+	store, err := OpenReceiptStoreV2(t.TempDir(), 32<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, created, err := store.Admit(context.Background(), "principal", validated, digest); err != nil || !created {
+		t.Fatalf("Unicode-origin admission created=%v err=%v", created, err)
 	}
 }
 

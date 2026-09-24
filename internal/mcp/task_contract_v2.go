@@ -240,6 +240,28 @@ func ValidateTaskRequestV2(raw []byte) (RunTaskV2Request, error) {
 	if err := d.Decode(&extra); err != io.EOF {
 		return r, errInvalidV2("trailing JSON")
 	}
+	return validateTaskRequestSemanticsV2(r)
+}
+
+// validateTaskRequestSemanticsV2 validates a decoded request independently of
+// its original wire encoding. ValidateTaskRequestV2 enforces the raw byte
+// limit; typed callers have no original encoding and receive semantic checks.
+func validateTaskRequestSemanticsV2(r RunTaskV2Request) (RunTaskV2Request, error) {
+	if r.Policy != nil {
+		policy := *r.Policy
+		policy.Origins = append([]string(nil), r.Policy.Origins...)
+		r.Policy = &policy
+	}
+	if !utf8Valid([]byte(r.Goal)) || !utf8Valid([]byte(r.StartURL)) || !utf8Valid([]byte(r.ReplayLabel)) || !utf8Valid(r.OutputSchema) {
+		return r, errInvalidV2("request contains invalid UTF-8")
+	}
+	if r.Policy != nil {
+		for _, origin := range r.Policy.Origins {
+			if !utf8Valid([]byte(origin)) {
+				return r, errInvalidV2("origin is not valid UTF-8")
+			}
+		}
+	}
 	if r.Schema != "ferro.task/v2" || !validTaskIDV2(r.TaskID) || r.Goal == "" || r.ModelProfile == "" || r.Policy == nil || len(r.OutputSchema) == 0 || bytes.Equal(bytes.TrimSpace(r.OutputSchema), []byte("null")) {
 		return r, errInvalidV2("missing or invalid required field")
 	}
