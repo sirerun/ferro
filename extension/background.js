@@ -406,6 +406,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         lastPollError = "";
         startPolling();
         sendResponse({ ok: true });
+        if (previous && previous.tabId !== c.tabId) void closeDisconnectedPanel(previous.tabId);
       } catch (error) {
         let message = error.message;
         if (restartPreviousPoll) {
@@ -467,6 +468,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       await chrome.storage.session.remove('connection');
       sendResponse({ ok:true, warning });
+      if (c) void closeDisconnectedPanel(c.tabId);
     })();
     return true;
   }
@@ -508,7 +510,7 @@ chrome.storage.session.get('connection').then(({ connection }) => {
 async function restoreSidePanelAccess() {
   if (!chrome.sidePanel) return;
   await chrome.sidePanel.setOptions({path:'sidepanel.html', enabled:true});
-  await chrome.sidePanel.setPanelBehavior({openPanelOnActionClick:true});
+  await chrome.sidePanel.setPanelBehavior({openPanelOnActionClick:false});
   const tabs = await chrome.tabs.query({});
   await Promise.all(tabs.filter(tab => Number.isInteger(tab.id)).map(async tab => {
     try {
@@ -520,3 +522,22 @@ async function restoreSidePanelAccess() {
   }));
 }
 void restoreSidePanelAccess().catch(error => console.error('Could not initialize Ferro side panel', error));
+
+// Disable only this tab's panel, leaving the website and other panels alone.
+// The explicit toolbar handler below always re-enables it before opening.
+async function closeDisconnectedPanel(tabId) {
+  if (!chrome.sidePanel) return;
+  try {
+    await chrome.sidePanel.setOptions({tabId, path:'sidepanel.html', enabled:false});
+  } catch (error) {
+    console.warn('Could not close disconnected Ferro panel', error);
+  }
+}
+async function openFerroPanel(tab) {
+  if (!chrome.sidePanel || !Number.isInteger(tab?.id)) return;
+  await chrome.sidePanel.setOptions({tabId:tab.id, path:'sidepanel.html', enabled:true});
+  await chrome.sidePanel.open({tabId:tab.id});
+}
+chrome.action?.onClicked.addListener(tab => {
+  void openFerroPanel(tab).catch(error => console.error('Could not open Ferro panel', error));
+});

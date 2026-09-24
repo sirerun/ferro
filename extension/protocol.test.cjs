@@ -210,7 +210,7 @@ test('startup repairs disabled panel overrides without changing pairing', async 
   context.chrome.tabs.query=async()=>[{id:42},{id:43}];
   context.chrome.storage.session.set=async()=>{throw new Error('Panel recovery must not change pairing');};
   await vm.runInContext('restoreSidePanelAccess()',context);
-  assert.equal(behavior.openPanelOnActionClick,true);
+  assert.equal(behavior.openPanelOnActionClick,false);
   assert.deepEqual(options.map(x=>x.tabId),[undefined,42,43]);
   assert.ok(options.every(x=>x.enabled && x.path==='sidepanel.html'));
 });
@@ -244,4 +244,12 @@ test('lost local pairing asks for confirmation before releasing service pairing'
  context.ensureContentReady=async()=>{};
  const response=await new Promise(resolve=>listeners[0]({type:'ferro-connect',connection:{base:'http://127.0.0.1:4175',token:'token',tabId:42}},{id:'test-extension',url:'chrome-extension://test-extension/sidepanel.html'},resolve));
  assert.equal(response.requiresConfirmation,true);assert.deepEqual(routes,['/chat/status']);
+});
+
+test('disconnected panel closes only on its tab and toolbar can reopen it',async()=>{
+ const {context}=worker();const calls=[];
+ context.chrome.sidePanel={setOptions:async value=>calls.push(['options',value.tabId,value.enabled,value.path]),open:async value=>calls.push(['open',value.tabId])};
+ await vm.runInContext('closeDisconnectedPanel(41)',context);
+ await vm.runInContext('openFerroPanel({id:41})',context);
+ assert.deepEqual(calls,[['options',41,false,'sidepanel.html'],['options',41,true,'sidepanel.html'],['open',41]]);
 });
