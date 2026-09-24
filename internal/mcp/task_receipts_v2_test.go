@@ -488,3 +488,140 @@ func TestReceiptsV2_CanonicalSchemaDigest(t *testing.T) {
 		t.Fatal("schema canonicalization collapsed distinct integer precision")
 	}
 }
+
+func TestReceiptsV2_FinalizeHTMLRawResultForms(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     TaskStatusV2
+		validation string
+		setOutput  func(*TaskResultV2, json.RawMessage)
+	}{
+		{
+			name:   "accepted result",
+			status: TaskSucceededV2, validation: "valid",
+			setOutput: func(result *TaskResultV2, raw json.RawMessage) { result.Result = raw },
+		},
+		{
+			name:   "partial result",
+			status: TaskFailedV2, validation: "invalid",
+			setOutput: func(result *TaskResultV2, raw json.RawMessage) { result.PartialResult = raw },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			s, r, d := receiptFixtureV2(t, dir)
+			rec := admitFixtureV2(t, s, r, d)
+			now := time.Now().UTC()
+			result := TaskResultV2{
+				Schema: "ferro.result/v2", TaskID: r.TaskID, ExecutionID: rec.ExecutionID,
+				Status: tc.status, StartedAt: now.Add(-time.Minute), EndedAt: now,
+				ModelProfile: r.ModelProfile, ProfileRevision: "revision",
+				EffectiveLimits: core.DefaultLimitsV2(), Validation: tc.validation,
+				SideEffectState: SideEffectNoneV2,
+			}
+			raw := json.RawMessage(`{"html":"` + strings.Repeat("<", 3000) + `"}`)
+			tc.setOutput(&result, raw)
+			if len(raw) >= 16<<10 {
+				t.Fatalf("fixture raw JSON is not below inline limit: %d", len(raw))
+			}
+			if err := ValidateTaskResultV2(result); err != nil {
+				t.Fatalf("raw result should pass envelope validation before serialization: %v", err)
+			}
+			finalizeErr := s.Finalize(context.Background(), "principal", rec.ExecutionID, result)
+			if finalizeErr == nil {
+				got, err := s.Get(context.Background(), "principal", rec.ExecutionID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got.Result == nil || ValidateTaskResultV2(*got.Result) == nil {
+					t.Fatal("Finalize persisted an expanded raw result that still passed validation")
+				}
+				if err := s.Close(); err != nil {
+					t.Fatal(err)
+				}
+				if reopened, err := OpenReceiptStoreV2(dir, 32<<20); err != nil {
+					t.Fatalf("Finalize accepted a result that made the store unreopenable: %v", err)
+				} else {
+					_ = reopened.Close()
+				}
+				t.Fatal("Finalize accepted an HTML-expanded raw result above the inline limit")
+			}
+			if got, err := s.Get(context.Background(), "principal", rec.ExecutionID); err != nil || got.Result != nil || got.State != ReceiptAdmittedV2 {
+				t.Fatalf("rejected finalization corrupted the existing receipt: %+v %v", got, err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			reopened, err := OpenReceiptStoreV2(dir, 32<<20)
+			if err != nil {
+				t.Fatalf("store failed to reopen after rejected finalization: %v", err)
+			}
+			t.Cleanup(func() { _ = reopened.Close() })
+			if got, err := reopened.Lookup(context.Background(), "principal", r.TaskID); err != nil || got.Result != nil {
+				t.Fatalf("existing receipt was lost after rejected finalization: %+v %v", got, err)
+			}
+		})
+	}
+}
+
+func TestReceiptsV2_HTMLSchemaDigestAndRequestBounds(t *testing.T) {
+	s, request, _ := receiptFixtureV2(t, t.TempDir())
+	largeText := strings.Repeat("<", 6000)
+	request.OutputSchema = json.RawMessage(`{"type":"object","properties":{"x":{"description":"` + largeText + `","type":"string"}}}`)
+	rawRequest := receiptRequestJSONV2(request)
+	validated, err := ValidateTaskRequestV2(rawRequest)
+	if err != nil {
+		t.Fatalf("raw HTML schema inside wire limits rejected: %v", err)
+	}
+	digest, err := canonicalRequestDigestV2(validated)
+	if err != nil {
+		t.Fatalf("digest valid raw HTML schema: %v", err)
+	}
+	first, created, err := s.Admit(context.Background(), "principal", validated, digest)
+	if err != nil || !created {
+		t.Fatalf("admit valid raw HTML schema = %+v created=%v err=%v", first, created, err)
+	}
+	request.OutputSchema = json.RawMessage(`{"properties":{"x":{"type":"string","description":"` + largeText + `"}},"type":"object"}`)
+	reordered, err := canonicalRequestDigestV2(request)
+	if err != nil || reordered != digest {
+		t.Fatalf("reordered HTML schema digest=%s err=%v; want %s", reordered, err, digest)
+	}
+	duplicate, created, err := s.Admit(context.Background(), "principal", request, reordered)
+	if err != nil || created || duplicate.ExecutionID != first.ExecutionID {
+		t.Fatalf("admit reordered HTML schema = %+v created=%v err=%v", duplicate, created, err)
+	}
+
+	maxSchema := json.RawMessage(`{"description":"` + strings.Repeat("x", 32768-len(`{"description":"`)-len(`"}`)) + `"}`)
+	if len(maxSchema) != 32768 {
+		t.Fatalf("max schema fixture length=%d", len(maxSchema))
+	}
+	request.OutputSchema = maxSchema
+	if _, err := ValidateTaskRequestV2(receiptRequestJSONV2(request)); err != nil {
+		t.Fatalf("schema exactly at byte limit rejected: %v", err)
+	}
+	request.OutputSchema = json.RawMessage(`{"description":"` + strings.Repeat("x", 32769-len(`{"description":"`)-len(`"}`)) + `"}`)
+	if len(request.OutputSchema) != 32769 {
+		t.Fatalf("oversized schema fixture length=%d", len(request.OutputSchema))
+	}
+	if _, err := ValidateTaskRequestV2(receiptRequestJSONV2(request)); err == nil {
+		t.Fatal("schema above byte limit was accepted")
+	}
+
+	request.OutputSchema = []byte(`{"type":"object"}`)
+	maxRequest := receiptRequestJSONV2(request)
+	if len(maxRequest) > 65536 {
+		t.Fatalf("base request exceeds wire limit: %d", len(maxRequest))
+	}
+	maxRequest = append(maxRequest, bytes.Repeat([]byte{' '}, 65536-len(maxRequest))...)
+	if _, err := ValidateTaskRequestV2(maxRequest); err != nil {
+		t.Fatalf("request exactly at byte limit rejected: %v", err)
+	}
+	maxRequest = append(maxRequest, ' ')
+	if _, err := ValidateTaskRequestV2(maxRequest); err == nil {
+		t.Fatal("request above byte limit was accepted")
+	}
+}
+
+func receiptRequestJSONV2(request RunTaskV2Request) []byte {
+	return []byte(`{"schema":"ferro.task/v2","task_id":"` + request.TaskID + `","goal":"` + request.Goal + `","model_profile":"` + request.ModelProfile + `","policy":{"mode":"` + request.Policy.Mode + `","origins":["https://example.com"]},"output_schema":` + string(request.OutputSchema) + `}`)
+}

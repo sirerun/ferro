@@ -200,7 +200,7 @@ func validDigestV2(d string) bool {
 	return err == nil && d == strings.ToLower(d)
 }
 func canonicalRequestDigestV2(r RunTaskV2Request) (string, error) {
-	b, err := json.Marshal(r)
+	b, err := marshalJSONNoHTMLEscapeV2(r)
 	if err != nil {
 		return "", fmt.Errorf("encode request: %w", err)
 	}
@@ -213,7 +213,7 @@ func canonicalRequestDigestV2(r RunTaskV2Request) (string, error) {
 		return "", fmt.Errorf("canonicalize output schema: %w", err)
 	}
 	validated.OutputSchema = canonicalSchema
-	b, err = json.Marshal(validated)
+	b, err = marshalJSONNoHTMLEscapeV2(validated)
 	if err != nil {
 		return "", fmt.Errorf("encode canonical request: %w", err)
 	}
@@ -235,11 +235,22 @@ func canonicalJSONBytesV2(raw []byte) ([]byte, error) {
 		}
 		return nil, fmt.Errorf("decode trailing JSON data: %w", err)
 	}
-	encoded, err := json.Marshal(value)
+	encoded, err := marshalJSONNoHTMLEscapeV2(value)
 	if err != nil {
 		return nil, fmt.Errorf("encode canonical JSON: %w", err)
 	}
 	return encoded, nil
+}
+
+func marshalJSONNoHTMLEscapeV2(value any) ([]byte, error) {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(value); err != nil {
+		return nil, err
+	}
+	encoded := buffer.Bytes()
+	return append([]byte(nil), encoded[:len(encoded)-1]...), nil
 }
 
 func (s *receiptStoreV2) Admit(ctx context.Context, owner string, request RunTaskV2Request, requestDigest string) (ReceiptV2, bool, error) {
@@ -418,10 +429,13 @@ func (s *receiptStoreV2) Finalize(ctx context.Context, owner, executionID string
 			return fmt.Errorf("artifact integrity failure")
 		}
 	}
+	c := cloneResultV2(result)
+	if err := ValidateTaskResultV2(c); err != nil {
+		return fmt.Errorf("invalid serialized task result: %w", err)
+	}
 	terminal := map[TaskStatusV2]ReceiptStateV2{TaskSucceededV2: ReceiptSucceededV2, TaskFailedV2: ReceiptFailedV2, TaskBlockedV2: ReceiptBlockedV2, TaskCancelledV2: ReceiptCancelledV2, TaskBudgetExhaustedV2: ReceiptBudgetExhaustedV2, TaskOutcomeUncertainV2: ReceiptUncertainV2}
 	next := cloneDiskV2(s.disk)
 	entry = next.Receipts[key]
-	c := cloneResultV2(result)
 	entry.Receipt.Result = &c
 	entry.Receipt.State = terminal[result.Status]
 	entry.Receipt.Artifacts = entry.Receipt.Artifacts[:0]
@@ -430,6 +444,9 @@ func (s *receiptStoreV2) Finalize(ctx context.Context, owner, executionID string
 	}
 	sort.Slice(entry.Receipt.Artifacts, func(i, j int) bool { return entry.Receipt.Artifacts[i].ID < entry.Receipt.Artifacts[j].ID })
 	entry.UpdatedAt = time.Now().UTC()
+	if err := ValidateTaskResultV2(*entry.Receipt.Result); err != nil {
+		return fmt.Errorf("invalid serialized task result in receipt: %w", err)
+	}
 	if encodedReceipt, err := json.Marshal(entry.Receipt); err != nil || int64(len(encodedReceipt)) > receiptMaxRecordV2 {
 		return fmt.Errorf("task receipt exceeds 4 MiB")
 	}
