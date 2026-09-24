@@ -1,4 +1,7 @@
-# Private hosted pilot templates
+# Private hosted pilot transport examples
+
+Deployment is not live. The selected AWS deployment must use Pulumi-managed
+containers with a qualified scale-to-zero and wake-up path; see [ADR 010](../../docs/adr/010-private-hosted-pilot.md). The files here demonstrate the transport’s trusted HTTPS-proxy and private-state requirements. They are not authorization or instructions to provision an always-on EC2 host.
 
 These templates assume one `ferro-cloud` process, one persistent
 `FERRO_MCP_HOME`, and one explicitly paired Chrome tab. Do not run multiple
