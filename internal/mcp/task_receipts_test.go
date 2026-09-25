@@ -15,21 +15,21 @@ import (
 	"github.com/dndungu/ferro/internal/core"
 )
 
-func receiptFixtureV2(t *testing.T, dir string) (ReceiptStoreV2, RunTaskV2Request, string) {
+func receiptFixture(t *testing.T, dir string) (ReceiptStore, RunTaskRequest, string) {
 	t.Helper()
-	s, err := OpenReceiptStoreV2(dir, 32<<20)
+	s, err := OpenReceiptStore(dir, 32<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	r := RunTaskV2Request{Schema: "ferro.task/v2", TaskID: "task_one", Goal: "inspect", ModelProfile: "profile", Policy: &TaskPolicyV2{Mode: "read_only", Origins: []string{"https://example.com"}}, OutputSchema: []byte(`{"type":"object"}`)}
-	digest, err := canonicalRequestDigestV2(r)
+	r := RunTaskRequest{Schema: "ferro.task/v2", TaskID: "task_one", Goal: "inspect", ModelProfile: "profile", Policy: &TaskPolicy{Mode: "read_only", Origins: []string{"https://example.com"}}, OutputSchema: []byte(`{"type":"object"}`)}
+	digest, err := canonicalRequestDigest(r)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return s, r, digest
 }
-func admitFixtureV2(t *testing.T, s ReceiptStoreV2, r RunTaskV2Request, digest string) ReceiptV2 {
+func admitFixture(t *testing.T, s ReceiptStore, r RunTaskRequest, digest string) Receipt {
 	t.Helper()
 	got, created, err := s.Admit(context.Background(), "principal", r, digest)
 	if err != nil || !created {
@@ -38,21 +38,21 @@ func admitFixtureV2(t *testing.T, s ReceiptStoreV2, r RunTaskV2Request, digest s
 	return got
 }
 
-func TestReceiptsV2_OwnerDenied(t *testing.T) {
-	s, r, d := receiptFixtureV2(t, t.TempDir())
-	got := admitFixtureV2(t, s, r, d)
-	if _, err := s.Get(context.Background(), "someone-else", got.ExecutionID); !errors.Is(err, ErrReceiptNotFoundV2) && !errors.Is(err, ErrReceiptOwnerDeniedV2) {
+func TestReceipts_OwnerDenied(t *testing.T) {
+	s, r, d := receiptFixture(t, t.TempDir())
+	got := admitFixture(t, s, r, d)
+	if _, err := s.Get(context.Background(), "someone-else", got.ExecutionID); !errors.Is(err, ErrReceiptNotFound) && !errors.Is(err, ErrReceiptOwnerDenied) {
 		t.Fatalf("cross-owner lookup disclosed receipt: %v", err)
 	}
-	if _, err := s.Lookup(context.Background(), "someone-else", r.TaskID); !errors.Is(err, ErrReceiptNotFoundV2) {
+	if _, err := s.Lookup(context.Background(), "someone-else", r.TaskID); !errors.Is(err, ErrReceiptNotFound) {
 		t.Fatalf("cross-owner caller-key lookup = %v", err)
 	}
 }
 
-func TestReceiptsV2_ExclusiveLockAndClose(t *testing.T) {
+func TestReceipts_ExclusiveLockAndClose(t *testing.T) {
 	dir := t.TempDir()
-	s, _, _ := receiptFixtureV2(t, dir)
-	if _, err := OpenReceiptStoreV2(dir, 32<<20); err == nil {
+	s, _, _ := receiptFixture(t, dir)
+	if _, err := OpenReceiptStore(dir, 32<<20); err == nil {
 		t.Fatal("second process-equivalent opener acquired the exclusive lock")
 	}
 	if err := s.Close(); err != nil {
@@ -61,7 +61,7 @@ func TestReceiptsV2_ExclusiveLockAndClose(t *testing.T) {
 	if _, err := s.Lookup(context.Background(), "principal", "task_one"); err == nil {
 		t.Fatal("lookup succeeded after Close")
 	}
-	reopened, err := OpenReceiptStoreV2(dir, 32<<20)
+	reopened, err := OpenReceiptStore(dir, 32<<20)
 	if err != nil {
 		t.Fatalf("lock was not released by Close: %v", err)
 	}
@@ -70,25 +70,25 @@ func TestReceiptsV2_ExclusiveLockAndClose(t *testing.T) {
 	}
 }
 
-func TestReceiptsV2_PathTraversal(t *testing.T) {
-	s, r, d := receiptFixtureV2(t, t.TempDir())
+func TestReceipts_PathTraversal(t *testing.T) {
+	s, r, d := receiptFixture(t, t.TempDir())
 	if _, _, err := s.Admit(context.Background(), "principal", r, "../"+d); err == nil {
 		t.Fatal("accepted malformed digest")
 	}
-	got := admitFixtureV2(t, s, r, d)
+	got := admitFixture(t, s, r, d)
 	if _, err := s.ReadArtifact(context.Background(), "principal", got.ExecutionID, "../../receipts-v2.json", 0, 12); err == nil {
 		t.Fatal("accepted traversal artifact ID")
 	}
 }
 
-func TestReceiptsV2_ReopenUncertain(t *testing.T) {
+func TestReceipts_ReopenUncertain(t *testing.T) {
 	dir := t.TempDir()
-	s, r, d := receiptFixtureV2(t, dir)
-	first := admitFixtureV2(t, s, r, d)
+	s, r, d := receiptFixture(t, dir)
+	first := admitFixture(t, s, r, d)
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	s2, err := OpenReceiptStoreV2(dir, 32<<20)
+	s2, err := OpenReceiptStore(dir, 32<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,21 +97,21 @@ func TestReceiptsV2_ReopenUncertain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.State != ReceiptUncertainV2 || got.ExecutionID != first.ExecutionID {
+	if got.State != ReceiptUncertain || got.ExecutionID != first.ExecutionID {
 		t.Fatalf("recovered receipt = %+v", got)
 	}
 }
 
-func TestReceiptsV2_RequestConflict(t *testing.T) {
-	s, r, d := receiptFixtureV2(t, t.TempDir())
-	admitFixtureV2(t, s, r, d)
+func TestReceipts_RequestConflict(t *testing.T) {
+	s, r, d := receiptFixture(t, t.TempDir())
+	admitFixture(t, s, r, d)
 	changed := r
 	changed.Goal = "different"
-	changedDigest, err := canonicalRequestDigestV2(changed)
+	changedDigest, err := canonicalRequestDigest(changed)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, created, err := s.Admit(context.Background(), "principal", changed, changedDigest); !errors.Is(err, ErrReceiptConflictV2) || created {
+	if _, created, err := s.Admit(context.Background(), "principal", changed, changedDigest); !errors.Is(err, ErrReceiptConflict) || created {
 		t.Fatalf("changed request = created %v, err %v", created, err)
 	}
 	if _, created, err := s.Admit(context.Background(), "principal", r, d); err != nil || created {
@@ -119,19 +119,19 @@ func TestReceiptsV2_RequestConflict(t *testing.T) {
 	}
 }
 
-func TestReceiptsV2_BoundedRead(t *testing.T) {
-	s, r, d := receiptFixtureV2(t, t.TempDir())
-	rec := admitFixtureV2(t, s, r, d)
-	data := bytes.Repeat([]byte("x"), int(receiptReadChunkV2+20))
+func TestReceipts_BoundedRead(t *testing.T) {
+	s, r, d := receiptFixture(t, t.TempDir())
+	rec := admitFixture(t, s, r, d)
+	data := bytes.Repeat([]byte("x"), int(receiptReadChunk+20))
 	a, err := s.PutArtifact(context.Background(), "principal", rec.ExecutionID, data, "application/octet-stream")
 	if err != nil {
 		t.Fatal(err)
 	}
-	chunk, err := s.ReadArtifact(context.Background(), "principal", rec.ExecutionID, a.ID, 10, receiptReadChunkV2)
-	if err != nil || len(chunk) != int(receiptReadChunkV2) {
+	chunk, err := s.ReadArtifact(context.Background(), "principal", rec.ExecutionID, a.ID, 10, receiptReadChunk)
+	if err != nil || len(chunk) != int(receiptReadChunk) {
 		t.Fatalf("bounded read len=%d err=%v", len(chunk), err)
 	}
-	if _, err = s.ReadArtifact(context.Background(), "principal", rec.ExecutionID, a.ID, 0, receiptReadChunkV2+1); err == nil {
+	if _, err = s.ReadArtifact(context.Background(), "principal", rec.ExecutionID, a.ID, 0, receiptReadChunk+1); err == nil {
 		t.Fatal("oversized chunk accepted")
 	}
 	chunk[0] = 'z'
@@ -141,9 +141,9 @@ func TestReceiptsV2_BoundedRead(t *testing.T) {
 	}
 }
 
-func TestReceiptsV2_WriteFailure(t *testing.T) {
-	s, r, d := receiptFixtureV2(t, t.TempDir())
-	internal := s.(*receiptStoreV2)
+func TestReceipts_WriteFailure(t *testing.T) {
+	s, r, d := receiptFixture(t, t.TempDir())
+	internal := s.(*receiptStore)
 	internal.writeFile = func(string, []byte) error { return errors.New("injected fsync/rename failure") }
 	if _, created, err := s.Admit(context.Background(), "principal", r, d); err == nil || created {
 		t.Fatalf("failed durable write = created %v err %v", created, err)
@@ -154,34 +154,34 @@ func TestReceiptsV2_WriteFailure(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := OpenReceiptStoreV2(internal.dir, 32<<20)
+	reopened, err := OpenReceiptStore(internal.dir, 32<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
-	if _, err := reopened.Lookup(context.Background(), "principal", r.TaskID); !errors.Is(err, ErrReceiptNotFoundV2) {
+	if _, err := reopened.Lookup(context.Background(), "principal", r.TaskID); !errors.Is(err, ErrReceiptNotFound) {
 		t.Fatalf("failed admission leaked into durable state: %v", err)
 	}
 }
 
-func TestReceiptsV2_CallerKeyRecovery(t *testing.T) {
+func TestReceipts_CallerKeyRecovery(t *testing.T) {
 	dir := t.TempDir()
-	s, r, d := receiptFixtureV2(t, dir)
-	first := admitFixtureV2(t, s, r, d)
+	s, r, d := receiptFixture(t, dir)
+	first := admitFixture(t, s, r, d)
 	_ = s.Close()
-	s2, err := OpenReceiptStoreV2(dir, 32<<20)
+	s2, err := OpenReceiptStore(dir, 32<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s2.Close() })
 	got, err := s2.Lookup(context.Background(), "principal", r.TaskID)
-	if err != nil || got.ExecutionID != first.ExecutionID || got.State != ReceiptUncertainV2 {
+	if err != nil || got.ExecutionID != first.ExecutionID || got.State != ReceiptUncertain {
 		t.Fatalf("caller recovery = %+v, %v", got, err)
 	}
 }
 
-func TestReceiptsV2_ConcurrentDuplicate(t *testing.T) {
-	s, r, d := receiptFixtureV2(t, t.TempDir())
+func TestReceipts_ConcurrentDuplicate(t *testing.T) {
+	s, r, d := receiptFixture(t, t.TempDir())
 	const n = 12
 	var wg sync.WaitGroup
 	wg.Add(n)
@@ -225,17 +225,17 @@ func TestReceiptsV2_ConcurrentDuplicate(t *testing.T) {
 	}
 }
 
-func TestReceiptsV2_RecoveryRetention(t *testing.T) {
-	s, r, d := receiptFixtureV2(t, t.TempDir())
-	got := admitFixtureV2(t, s, r, d)
+func TestReceipts_RecoveryRetention(t *testing.T) {
+	s, r, d := receiptFixture(t, t.TempDir())
+	got := admitFixture(t, s, r, d)
 	now := time.Now().UTC()
 	billed := int64(0)
-	result := TaskResultV2{Schema: "ferro.result/v2", TaskID: r.TaskID, ExecutionID: got.ExecutionID, Status: TaskFailedV2, StartedAt: now.Add(-time.Minute), EndedAt: now, ModelProfile: r.ModelProfile, ProfileRevision: "revision", EffectiveLimits: core.DefaultLimitsV2(), Validation: "not_run", Usage: core.RequestUsageV2{BilledMicroUSD: &billed}, SideEffectState: SideEffectNoneV2}
+	result := TaskResult{Schema: "ferro.result/v2", TaskID: r.TaskID, ExecutionID: got.ExecutionID, Status: TaskFailed, StartedAt: now.Add(-time.Minute), EndedAt: now, ModelProfile: r.ModelProfile, ProfileRevision: "revision", EffectiveLimits: core.DefaultLimits(), Validation: "not_run", Usage: core.RequestUsage{BilledMicroUSD: &billed}, SideEffectState: SideEffectNone}
 	if err := s.Finalize(context.Background(), "principal", got.ExecutionID, result); err != nil {
 		t.Fatalf("Finalize(): %v", err)
 	}
-	internal := s.(*receiptStoreV2)
-	key := receiptKeyV2("principal", r.TaskID)
+	internal := s.(*receiptStore)
+	key := receiptKey("principal", r.TaskID)
 	entry := internal.disk.Receipts[key]
 	entry.Receipt.CreatedAt = now.Add(-31 * 24 * time.Hour)
 	internal.disk.Receipts[key] = entry
@@ -245,23 +245,23 @@ func TestReceiptsV2_RecoveryRetention(t *testing.T) {
 	if err := s.Cleanup(context.Background(), now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Lookup(context.Background(), "principal", r.TaskID); !errors.Is(err, ErrReceiptExpiredV2) {
+	if _, err := s.Lookup(context.Background(), "principal", r.TaskID); !errors.Is(err, ErrReceiptExpired) {
 		t.Fatalf("expired caller key did not resolve to tombstone: %v", err)
 	}
-	if _, _, err := s.Admit(context.Background(), "principal", r, d); !errors.Is(err, ErrReceiptExpiredV2) {
+	if _, _, err := s.Admit(context.Background(), "principal", r, d); !errors.Is(err, ErrReceiptExpired) {
 		t.Fatalf("expired key was admitted again: %v", err)
 	}
 	// An active entry is never eligible for cleanup, regardless of its age.
 	r2 := r
 	r2.TaskID = "active_task"
-	d2, err := canonicalRequestDigestV2(r2)
+	d2, err := canonicalRequestDigest(r2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	active := admitFixtureV2(t, s, r2, d2)
-	activeEntry := internal.disk.Receipts[receiptKeyV2("principal", r2.TaskID)]
+	active := admitFixture(t, s, r2, d2)
+	activeEntry := internal.disk.Receipts[receiptKey("principal", r2.TaskID)]
 	activeEntry.Receipt.CreatedAt = now.Add(-365 * 24 * time.Hour)
-	internal.disk.Receipts[receiptKeyV2("principal", r2.TaskID)] = activeEntry
+	internal.disk.Receipts[receiptKey("principal", r2.TaskID)] = activeEntry
 	if err := internal.persist(internal.disk); err != nil {
 		t.Fatal(err)
 	}
@@ -271,27 +271,27 @@ func TestReceiptsV2_RecoveryRetention(t *testing.T) {
 	if recovered, err := s.Lookup(context.Background(), "principal", r2.TaskID); err != nil || recovered.ExecutionID != active.ExecutionID {
 		t.Fatalf("active receipt removed: %+v %v", recovered, err)
 	}
-	if _, err := os.Stat(filepath.Join(internal.dir, receiptStoreFileV2)); err != nil {
+	if _, err := os.Stat(filepath.Join(internal.dir, receiptStoreFile)); err != nil {
 		t.Fatal(err)
 	}
 	// Missing spend information keeps a terminal receipt unreconciled.
 	r3 := r
 	r3.TaskID = "unknown_spend"
-	d3, err := canonicalRequestDigestV2(r3)
+	d3, err := canonicalRequestDigest(r3)
 	if err != nil {
 		t.Fatal(err)
 	}
-	unknown := admitFixtureV2(t, s, r3, d3)
+	unknown := admitFixture(t, s, r3, d3)
 	unknownResult := result
 	unknownResult.TaskID = r3.TaskID
 	unknownResult.ExecutionID = unknown.ExecutionID
-	unknownResult.Usage = core.RequestUsageV2{}
+	unknownResult.Usage = core.RequestUsage{}
 	if err := s.Finalize(context.Background(), "principal", unknown.ExecutionID, unknownResult); err != nil {
 		t.Fatal(err)
 	}
-	unknownEntry := internal.disk.Receipts[receiptKeyV2("principal", r3.TaskID)]
+	unknownEntry := internal.disk.Receipts[receiptKey("principal", r3.TaskID)]
 	unknownEntry.Receipt.CreatedAt = now.Add(-365 * 24 * time.Hour)
-	internal.disk.Receipts[receiptKeyV2("principal", r3.TaskID)] = unknownEntry
+	internal.disk.Receipts[receiptKey("principal", r3.TaskID)] = unknownEntry
 	if err := internal.persist(internal.disk); err != nil {
 		t.Fatal(err)
 	}
@@ -303,29 +303,29 @@ func TestReceiptsV2_RecoveryRetention(t *testing.T) {
 	}
 }
 
-func TestReceiptsV2_UnknownSpendCannotBeCleanedAfterFinalize(t *testing.T) {
+func TestReceipts_UnknownSpendCannotBeCleanedAfterFinalize(t *testing.T) {
 	dir := t.TempDir()
-	s, r, d := receiptFixtureV2(t, dir)
-	rec := admitFixtureV2(t, s, r, d)
+	s, r, d := receiptFixture(t, dir)
+	rec := admitFixture(t, s, r, d)
 	now := time.Now().UTC()
 	knownCost := int64(0)
-	result := TaskResultV2{
+	result := TaskResult{
 		Schema: "ferro.result/v2", TaskID: r.TaskID, ExecutionID: rec.ExecutionID,
-		Status: TaskFailedV2, StartedAt: now.Add(-time.Minute), EndedAt: now,
+		Status: TaskFailed, StartedAt: now.Add(-time.Minute), EndedAt: now,
 		ModelProfile: r.ModelProfile, ProfileRevision: "revision",
-		EffectiveLimits: core.DefaultLimitsV2(), Validation: "not_run",
-		Usage: core.RequestUsageV2{BilledMicroUSD: &knownCost},
-		Budget: core.BudgetSnapshotV2{
+		EffectiveLimits: core.DefaultLimits(), Validation: "not_run",
+		Usage: core.RequestUsage{BilledMicroUSD: &knownCost},
+		Budget: core.BudgetSnapshot{
 			Requests: 2, UncertainRequests: 1,
-			ReportedUsage: core.RequestUsageV2{BilledMicroUSD: &knownCost}, Currency: "USD",
+			ReportedUsage: core.RequestUsage{BilledMicroUSD: &knownCost}, Currency: "USD",
 		},
-		SideEffectState: SideEffectNoneV2,
+		SideEffectState: SideEffectNone,
 	}
 	if err := s.Finalize(context.Background(), "principal", rec.ExecutionID, result); err != nil {
 		t.Fatalf("Finalize(): %v", err)
 	}
-	internal := s.(*receiptStoreV2)
-	key := receiptKeyV2("principal", r.TaskID)
+	internal := s.(*receiptStore)
+	key := receiptKey("principal", r.TaskID)
 	entry := internal.disk.Receipts[key]
 	finalizeMarkedReconciled := entry.Reconciled
 	// Simulate a previously persisted flag from the older, incomplete rule.
@@ -347,7 +347,7 @@ func TestReceiptsV2_UnknownSpendCannotBeCleanedAfterFinalize(t *testing.T) {
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := OpenReceiptStoreV2(dir, 32<<20)
+	reopened, err := OpenReceiptStore(dir, 32<<20)
 	if err != nil {
 		t.Fatalf("reopen after uncertain-spend cleanup: %v", err)
 	}
@@ -357,30 +357,30 @@ func TestReceiptsV2_UnknownSpendCannotBeCleanedAfterFinalize(t *testing.T) {
 	}
 }
 
-func TestReceiptsV2_NearLimitFinalizeRemainsReopenable(t *testing.T) {
+func TestReceipts_NearLimitFinalizeRemainsReopenable(t *testing.T) {
 	dir := t.TempDir()
-	s, r, d := receiptFixtureV2(t, dir)
-	rec := admitFixtureV2(t, s, r, d)
+	s, r, d := receiptFixture(t, dir)
+	rec := admitFixture(t, s, r, d)
 	now := time.Now().UTC()
-	result := TaskResultV2{
+	result := TaskResult{
 		Schema: "ferro.result/v2", TaskID: r.TaskID, ExecutionID: rec.ExecutionID,
-		Status: TaskFailedV2, StartedAt: now.Add(-time.Minute), EndedAt: now,
+		Status: TaskFailed, StartedAt: now.Add(-time.Minute), EndedAt: now,
 		ModelProfile: r.ModelProfile, ProfileRevision: "revision",
-		EffectiveLimits: core.DefaultLimitsV2(), Validation: "not_run",
-		SideEffectState: SideEffectNoneV2,
+		EffectiveLimits: core.DefaultLimits(), Validation: "not_run",
+		SideEffectState: SideEffectNone,
 	}
-	result.Error = &TaskErrorV2{Category: "provider_error", Stage: "planning", Retry: "never"}
-	result.Error.Stage = nearLimitErrorStageV2(t, result)
+	result.Error = &TaskError{Category: "provider_error", Stage: "planning", Retry: "never"}
+	result.Error.Stage = nearLimitErrorStage(t, result)
 	encodedResult, err := json.Marshal(result)
-	if err != nil || int64(len(encodedResult)) > receiptMaxRecordV2 {
+	if err != nil || int64(len(encodedResult)) > receiptMaxRecord {
 		t.Fatalf("test result exceeds result boundary: bytes=%d err=%v", len(encodedResult), err)
 	}
-	receipt := ReceiptV2{
+	receipt := Receipt{
 		Owner: "principal", ExecutionID: rec.ExecutionID, TaskID: rec.TaskID,
-		RequestDigest: d, State: ReceiptFailedV2, Result: &result, CreatedAt: rec.CreatedAt,
+		RequestDigest: d, State: ReceiptFailed, Result: &result, CreatedAt: rec.CreatedAt,
 	}
 	encodedReceipt, err := json.Marshal(receipt)
-	if err != nil || int64(len(encodedReceipt)) <= receiptMaxRecordV2 {
+	if err != nil || int64(len(encodedReceipt)) <= receiptMaxRecord {
 		t.Fatalf("test receipt does not exceed full receipt boundary: bytes=%d err=%v", len(encodedReceipt), err)
 	}
 
@@ -389,20 +389,20 @@ func TestReceiptsV2_NearLimitFinalizeRemainsReopenable(t *testing.T) {
 		if err := s.Close(); err != nil {
 			t.Fatal(err)
 		}
-		if reopened, err := OpenReceiptStoreV2(dir, 32<<20); err != nil {
+		if reopened, err := OpenReceiptStore(dir, 32<<20); err != nil {
 			t.Fatalf("Finalize accepted a result that made the store unreopenable: %v", err)
 		} else {
 			_ = reopened.Close()
 		}
 		t.Fatal("Finalize accepted a full receipt above its persisted record limit")
 	}
-	if got, err := s.Get(context.Background(), "principal", rec.ExecutionID); err != nil || got.Result != nil || got.State != ReceiptAdmittedV2 {
+	if got, err := s.Get(context.Background(), "principal", rec.ExecutionID); err != nil || got.Result != nil || got.State != ReceiptAdmitted {
 		t.Fatalf("rejected finalization corrupted the existing receipt: %+v %v", got, err)
 	}
 	if err := s.Close(); err != nil {
 		t.Fatal(err)
 	}
-	reopened, err := OpenReceiptStoreV2(dir, 32<<20)
+	reopened, err := OpenReceiptStore(dir, 32<<20)
 	if err != nil {
 		t.Fatalf("store failed to reopen after rejected finalization: %v", err)
 	}
@@ -412,12 +412,12 @@ func TestReceiptsV2_NearLimitFinalizeRemainsReopenable(t *testing.T) {
 	}
 }
 
-func nearLimitErrorStageV2(t *testing.T, result TaskResultV2) string {
+func nearLimitErrorStage(t *testing.T, result TaskResult) string {
 	t.Helper()
 	if result.Error == nil {
 		t.Fatal("near-limit result needs an error")
 	}
-	low, high := 0, int(receiptMaxRecordV2)
+	low, high := 0, int(receiptMaxRecord)
 	for low < high {
 		mid := low + (high-low+1)/2
 		result.Error.Stage = strings.Repeat("s", mid)
@@ -425,7 +425,7 @@ func nearLimitErrorStageV2(t *testing.T, result TaskResultV2) string {
 		if err != nil {
 			t.Fatalf("marshal candidate result: %v", err)
 		}
-		if int64(len(encoded)) <= receiptMaxRecordV2 {
+		if int64(len(encoded)) <= receiptMaxRecord {
 			low = mid
 		} else {
 			high = mid - 1
@@ -434,17 +434,17 @@ func nearLimitErrorStageV2(t *testing.T, result TaskResultV2) string {
 	return strings.Repeat("s", low)
 }
 
-func TestReceiptsV2_CanonicalSchemaDigest(t *testing.T) {
-	s, base, _ := receiptFixtureV2(t, t.TempDir())
+func TestReceipts_CanonicalSchemaDigest(t *testing.T) {
+	s, base, _ := receiptFixture(t, t.TempDir())
 	r1 := base
 	r1.OutputSchema = []byte(`{"type":"object","properties":{"title":{"type":"string","description":"title"},"count":{"type":"integer","minimum":1}},"required":["title"]}`)
-	d1, err := canonicalRequestDigestV2(r1)
+	d1, err := canonicalRequestDigest(r1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	r2 := base
 	r2.OutputSchema = []byte(`{"required":["title"],"properties":{"count":{"minimum":1,"type":"integer"},"title":{"description":"title","type":"string"}},"type":"object"}`)
-	d2, err := canonicalRequestDigestV2(r2)
+	d2, err := canonicalRequestDigest(r2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -461,14 +461,14 @@ func TestReceiptsV2_CanonicalSchemaDigest(t *testing.T) {
 	}
 	r3 := base
 	r3.OutputSchema = []byte(`{"required":["title"],"properties":{"count":{"minimum":1,"type":"integer"},"title":{"description":"title","type":"number"}},"type":"object"}`)
-	d3, err := canonicalRequestDigestV2(r3)
+	d3, err := canonicalRequestDigest(r3)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if d3 == d1 {
 		t.Fatal("actual schema change retained the same request identity")
 	}
-	if _, created, err := s.Admit(context.Background(), "principal", r3, d3); !errors.Is(err, ErrReceiptConflictV2) || created {
+	if _, created, err := s.Admit(context.Background(), "principal", r3, d3); !errors.Is(err, ErrReceiptConflict) || created {
 		t.Fatalf("changed output schema admission = created %v err %v", created, err)
 	}
 
@@ -476,11 +476,11 @@ func TestReceiptsV2_CanonicalSchemaDigest(t *testing.T) {
 	precise1.OutputSchema = []byte(`{"type":"integer","minimum":9007199254740992}`)
 	precise2 := base
 	precise2.OutputSchema = []byte(`{"minimum":9007199254740993,"type":"integer"}`)
-	p1, err := canonicalRequestDigestV2(precise1)
+	p1, err := canonicalRequestDigest(precise1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	p2, err := canonicalRequestDigestV2(precise2)
+	p2, err := canonicalRequestDigest(precise2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -489,42 +489,42 @@ func TestReceiptsV2_CanonicalSchemaDigest(t *testing.T) {
 	}
 }
 
-func TestReceiptsV2_FinalizeHTMLRawResultForms(t *testing.T) {
+func TestReceipts_FinalizeHTMLRawResultForms(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
-		status     TaskStatusV2
+		status     TaskStatus
 		validation string
-		setOutput  func(*TaskResultV2, json.RawMessage)
+		setOutput  func(*TaskResult, json.RawMessage)
 	}{
 		{
 			name:   "accepted result",
-			status: TaskSucceededV2, validation: "valid",
-			setOutput: func(result *TaskResultV2, raw json.RawMessage) { result.Result = raw },
+			status: TaskSucceeded, validation: "valid",
+			setOutput: func(result *TaskResult, raw json.RawMessage) { result.Result = raw },
 		},
 		{
 			name:   "partial result",
-			status: TaskFailedV2, validation: "invalid",
-			setOutput: func(result *TaskResultV2, raw json.RawMessage) { result.PartialResult = raw },
+			status: TaskFailed, validation: "invalid",
+			setOutput: func(result *TaskResult, raw json.RawMessage) { result.PartialResult = raw },
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := t.TempDir()
-			s, r, d := receiptFixtureV2(t, dir)
-			rec := admitFixtureV2(t, s, r, d)
+			s, r, d := receiptFixture(t, dir)
+			rec := admitFixture(t, s, r, d)
 			now := time.Now().UTC()
-			result := TaskResultV2{
+			result := TaskResult{
 				Schema: "ferro.result/v2", TaskID: r.TaskID, ExecutionID: rec.ExecutionID,
 				Status: tc.status, StartedAt: now.Add(-time.Minute), EndedAt: now,
 				ModelProfile: r.ModelProfile, ProfileRevision: "revision",
-				EffectiveLimits: core.DefaultLimitsV2(), Validation: tc.validation,
-				SideEffectState: SideEffectNoneV2,
+				EffectiveLimits: core.DefaultLimits(), Validation: tc.validation,
+				SideEffectState: SideEffectNone,
 			}
 			raw := json.RawMessage(`{"html":"` + strings.Repeat("<", 3000) + `"}`)
 			tc.setOutput(&result, raw)
 			if len(raw) >= 16<<10 {
 				t.Fatalf("fixture raw JSON is not below inline limit: %d", len(raw))
 			}
-			if err := ValidateTaskResultV2(result); err != nil {
+			if err := ValidateTaskResult(result); err != nil {
 				t.Fatalf("raw result should pass envelope validation before serialization: %v", err)
 			}
 			finalizeErr := s.Finalize(context.Background(), "principal", rec.ExecutionID, result)
@@ -533,26 +533,26 @@ func TestReceiptsV2_FinalizeHTMLRawResultForms(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if got.Result == nil || ValidateTaskResultV2(*got.Result) == nil {
+				if got.Result == nil || ValidateTaskResult(*got.Result) == nil {
 					t.Fatal("Finalize persisted an expanded raw result that still passed validation")
 				}
 				if err := s.Close(); err != nil {
 					t.Fatal(err)
 				}
-				if reopened, err := OpenReceiptStoreV2(dir, 32<<20); err != nil {
+				if reopened, err := OpenReceiptStore(dir, 32<<20); err != nil {
 					t.Fatalf("Finalize accepted a result that made the store unreopenable: %v", err)
 				} else {
 					_ = reopened.Close()
 				}
 				t.Fatal("Finalize accepted an HTML-expanded raw result above the inline limit")
 			}
-			if got, err := s.Get(context.Background(), "principal", rec.ExecutionID); err != nil || got.Result != nil || got.State != ReceiptAdmittedV2 {
+			if got, err := s.Get(context.Background(), "principal", rec.ExecutionID); err != nil || got.Result != nil || got.State != ReceiptAdmitted {
 				t.Fatalf("rejected finalization corrupted the existing receipt: %+v %v", got, err)
 			}
 			if err := s.Close(); err != nil {
 				t.Fatal(err)
 			}
-			reopened, err := OpenReceiptStoreV2(dir, 32<<20)
+			reopened, err := OpenReceiptStore(dir, 32<<20)
 			if err != nil {
 				t.Fatalf("store failed to reopen after rejected finalization: %v", err)
 			}
@@ -564,16 +564,16 @@ func TestReceiptsV2_FinalizeHTMLRawResultForms(t *testing.T) {
 	}
 }
 
-func TestReceiptsV2_HTMLSchemaDigestAndRequestBounds(t *testing.T) {
-	s, request, _ := receiptFixtureV2(t, t.TempDir())
+func TestReceipts_HTMLSchemaDigestAndRequestBounds(t *testing.T) {
+	s, request, _ := receiptFixture(t, t.TempDir())
 	largeText := strings.Repeat("<", 6000)
 	request.OutputSchema = json.RawMessage(`{"type":"object","properties":{"x":{"description":"` + largeText + `","type":"string"}}}`)
-	rawRequest := receiptRequestJSONV2(request)
-	validated, err := ValidateTaskRequestV2(rawRequest)
+	rawRequest := receiptRequestJSON(request)
+	validated, err := ValidateTaskRequest(rawRequest)
 	if err != nil {
 		t.Fatalf("raw HTML schema inside wire limits rejected: %v", err)
 	}
-	digest, err := canonicalRequestDigestV2(validated)
+	digest, err := canonicalRequestDigest(validated)
 	if err != nil {
 		t.Fatalf("digest valid raw HTML schema: %v", err)
 	}
@@ -582,7 +582,7 @@ func TestReceiptsV2_HTMLSchemaDigestAndRequestBounds(t *testing.T) {
 		t.Fatalf("admit valid raw HTML schema = %+v created=%v err=%v", first, created, err)
 	}
 	request.OutputSchema = json.RawMessage(`{"properties":{"x":{"type":"string","description":"` + largeText + `"}},"type":"object"}`)
-	reordered, err := canonicalRequestDigestV2(request)
+	reordered, err := canonicalRequestDigest(request)
 	if err != nil || reordered != digest {
 		t.Fatalf("reordered HTML schema digest=%s err=%v; want %s", reordered, err, digest)
 	}
@@ -596,53 +596,53 @@ func TestReceiptsV2_HTMLSchemaDigestAndRequestBounds(t *testing.T) {
 		t.Fatalf("max schema fixture length=%d", len(maxSchema))
 	}
 	request.OutputSchema = maxSchema
-	if _, err := ValidateTaskRequestV2(receiptRequestJSONV2(request)); err != nil {
+	if _, err := ValidateTaskRequest(receiptRequestJSON(request)); err != nil {
 		t.Fatalf("schema exactly at byte limit rejected: %v", err)
 	}
 	request.OutputSchema = json.RawMessage(`{"description":"` + strings.Repeat("x", 32769-len(`{"description":"`)-len(`"}`)) + `"}`)
 	if len(request.OutputSchema) != 32769 {
 		t.Fatalf("oversized schema fixture length=%d", len(request.OutputSchema))
 	}
-	if _, err := ValidateTaskRequestV2(receiptRequestJSONV2(request)); err == nil {
+	if _, err := ValidateTaskRequest(receiptRequestJSON(request)); err == nil {
 		t.Fatal("schema above byte limit was accepted")
 	}
 
 	request.OutputSchema = []byte(`{"type":"object"}`)
-	maxRequest := receiptRequestJSONV2(request)
+	maxRequest := receiptRequestJSON(request)
 	if len(maxRequest) > 65536 {
 		t.Fatalf("base request exceeds wire limit: %d", len(maxRequest))
 	}
 	maxRequest = append(maxRequest, bytes.Repeat([]byte{' '}, 65536-len(maxRequest))...)
-	if _, err := ValidateTaskRequestV2(maxRequest); err != nil {
+	if _, err := ValidateTaskRequest(maxRequest); err != nil {
 		t.Fatalf("request exactly at byte limit rejected: %v", err)
 	}
 	maxRequest = append(maxRequest, ' ')
-	if _, err := ValidateTaskRequestV2(maxRequest); err == nil {
+	if _, err := ValidateTaskRequest(maxRequest); err == nil {
 		t.Fatal("request above byte limit was accepted")
 	}
 }
 
-func TestReceiptsV2_RecoveryReservesCapacity(t *testing.T) {
-	request := RunTaskV2Request{
+func TestReceipts_RecoveryReservesCapacity(t *testing.T) {
+	request := RunTaskRequest{
 		Schema: "ferro.task/v2", TaskID: "task_capacity", Goal: "inspect", ModelProfile: "profile",
-		Policy:       &TaskPolicyV2{Mode: "read_only", Origins: []string{"https://example.com"}},
+		Policy:       &TaskPolicy{Mode: "read_only", Origins: []string{"https://example.com"}},
 		OutputSchema: []byte(`{"type":"object"}`),
 	}
-	digest, err := canonicalRequestDigestV2(request)
+	digest, err := canonicalRequestDigest(request)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Run("rejects write without recovery headroom", func(t *testing.T) {
 		second := request
 		second.TaskID = "task_capacity2"
-		secondDigest, err := canonicalRequestDigestV2(second)
+		secondDigest, err := canonicalRequestDigest(second)
 		if err != nil {
 			t.Fatal(err)
 		}
 		// Calibrate to the exact active representation, including multiple rows
 		// and a running row with artifact data.
 		calibrationDir := t.TempDir()
-		calibration, err := OpenReceiptStoreV2(calibrationDir, 4096)
+		calibration, err := OpenReceiptStore(calibrationDir, 4096)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -659,13 +659,13 @@ func TestReceiptsV2_RecoveryReservesCapacity(t *testing.T) {
 		if err := calibration.Close(); err != nil {
 			t.Fatal(err)
 		}
-		info, err := os.Stat(filepath.Join(calibrationDir, receiptStoreFileV2))
+		info, err := os.Stat(filepath.Join(calibrationDir, receiptStoreFile))
 		if err != nil {
 			t.Fatal(err)
 		}
 		capacity := info.Size()
 		dir := t.TempDir()
-		s, err := OpenReceiptStoreV2(dir, capacity)
+		s, err := OpenReceiptStore(dir, capacity)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -677,33 +677,33 @@ func TestReceiptsV2_RecoveryReservesCapacity(t *testing.T) {
 		if err != nil || !created {
 			t.Fatalf("second capacity admission = %+v created=%v err=%v", secondReceipt, created, err)
 		}
-		if _, err := s.PutArtifact(context.Background(), "principal", secondReceipt.ExecutionID, []byte("artifact"), "text/plain"); !errors.Is(err, ErrReceiptCapacityV2) {
+		if _, err := s.PutArtifact(context.Background(), "principal", secondReceipt.ExecutionID, []byte("artifact"), "text/plain"); !errors.Is(err, ErrReceiptCapacity) {
 			t.Fatalf("artifact update without recovery headroom = %v", err)
 		}
-		if got, err := s.Lookup(context.Background(), "principal", request.TaskID); err != nil || got.State != ReceiptAdmittedV2 {
+		if got, err := s.Lookup(context.Background(), "principal", request.TaskID); err != nil || got.State != ReceiptAdmitted {
 			t.Fatalf("capacity rejection changed first active receipt: %+v %v", got, err)
 		}
-		if got, err := s.Lookup(context.Background(), "principal", second.TaskID); err != nil || got.State != ReceiptAdmittedV2 || len(got.Artifacts) != 0 {
+		if got, err := s.Lookup(context.Background(), "principal", second.TaskID); err != nil || got.State != ReceiptAdmitted || len(got.Artifacts) != 0 {
 			t.Fatalf("capacity rejection changed second active receipt: %+v %v", got, err)
 		}
 		if err := s.Close(); err != nil {
 			t.Fatal(err)
 		}
-		reopened, err := OpenReceiptStoreV2(dir, capacity)
+		reopened, err := OpenReceiptStore(dir, capacity)
 		if err != nil {
 			t.Fatalf("capacity rejection poisoned empty store: %v", err)
 		}
 		defer reopened.Close()
 		for _, taskID := range []string{request.TaskID, second.TaskID} {
 			got, err := reopened.Lookup(context.Background(), "principal", taskID)
-			if err != nil || got.State != ReceiptUncertainV2 {
+			if err != nil || got.State != ReceiptUncertain {
 				t.Fatalf("recovered receipt %s = %+v err=%v", taskID, got, err)
 			}
 		}
 	})
 	t.Run("accepted active receipt recovers", func(t *testing.T) {
 		dir := t.TempDir()
-		s, err := OpenReceiptStoreV2(dir, 4096)
+		s, err := OpenReceiptStore(dir, 4096)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -714,48 +714,48 @@ func TestReceiptsV2_RecoveryReservesCapacity(t *testing.T) {
 		if err := s.Close(); err != nil {
 			t.Fatal(err)
 		}
-		reopened, err := OpenReceiptStoreV2(dir, 4096)
+		reopened, err := OpenReceiptStore(dir, 4096)
 		if err != nil {
 			t.Fatalf("accepted active receipt could not recover: %v", err)
 		}
 		t.Cleanup(func() { _ = reopened.Close() })
 		got, err := reopened.Lookup(context.Background(), "principal", request.TaskID)
-		if err != nil || got.ExecutionID != first.ExecutionID || got.State != ReceiptUncertainV2 {
+		if err != nil || got.ExecutionID != first.ExecutionID || got.State != ReceiptUncertain {
 			t.Fatalf("recovered receipt = %+v err=%v", got, err)
 		}
 	})
 }
 
-func TestReceiptsV2_UnicodeLineSeparatorDigestWithinWireBounds(t *testing.T) {
-	store, request, _ := receiptFixtureV2(t, t.TempDir())
+func TestReceipts_UnicodeLineSeparatorDigestWithinWireBounds(t *testing.T) {
+	store, request, _ := receiptFixture(t, t.TempDir())
 	request.TaskID = "task_unicode"
 	request.Goal = strings.Repeat("\u2028", 5461)
 	prefix, suffix := `{"description":"`, `"}`
 	count := (32768 - len(prefix) - len(suffix)) / len("\u2028")
 	request.OutputSchema = json.RawMessage(prefix + strings.Repeat("\u2028", count-1) + "\u2029" + suffix)
-	raw := receiptRequestJSONV2(request)
+	raw := receiptRequestJSON(request)
 	if len(raw) > 65536 || len(request.Goal) > 16384 || len(request.OutputSchema) > 32768 {
 		t.Fatalf("test request does not fit raw limits: request=%d goal=%d schema=%d", len(raw), len(request.Goal), len(request.OutputSchema))
 	}
-	validated, err := ValidateTaskRequestV2(raw)
+	validated, err := ValidateTaskRequest(raw)
 	if err != nil {
 		t.Fatalf("valid U+2028 request rejected before digest: %v", err)
 	}
-	if _, err := canonicalRequestDigestV2(validated); err != nil {
+	if _, err := canonicalRequestDigest(validated); err != nil {
 		t.Fatalf("valid U+2028 request digest failed: %v", err)
 	}
-	digest, err := canonicalRequestDigestV2(validated)
+	digest, err := canonicalRequestDigest(validated)
 	if err != nil {
 		t.Fatal(err)
 	}
 	compact := request
 	compact.Goal = "line\u2028line\u2029"
 	compact.OutputSchema = json.RawMessage(`{"description":"\u2028"}`)
-	literalValidated, err := ValidateTaskRequestV2(receiptRequestJSONV2(compact))
+	literalValidated, err := ValidateTaskRequest(receiptRequestJSON(compact))
 	if err != nil {
 		t.Fatalf("literal equivalent request rejected: %v", err)
 	}
-	literalDigest, err := canonicalRequestDigestV2(literalValidated)
+	literalDigest, err := canonicalRequestDigest(literalValidated)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -763,11 +763,11 @@ func TestReceiptsV2_UnicodeLineSeparatorDigestWithinWireBounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	escapedValidated, err := ValidateTaskRequestV2(escapedRaw)
+	escapedValidated, err := ValidateTaskRequest(escapedRaw)
 	if err != nil {
 		t.Fatalf("escaped equivalent request rejected: %v", err)
 	}
-	escapedDigest, err := canonicalRequestDigestV2(escapedValidated)
+	escapedDigest, err := canonicalRequestDigest(escapedValidated)
 	if err != nil || escapedDigest != literalDigest {
 		t.Fatalf("equivalent escaped request digest = %q err=%v want %q", escapedDigest, err, literalDigest)
 	}
@@ -776,7 +776,7 @@ func TestReceiptsV2_UnicodeLineSeparatorDigestWithinWireBounds(t *testing.T) {
 	}
 }
 
-func TestReceiptsV2_WireSizeAndTypedSemanticLimits(t *testing.T) {
+func TestReceipts_WireSizeAndTypedSemanticLimits(t *testing.T) {
 	goal := strings.Repeat("g", 16384)
 	schemaPrefix, schemaSuffix := `{"type":"object","description":"`, `"}`
 	requestPrefix := `{"schema":"ferro.task/v2","task_id":"task_default_cap","goal":"` + goal + `","start_url":"https://example.com/start","model_profile":"profile","policy":{"mode":"read_only","origins":["https://example.com"]},"output_schema":`
@@ -793,15 +793,15 @@ func TestReceiptsV2_WireSizeAndTypedSemanticLimits(t *testing.T) {
 	if len(raw) != 65536 || len(goal) != 16384 || len(schemaPrefix)+len(description)+len(schemaSuffix) > 32768 {
 		t.Fatalf("bad boundary fixture: raw=%d goal=%d schema=%d", len(raw), len(goal), len(schemaPrefix)+len(description)+len(schemaSuffix))
 	}
-	validated, err := ValidateTaskRequestV2(raw)
+	validated, err := ValidateTaskRequest(raw)
 	if err != nil {
 		t.Fatalf("exact-limit request rejected: %v", err)
 	}
-	digest, err := canonicalRequestDigestV2(validated)
+	digest, err := canonicalRequestDigest(validated)
 	if err != nil {
 		t.Fatalf("normalizing valid exact-limit request rejected it: %v", err)
 	}
-	store, err := OpenReceiptStoreV2(t.TempDir(), 32<<20)
+	store, err := OpenReceiptStore(t.TempDir(), 32<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -810,40 +810,40 @@ func TestReceiptsV2_WireSizeAndTypedSemanticLimits(t *testing.T) {
 		t.Fatalf("exact-limit admission created=%v err=%v", created, err)
 	}
 
-	if _, err := ValidateTaskRequestV2(append(append([]byte(nil), raw...), ' ')); err == nil {
+	if _, err := ValidateTaskRequest(append(append([]byte(nil), raw...), ' ')); err == nil {
 		t.Fatal("request one byte over the wire limit was accepted")
 	}
 	oversizedField := validated
 	oversizedField.Goal += "x"
-	if _, err := canonicalRequestDigestV2(oversizedField); err == nil {
+	if _, err := canonicalRequestDigest(oversizedField); err == nil {
 		t.Fatal("direct typed request bypassed the goal field limit")
 	}
 
 	withExplicitDefaults := validated
-	withExplicitDefaults.Limits = core.LimitOverridesV2{}
-	withExplicitDefaults.Evidence = EvidenceCompactV2
-	if got, err := canonicalRequestDigestV2(withExplicitDefaults); err != nil || got != digest {
+	withExplicitDefaults.Limits = core.LimitOverrides{}
+	withExplicitDefaults.Evidence = EvidenceCompact
+	if got, err := canonicalRequestDigest(withExplicitDefaults); err != nil || got != digest {
 		t.Fatalf("explicit defaults digest = %q err=%v, want %q", got, err, digest)
 	}
 	omittedDefaults := validated
 	omittedDefaults.Evidence = ""
-	if got, err := canonicalRequestDigestV2(omittedDefaults); err != nil || got != digest {
+	if got, err := canonicalRequestDigest(omittedDefaults); err != nil || got != digest {
 		t.Fatalf("omitted defaults digest = %q err=%v, want %q", got, err, digest)
 	}
 	invalidEvidence := validated
 	invalidEvidence.Evidence = "unsupported"
-	if _, err := canonicalRequestDigestV2(invalidEvidence); err == nil {
+	if _, err := canonicalRequestDigest(invalidEvidence); err == nil {
 		t.Fatal("invalid nonempty evidence bypassed request validation")
 	}
 	negativeLimit := int64(-1)
 	invalidLimits := validated
 	invalidLimits.Limits.Actions = &negativeLimit
-	if _, err := canonicalRequestDigestV2(invalidLimits); err == nil {
+	if _, err := canonicalRequestDigest(invalidLimits); err == nil {
 		t.Fatal("invalid nonempty limits bypassed request validation")
 	}
 }
 
-func TestReceiptsV2_UnicodeOriginNormalizationAtWireLimit(t *testing.T) {
+func TestReceipts_UnicodeOriginNormalizationAtWireLimit(t *testing.T) {
 	goal := strings.Repeat("g", 16384)
 	origin := "https://Ⱥ.example"
 	schemaPrefix, schemaSuffix := `{"type":"object","description":"`, `"}`
@@ -858,7 +858,7 @@ func TestReceiptsV2_UnicodeOriginNormalizationAtWireLimit(t *testing.T) {
 	if len(raw) != 65536 {
 		t.Fatalf("Unicode-origin fixture is %d bytes, want 65536", len(raw))
 	}
-	validated, err := ValidateTaskRequestV2(raw)
+	validated, err := ValidateTaskRequest(raw)
 	if err != nil {
 		t.Fatalf("exact-limit Unicode-origin request rejected: %v", err)
 	}
@@ -866,19 +866,19 @@ func TestReceiptsV2_UnicodeOriginNormalizationAtWireLimit(t *testing.T) {
 		t.Fatalf("origin was not normalized as expected: %q", validated.Policy.Origins[0])
 	}
 	typedUnnormalized := validated
-	typedUnnormalized.Policy = &TaskPolicyV2{Mode: "read_only", Origins: []string{origin}}
-	digest, err := canonicalRequestDigestV2(validated)
+	typedUnnormalized.Policy = &TaskPolicy{Mode: "read_only", Origins: []string{origin}}
+	digest, err := canonicalRequestDigest(validated)
 	if err != nil {
 		t.Fatalf("normalized origin expansion invalidated request: %v", err)
 	}
-	unnormalizedDigest, err := canonicalRequestDigestV2(typedUnnormalized)
+	unnormalizedDigest, err := canonicalRequestDigest(typedUnnormalized)
 	if err != nil || unnormalizedDigest != digest {
 		t.Fatalf("typed unnormalized origin digest=%q err=%v want %q", unnormalizedDigest, err, digest)
 	}
 	if typedUnnormalized.Policy.Origins[0] != origin {
 		t.Fatalf("digest mutated caller-owned policy origin to %q", typedUnnormalized.Policy.Origins[0])
 	}
-	store, err := OpenReceiptStoreV2(t.TempDir(), 32<<20)
+	store, err := OpenReceiptStore(t.TempDir(), 32<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -888,10 +888,10 @@ func TestReceiptsV2_UnicodeOriginNormalizationAtWireLimit(t *testing.T) {
 	}
 }
 
-func TestMarshalJSONNoHTMLEscapeV2LineSeparatorSemantics(t *testing.T) {
+func TestMarshalJSONNoHTMLEscapeLineSeparatorSemantics(t *testing.T) {
 	for _, separator := range []string{"\u2028", "\u2029"} {
 		value := map[string]string{"text": "left\\" + separator + "right", "literal": "\\u2028"}
-		encoded, err := marshalJSONNoHTMLEscapeV2(value)
+		encoded, err := marshalJSONNoHTMLEscape(value)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -905,6 +905,6 @@ func TestMarshalJSONNoHTMLEscapeV2LineSeparatorSemantics(t *testing.T) {
 	}
 }
 
-func receiptRequestJSONV2(request RunTaskV2Request) []byte {
+func receiptRequestJSON(request RunTaskRequest) []byte {
 	return []byte(`{"schema":"ferro.task/v2","task_id":"` + request.TaskID + `","goal":"` + request.Goal + `","model_profile":"` + request.ModelProfile + `","policy":{"mode":"` + request.Policy.Mode + `","origins":["https://example.com"]},"output_schema":` + string(request.OutputSchema) + `}`)
 }

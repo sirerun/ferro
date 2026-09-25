@@ -11,7 +11,7 @@ import (
 
 // This examples check runs the frozen public validators against the operator
 // guide's request and result envelopes, rather than only checking JSON syntax.
-func TestBulkV2Examples(t *testing.T) {
+func TestBulkExamples(t *testing.T) {
 	root := filepath.Join("..", "docs", "examples", "bulk-v2")
 	for _, name := range []string{"read-only-request.json", "blocked-request.json", "budget-request.json", "artifact-request.json"} {
 		t.Run(name, func(t *testing.T) {
@@ -19,7 +19,7 @@ func TestBulkV2Examples(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := mcp.ValidateTaskRequestV2(raw); err != nil {
+			if _, err := mcp.ValidateTaskRequest(raw); err != nil {
 				t.Fatalf("frozen request validation: %v", err)
 			}
 		})
@@ -30,11 +30,11 @@ func TestBulkV2Examples(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var result mcp.TaskResultV2
+			var result mcp.TaskResult
 			if err := json.Unmarshal(raw, &result); err != nil {
 				t.Fatal(err)
 			}
-			if err := mcp.ValidateTaskResultV2(result); err != nil {
+			if err := mcp.ValidateTaskResult(result); err != nil {
 				t.Fatalf("frozen result validation: %v", err)
 			}
 		})

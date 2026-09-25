@@ -16,7 +16,7 @@ import (
 	"github.com/dndungu/ferro/internal/core"
 )
 
-type pageFixtureV2 struct {
+type pageFixture struct {
 	ID            string             `json:"id"`
 	Kind          string             `json:"kind"`
 	Path          string             `json:"path"`
@@ -29,19 +29,19 @@ type pageFixtureV2 struct {
 	ForbiddenText []string           `json:"forbidden_text"`
 }
 
-type providerFixtureIndexV2 struct {
+type providerFixtureIndex struct {
 	ID         string `json:"id"`
 	File       string `json:"file"`
 	Case       string `json:"case"`
 	UsageKnown bool   `json:"usage_known"`
 }
 
-type providerMessageV2 struct {
+type providerMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
-type providerResponseV2 struct {
+type providerResponse struct {
 	ID      string `json:"id"`
 	Model   string `json:"model"`
 	Choices []struct {
@@ -53,13 +53,13 @@ type providerResponseV2 struct {
 	Usage json.RawMessage `json:"usage"`
 }
 
-type providerTranscriptV2 struct {
-	ID              string              `json:"id"`
-	RequestMessages []providerMessageV2 `json:"request_messages"`
-	Response        json.RawMessage     `json:"response"`
+type providerTranscript struct {
+	ID              string            `json:"id"`
+	RequestMessages []providerMessage `json:"request_messages"`
+	Response        json.RawMessage   `json:"response"`
 }
 
-func bulkV2FixtureRoot(t *testing.T) string {
+func bulkFixtureRoot(t *testing.T) string {
 	t.Helper()
 	_, source, _, ok := runtime.Caller(0)
 	if !ok {
@@ -68,36 +68,36 @@ func bulkV2FixtureRoot(t *testing.T) string {
 	return filepath.Clean(filepath.Join(filepath.Dir(source), "..", "testdata", "bulk-v2"))
 }
 
-func readPageFixturesV2(t *testing.T, root string) []pageFixtureV2 {
+func readPageFixtures(t *testing.T, root string) []pageFixture {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(root, "pages", "fixtures.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var fixtures []pageFixtureV2
+	var fixtures []pageFixture
 	if err := json.Unmarshal(b, &fixtures); err != nil {
 		t.Fatalf("decode page fixture manifest: %v", err)
 	}
 	return fixtures
 }
 
-func readProviderFixturesV2(t *testing.T, root string) ([]providerFixtureIndexV2, map[string]providerTranscriptV2) {
+func readProviderFixtures(t *testing.T, root string) ([]providerFixtureIndex, map[string]providerTranscript) {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join(root, "provider-transcripts", "index.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var index []providerFixtureIndexV2
+	var index []providerFixtureIndex
 	if err := json.Unmarshal(b, &index); err != nil {
 		t.Fatalf("decode provider transcript index: %v", err)
 	}
-	transcripts := make(map[string]providerTranscriptV2, len(index))
+	transcripts := make(map[string]providerTranscript, len(index))
 	for _, entry := range index {
 		body, err := os.ReadFile(filepath.Join(root, "provider-transcripts", entry.File))
 		if err != nil {
 			t.Fatalf("read transcript %s: %v", entry.ID, err)
 		}
-		var transcript providerTranscriptV2
+		var transcript providerTranscript
 		if err := json.Unmarshal(body, &transcript); err != nil {
 			t.Fatalf("decode transcript %s: %v", entry.ID, err)
 		}
@@ -106,9 +106,9 @@ func readProviderFixturesV2(t *testing.T, root string) ([]providerFixtureIndexV2
 	return index, transcripts
 }
 
-func TestBulkV2Fixtures_Complete(t *testing.T) {
-	root := bulkV2FixtureRoot(t)
-	pages := readPageFixturesV2(t, root)
+func TestBulkFixtures_Complete(t *testing.T) {
+	root := bulkFixtureRoot(t)
+	pages := readPageFixtures(t, root)
 	wantPageKinds := map[string]bool{
 		"stable_fields": false, "missing_fields": false, "stale_layout": false,
 		"redirect": false, "login_gate": false, "hostile_instructions": false,
@@ -151,7 +151,7 @@ func TestBulkV2Fixtures_Complete(t *testing.T) {
 		}
 	}
 
-	index, transcripts := readProviderFixturesV2(t, root)
+	index, transcripts := readProviderFixtures(t, root)
 	wantProviderCases := map[string]bool{
 		"valid_plan": false, "malformed_json": false, "schema_mismatch": false,
 		"repair_response": false, "missing_usage": false,
@@ -170,14 +170,14 @@ func TestBulkV2Fixtures_Complete(t *testing.T) {
 		if !ok || transcript.ID != entry.ID || len(transcript.RequestMessages) == 0 {
 			t.Fatalf("provider transcript %s has no request/response evidence", entry.ID)
 		}
-		var response providerResponseV2
+		var response providerResponse
 		if err := json.Unmarshal(transcript.Response, &response); err != nil || len(response.Choices) != 1 || response.Choices[0].FinishReason != "stop" {
 			t.Fatalf("provider transcript %s has invalid response: %v", entry.ID, err)
 		}
 		if entry.UsageKnown != (len(response.Usage) > 0) {
 			t.Fatalf("provider transcript %s usage_known=%v usage=%s", entry.ID, entry.UsageKnown, response.Usage)
 		}
-		validateProviderTranscriptCaseV2(t, entry, transcript, response)
+		validateProviderTranscriptCase(t, entry, transcript, response)
 	}
 	for name, found := range wantProviderCases {
 		if !found {
@@ -186,7 +186,7 @@ func TestBulkV2Fixtures_Complete(t *testing.T) {
 	}
 }
 
-func validateProviderTranscriptCaseV2(t *testing.T, entry providerFixtureIndexV2, transcript providerTranscriptV2, response providerResponseV2) {
+func validateProviderTranscriptCase(t *testing.T, entry providerFixtureIndex, transcript providerTranscript, response providerResponse) {
 	t.Helper()
 	content := response.Choices[0].Message.Content
 	switch entry.Case {
@@ -226,15 +226,15 @@ func validateProviderTranscriptCaseV2(t *testing.T, entry providerFixtureIndexV2
 	}
 }
 
-func TestBulkV2Fixtures_LocalServer(t *testing.T) {
-	root := bulkV2FixtureRoot(t)
-	pages := readPageFixturesV2(t, root)
-	providerIndex, transcripts := readProviderFixturesV2(t, root)
-	pageByPath := make(map[string]pageFixtureV2, len(pages))
+func TestBulkFixtures_LocalServer(t *testing.T) {
+	root := bulkFixtureRoot(t)
+	pages := readPageFixtures(t, root)
+	providerIndex, transcripts := readProviderFixtures(t, root)
+	pageByPath := make(map[string]pageFixture, len(pages))
 	for _, fixture := range pages {
 		pageByPath[fixture.Path] = fixture
 	}
-	providerByID := make(map[string]providerTranscriptV2, len(providerIndex))
+	providerByID := make(map[string]providerTranscript, len(providerIndex))
 	for _, entry := range providerIndex {
 		providerByID[entry.ID] = transcripts[entry.ID]
 	}
@@ -330,12 +330,12 @@ func TestBulkV2Fixtures_LocalServer(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var got providerResponseV2
+			var got providerResponse
 			if err := json.Unmarshal(body, &got); err != nil || len(got.Choices) != 1 {
 				t.Fatalf("provider fixture response invalid: %v", err)
 			}
 			transcript := transcripts[entry.ID]
-			var expected providerResponseV2
+			var expected providerResponse
 			if err := json.Unmarshal(transcript.Response, &expected); err != nil {
 				t.Fatal(err)
 			}
@@ -346,8 +346,8 @@ func TestBulkV2Fixtures_LocalServer(t *testing.T) {
 	}
 }
 
-func TestBulkV2Fixtures_NoSecrets(t *testing.T) {
-	root := bulkV2FixtureRoot(t)
+func TestBulkFixtures_NoSecrets(t *testing.T) {
+	root := bulkFixtureRoot(t)
 	var files []string
 	for _, directory := range []string{"pages", "provider-transcripts"} {
 		base := filepath.Join(root, directory)

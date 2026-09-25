@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-func TestUsageContractV2Nullable(t *testing.T) {
-	var u core.RequestUsageV2
+func TestUsageContractNullable(t *testing.T) {
+	var u core.RequestUsage
 	if err := json.Unmarshal([]byte(`{"input_tokens":0}`), &u); err != nil {
 		t.Fatal(err)
 	}
@@ -15,8 +15,8 @@ func TestUsageContractV2Nullable(t *testing.T) {
 		t.Fatalf("nullable usage lost: %+v", u)
 	}
 }
-func TestTransmissionV2Enums(t *testing.T) {
-	got := []core.TransmissionV2{core.TransmissionNotSentV2, core.TransmissionSentUnknownV2, core.TransmissionResponseReceivedV2}
+func TestTransmissionEnums(t *testing.T) {
+	got := []core.Transmission{core.TransmissionNotSent, core.TransmissionSentUnknown, core.TransmissionResponseReceived}
 	if got[0] == got[1] || got[1] == got[2] {
 		t.Fatal("transmission states collide")
 	}

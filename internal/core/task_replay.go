@@ -8,9 +8,9 @@ import (
 	"strings"
 )
 
-// ReplayIdentityV2 derives an opaque cache partition from the frozen replay
+// ReplayIdentity derives an opaque cache partition from the frozen replay
 // context. An empty caller label explicitly disables replay.
-func ReplayIdentityV2(ctx ReplayContextV2) (string, error) {
+func ReplayIdentity(ctx ReplayContext) (string, error) {
 	if ctx.CallerLabel == "" {
 		return "", nil
 	}

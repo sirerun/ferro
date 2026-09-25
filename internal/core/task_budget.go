@@ -9,42 +9,42 @@ import (
 )
 
 const (
-	budgetKindPlanningV2   = "planning"
-	budgetKindRepairV2     = "repair"
-	budgetKindExtractionV2 = "extraction"
-	budgetKindParseRetryV2 = "parse_retry"
+	budgetKindPlanning   = "planning"
+	budgetKindRepair     = "repair"
+	budgetKindExtraction = "extraction"
+	budgetKindParseRetry = "parse_retry"
 )
 
-type taskBudgetV2 struct {
+type taskBudget struct {
 	mu         sync.Mutex
-	limits     LimitsV2
+	limits     Limits
 	deadline   time.Time
 	now        func() time.Time
-	snapshot   BudgetSnapshotV2
+	snapshot   BudgetSnapshot
 	overrun    bool
 	sequence   uint64
-	pending    map[string]budgetReservationV2
+	pending    map[string]budgetReservation
 	reconciled map[string]struct{}
 }
 
-type budgetReservationV2 struct {
+type budgetReservation struct {
 	kind     string
 	reserved int64
 }
 
-// NewTaskBudgetV2 creates a request and action budget with a fixed deadline.
-func NewTaskBudgetV2(limits LimitsV2, started time.Time) (BudgetControllerV2, error) {
-	return newTaskBudgetV2(limits, started, time.Now)
+// NewTaskBudget creates a request and action budget with a fixed deadline.
+func NewTaskBudget(limits Limits, started time.Time) (BudgetController, error) {
+	return newTaskBudget(limits, started, time.Now)
 }
 
-func newTaskBudgetV2(limits LimitsV2, started time.Time, now func() time.Time) (*taskBudgetV2, error) {
+func newTaskBudget(limits Limits, started time.Time, now func() time.Time) (*taskBudget, error) {
 	if limits.ReserveMicroUSD != nil {
-		return nil, ErrUnsupportedCostReserveV2
+		return nil, ErrUnsupportedCostReserve
 	}
 	if limits.HardDollar {
-		return nil, ErrUnsupportedHardDollarV2
+		return nil, ErrUnsupportedHardDollar
 	}
-	if err := limits.ValidateV2(); err != nil {
+	if err := limits.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid task budget limits: %w", err)
 	}
 	if started.IsZero() {
@@ -58,94 +58,94 @@ func newTaskBudgetV2(limits LimitsV2, started time.Time, now func() time.Time) (
 		return nil, fmt.Errorf("task budget start time is in the future")
 	}
 	deadline := started.Add(time.Duration(limits.RuntimeMS) * time.Millisecond)
-	return &taskBudgetV2{
-		limits:     cloneLimitsV2(limits),
+	return &taskBudget{
+		limits:     cloneLimits(limits),
 		deadline:   deadline,
 		now:        now,
-		pending:    make(map[string]budgetReservationV2),
+		pending:    make(map[string]budgetReservation),
 		reconciled: make(map[string]struct{}),
 	}, nil
 }
 
-func (b *taskBudgetV2) Admit(ctx context.Context, kind string, estimatedInput, maxOutput int64) (ReservationV2, error) {
+func (b *taskBudget) Admit(ctx context.Context, kind string, estimatedInput, maxOutput int64) (Reservation, error) {
 	if ctx == nil {
-		return ReservationV2{}, fmt.Errorf("admit model request: nil context")
+		return Reservation{}, fmt.Errorf("admit model request: nil context")
 	}
 	if err := b.contextError(ctx); err != nil {
-		return ReservationV2{}, err
+		return Reservation{}, err
 	}
-	if !validBudgetKindV2(kind) {
-		return ReservationV2{}, fmt.Errorf("invalid model request kind %q", kind)
+	if !validBudgetKind(kind) {
+		return Reservation{}, fmt.Errorf("invalid model request kind %q", kind)
 	}
 	if estimatedInput < 0 {
-		return ReservationV2{}, fmt.Errorf("estimated input tokens cannot be negative")
+		return Reservation{}, fmt.Errorf("estimated input tokens cannot be negative")
 	}
 	if estimatedInput > b.limits.MaxInputTokens {
-		return ReservationV2{}, fmt.Errorf("%w: estimated input exceeds the per-request token ceiling", ErrBudgetExhaustedV2)
+		return Reservation{}, fmt.Errorf("%w: estimated input exceeds the per-request token ceiling", ErrBudgetExhausted)
 	}
 	if maxOutput <= 0 || maxOutput > b.limits.MaxOutputTokens {
-		return ReservationV2{}, fmt.Errorf("maximum output tokens outside [1,%d]", b.limits.MaxOutputTokens)
+		return Reservation{}, fmt.Errorf("maximum output tokens outside [1,%d]", b.limits.MaxOutputTokens)
 	}
-	reserve, ok := addNonnegativeV2(estimatedInput, maxOutput)
+	reserve, ok := addNonnegative(estimatedInput, maxOutput)
 	if !ok {
-		return ReservationV2{}, fmt.Errorf("request token reservation overflow")
+		return Reservation{}, fmt.Errorf("request token reservation overflow")
 	}
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if err := b.contextError(ctx); err != nil {
-		return ReservationV2{}, err
+		return Reservation{}, err
 	}
 	if !b.now().Before(b.deadline) {
-		return ReservationV2{}, ErrBudgetExhaustedV2
+		return Reservation{}, ErrBudgetExhausted
 	}
 	if b.overrun {
-		return ReservationV2{}, ErrBudgetExhaustedV2
+		return Reservation{}, ErrBudgetExhausted
 	}
 	if b.snapshot.Requests >= b.limits.ModelRequests {
-		return ReservationV2{}, ErrBudgetExhaustedV2
+		return Reservation{}, ErrBudgetExhausted
 	}
-	if kind == budgetKindPlanningV2 && b.snapshot.PlanningPasses >= b.limits.PlanningPasses {
-		return ReservationV2{}, ErrBudgetExhaustedV2
+	if kind == budgetKindPlanning && b.snapshot.PlanningPasses >= b.limits.PlanningPasses {
+		return Reservation{}, ErrBudgetExhausted
 	}
-	if kind == budgetKindRepairV2 && b.snapshot.Repairs >= b.limits.Repairs {
-		return ReservationV2{}, ErrBudgetExhaustedV2
+	if kind == budgetKindRepair && b.snapshot.Repairs >= b.limits.Repairs {
+		return Reservation{}, ErrBudgetExhausted
 	}
-	newReserved, ok := addNonnegativeV2(b.snapshot.ReservedTokens, reserve)
+	newReserved, ok := addNonnegative(b.snapshot.ReservedTokens, reserve)
 	if !ok {
-		return ReservationV2{}, fmt.Errorf("cumulative token reservation overflow")
+		return Reservation{}, fmt.Errorf("cumulative token reservation overflow")
 	}
 	if newReserved > b.limits.TotalReservedTokens {
-		return ReservationV2{}, ErrBudgetExhaustedV2
+		return Reservation{}, ErrBudgetExhausted
 	}
-	newEstimatedInput, ok := addNonnegativeV2(b.snapshot.EstimatedInputTokens, estimatedInput)
+	newEstimatedInput, ok := addNonnegative(b.snapshot.EstimatedInputTokens, estimatedInput)
 	if !ok {
-		return ReservationV2{}, fmt.Errorf("cumulative input estimate overflow")
+		return Reservation{}, fmt.Errorf("cumulative input estimate overflow")
 	}
-	newReservedOutput, ok := addNonnegativeV2(b.snapshot.ReservedOutputTokens, maxOutput)
+	newReservedOutput, ok := addNonnegative(b.snapshot.ReservedOutputTokens, maxOutput)
 	if !ok {
-		return ReservationV2{}, fmt.Errorf("cumulative output reservation overflow")
+		return Reservation{}, fmt.Errorf("cumulative output reservation overflow")
 	}
-	newRequests, ok := addNonnegativeV2(b.snapshot.Requests, 1)
+	newRequests, ok := addNonnegative(b.snapshot.Requests, 1)
 	if !ok {
-		return ReservationV2{}, fmt.Errorf("model request counter overflow")
+		return Reservation{}, fmt.Errorf("model request counter overflow")
 	}
 	newPlanningPasses := b.snapshot.PlanningPasses
 	newRepairs := b.snapshot.Repairs
-	if kind == budgetKindPlanningV2 {
-		newPlanningPasses, ok = addNonnegativeV2(newPlanningPasses, 1)
+	if kind == budgetKindPlanning {
+		newPlanningPasses, ok = addNonnegative(newPlanningPasses, 1)
 		if !ok {
-			return ReservationV2{}, fmt.Errorf("planning pass counter overflow")
+			return Reservation{}, fmt.Errorf("planning pass counter overflow")
 		}
 	}
-	if kind == budgetKindRepairV2 {
-		newRepairs, ok = addNonnegativeV2(newRepairs, 1)
+	if kind == budgetKindRepair {
+		newRepairs, ok = addNonnegative(newRepairs, 1)
 		if !ok {
-			return ReservationV2{}, fmt.Errorf("repair counter overflow")
+			return Reservation{}, fmt.Errorf("repair counter overflow")
 		}
 	}
 	if b.sequence == math.MaxUint64 {
-		return ReservationV2{}, fmt.Errorf("reservation identifier counter overflow")
+		return Reservation{}, fmt.Errorf("reservation identifier counter overflow")
 	}
 	id := fmt.Sprintf("budget-v2-%d", b.sequence+1)
 	b.sequence++
@@ -155,24 +155,24 @@ func (b *taskBudgetV2) Admit(ctx context.Context, kind string, estimatedInput, m
 	b.snapshot.ReservedTokens = newReserved
 	b.snapshot.EstimatedInputTokens = newEstimatedInput
 	b.snapshot.ReservedOutputTokens = newReservedOutput
-	b.pending[id] = budgetReservationV2{kind: kind, reserved: reserve}
-	return ReservationV2{ID: id, Kind: kind, EstimatedInput: estimatedInput, MaxOutput: maxOutput}, nil
+	b.pending[id] = budgetReservation{kind: kind, reserved: reserve}
+	return Reservation{ID: id, Kind: kind, EstimatedInput: estimatedInput, MaxOutput: maxOutput}, nil
 }
 
-func (b *taskBudgetV2) Reconcile(id string, completion CompletionV2) error {
+func (b *taskBudget) Reconcile(id string, completion Completion) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if _, ok := b.reconciled[id]; ok {
-		return ErrDuplicateReconcileV2
+		return ErrDuplicateReconcile
 	}
 	reservation, ok := b.pending[id]
 	if !ok || id == "" {
-		return ErrInvalidReservationV2
+		return ErrInvalidReservation
 	}
-	if err := validateCompletionUsageV2(completion); err != nil {
+	if err := validateCompletionUsage(completion); err != nil {
 		return err
 	}
-	usageTotals, err := sumUsageV2(b.snapshot.ReportedUsage, completion.Usage)
+	usageTotals, err := sumUsage(b.snapshot.ReportedUsage, completion.Usage)
 	if err != nil {
 		return err
 	}
@@ -181,18 +181,18 @@ func (b *taskBudgetV2) Reconcile(id string, completion CompletionV2) error {
 	newUncertain := b.snapshot.UncertainRequests
 	newOverrun := b.overrun
 	switch completion.Transmission {
-	case TransmissionNotSentV2:
-		newReserved, ok = subtractNonnegativeV2(newReserved, reservation.reserved)
+	case TransmissionNotSent:
+		newReserved, ok = subtractNonnegative(newReserved, reservation.reserved)
 		if !ok {
 			return fmt.Errorf("token reservation accounting underflow")
 		}
-	case TransmissionSentUnknownV2:
-		newUncertain, ok = addNonnegativeV2(newUncertain, 1)
+	case TransmissionSentUnknown:
+		newUncertain, ok = addNonnegative(newUncertain, 1)
 		if !ok {
 			return fmt.Errorf("uncertain request counter overflow")
 		}
-	case TransmissionResponseReceivedV2:
-		actual, known, totalErr := actualTokenUsageV2(completion.Usage)
+	case TransmissionResponseReceived:
+		actual, known, totalErr := actualTokenUsage(completion.Usage)
 		if totalErr != nil {
 			return totalErr
 		}
@@ -200,17 +200,17 @@ func (b *taskBudgetV2) Reconcile(id string, completion CompletionV2) error {
 			if actual > reservation.reserved {
 				newOverrun = true
 			}
-			newReserved, ok = subtractNonnegativeV2(newReserved, reservation.reserved)
+			newReserved, ok = subtractNonnegative(newReserved, reservation.reserved)
 			if !ok {
 				return fmt.Errorf("token reservation accounting underflow")
 			}
-			newReserved, ok = addNonnegativeV2(newReserved, actual)
+			newReserved, ok = addNonnegative(newReserved, actual)
 			if !ok {
 				return fmt.Errorf("reported token usage overflow")
 			}
 		}
 		if !known || completion.Usage.BilledMicroUSD == nil {
-			newUncertain, ok = addNonnegativeV2(newUncertain, 1)
+			newUncertain, ok = addNonnegative(newUncertain, 1)
 			if !ok {
 				return fmt.Errorf("uncertain request counter overflow")
 			}
@@ -231,7 +231,7 @@ func (b *taskBudgetV2) Reconcile(id string, completion CompletionV2) error {
 	return nil
 }
 
-func (b *taskBudgetV2) AdmitAction(ctx context.Context) error {
+func (b *taskBudget) AdmitAction(ctx context.Context) error {
 	if ctx == nil {
 		return fmt.Errorf("admit browser action: nil context")
 	}
@@ -244,9 +244,9 @@ func (b *taskBudgetV2) AdmitAction(ctx context.Context) error {
 		return err
 	}
 	if !b.now().Before(b.deadline) || b.overrun || b.snapshot.Actions >= b.limits.Actions {
-		return ErrBudgetExhaustedV2
+		return ErrBudgetExhausted
 	}
-	next, ok := addNonnegativeV2(b.snapshot.Actions, 1)
+	next, ok := addNonnegative(b.snapshot.Actions, 1)
 	if !ok {
 		return fmt.Errorf("browser action counter overflow")
 	}
@@ -254,7 +254,7 @@ func (b *taskBudgetV2) AdmitAction(ctx context.Context) error {
 	return nil
 }
 
-func (b *taskBudgetV2) contextError(ctx context.Context) error {
+func (b *taskBudget) contextError(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -264,42 +264,42 @@ func (b *taskBudgetV2) contextError(ctx context.Context) error {
 	return nil
 }
 
-func (b *taskBudgetV2) Snapshot() BudgetSnapshotV2 {
+func (b *taskBudget) Snapshot() BudgetSnapshot {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	snapshot := b.snapshot
-	snapshot.ReportedUsage = cloneUsageV2(snapshot.ReportedUsage)
-	snapshot.ReservedMicroUSD = cloneInt64V2(snapshot.ReservedMicroUSD)
-	snapshot.UnresolvedMicroUSD = cloneInt64V2(snapshot.UnresolvedMicroUSD)
+	snapshot.ReportedUsage = cloneUsage(snapshot.ReportedUsage)
+	snapshot.ReservedMicroUSD = cloneInt64(snapshot.ReservedMicroUSD)
+	snapshot.UnresolvedMicroUSD = cloneInt64(snapshot.UnresolvedMicroUSD)
 	return snapshot
 }
 
-func validBudgetKindV2(kind string) bool {
+func validBudgetKind(kind string) bool {
 	switch kind {
-	case budgetKindPlanningV2, budgetKindRepairV2, budgetKindExtractionV2, budgetKindParseRetryV2:
+	case budgetKindPlanning, budgetKindRepair, budgetKindExtraction, budgetKindParseRetry:
 		return true
 	default:
 		return false
 	}
 }
 
-func addNonnegativeV2(a, c int64) (int64, bool) {
+func addNonnegative(a, c int64) (int64, bool) {
 	if a < 0 || c < 0 || a > math.MaxInt64-c {
 		return 0, false
 	}
 	return a + c, true
 }
 
-func subtractNonnegativeV2(a, c int64) (int64, bool) {
+func subtractNonnegative(a, c int64) (int64, bool) {
 	if a < 0 || c < 0 || c > a {
 		return 0, false
 	}
 	return a - c, true
 }
 
-func validateCompletionUsageV2(completion CompletionV2) error {
+func validateCompletionUsage(completion Completion) error {
 	switch completion.Transmission {
-	case TransmissionNotSentV2, TransmissionSentUnknownV2, TransmissionResponseReceivedV2:
+	case TransmissionNotSent, TransmissionSentUnknown, TransmissionResponseReceived:
 	default:
 		return fmt.Errorf("invalid transmission state %q", completion.Transmission)
 	}
@@ -316,11 +316,11 @@ func validateCompletionUsageV2(completion CompletionV2) error {
 		if value != nil && *value < 0 {
 			return fmt.Errorf("reported usage cannot be negative")
 		}
-		if value != nil && completion.Transmission != TransmissionResponseReceivedV2 {
+		if value != nil && completion.Transmission != TransmissionResponseReceived {
 			return fmt.Errorf("reported usage requires a received response")
 		}
 	}
-	if completion.Transmission == TransmissionResponseReceivedV2 && completion.Usage.TotalTokens != nil {
+	if completion.Transmission == TransmissionResponseReceived && completion.Usage.TotalTokens != nil {
 		input, output := completion.Usage.InputTokens, completion.Usage.OutputTokens
 		var minimum int64
 		if input != nil {
@@ -332,7 +332,7 @@ func validateCompletionUsageV2(completion CompletionV2) error {
 			}
 		}
 		if input != nil && output != nil {
-			sum, ok := addNonnegativeV2(*input, *output)
+			sum, ok := addNonnegative(*input, *output)
 			if !ok {
 				return fmt.Errorf("reported input and output token sum overflow")
 			}
@@ -345,21 +345,21 @@ func validateCompletionUsageV2(completion CompletionV2) error {
 	return nil
 }
 
-func actualTokenUsageV2(usage RequestUsageV2) (int64, bool, error) {
+func actualTokenUsage(usage RequestUsage) (int64, bool, error) {
 	if usage.TotalTokens != nil {
 		return *usage.TotalTokens, true, nil
 	}
 	if usage.InputTokens == nil || usage.OutputTokens == nil {
 		return 0, false, nil
 	}
-	total, ok := addNonnegativeV2(*usage.InputTokens, *usage.OutputTokens)
+	total, ok := addNonnegative(*usage.InputTokens, *usage.OutputTokens)
 	if !ok {
 		return 0, false, fmt.Errorf("reported input and output token sum overflow")
 	}
 	return total, true, nil
 }
 
-func sumUsageV2(current, added RequestUsageV2) (RequestUsageV2, error) {
+func sumUsage(current, added RequestUsage) (RequestUsage, error) {
 	fields := []struct {
 		name string
 		dst  **int64
@@ -382,9 +382,9 @@ func sumUsageV2(current, added RequestUsageV2) (RequestUsageV2, error) {
 			*field.dst = &value
 			continue
 		}
-		total, ok := addNonnegativeV2(**field.dst, *field.a)
+		total, ok := addNonnegative(**field.dst, *field.a)
 		if !ok {
-			return RequestUsageV2{}, fmt.Errorf("reported %s total overflow", field.name)
+			return RequestUsage{}, fmt.Errorf("reported %s total overflow", field.name)
 		}
 		value := total
 		*field.dst = &value
@@ -392,13 +392,13 @@ func sumUsageV2(current, added RequestUsageV2) (RequestUsageV2, error) {
 	return current, nil
 }
 
-func cloneUsageV2(usage RequestUsageV2) RequestUsageV2 {
-	usage.InputTokens = cloneInt64V2(usage.InputTokens)
-	usage.OutputTokens = cloneInt64V2(usage.OutputTokens)
-	usage.TotalTokens = cloneInt64V2(usage.TotalTokens)
-	usage.ReasoningTokens = cloneInt64V2(usage.ReasoningTokens)
-	usage.CacheReadTokens = cloneInt64V2(usage.CacheReadTokens)
-	usage.CacheWriteTokens = cloneInt64V2(usage.CacheWriteTokens)
-	usage.BilledMicroUSD = cloneInt64V2(usage.BilledMicroUSD)
+func cloneUsage(usage RequestUsage) RequestUsage {
+	usage.InputTokens = cloneInt64(usage.InputTokens)
+	usage.OutputTokens = cloneInt64(usage.OutputTokens)
+	usage.TotalTokens = cloneInt64(usage.TotalTokens)
+	usage.ReasoningTokens = cloneInt64(usage.ReasoningTokens)
+	usage.CacheReadTokens = cloneInt64(usage.CacheReadTokens)
+	usage.CacheWriteTokens = cloneInt64(usage.CacheWriteTokens)
+	usage.BilledMicroUSD = cloneInt64(usage.BilledMicroUSD)
 	return usage
 }

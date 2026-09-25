@@ -229,17 +229,23 @@ Any type with `Complete(ctx, system, user string) (string, error)`
 satisfies `ferro.LLMClient`, so other backends need no changes to the
 engine.
 
-## Bounded browser tasks
+## Goal-level browser work
 
-MCP clients can use `run_task_v2` for read-only work with a unique task ID,
-explicit origins, an output schema and request/token/action limits. Model
-usage stays attached to the outcome, including failures. Durable receipts
-prevent duplicate dispatch and let a new client recover after a lost response.
-Large results can be fetched as bounded, digest-verified artifact chunks.
+Use the single `run_task` MCP tool for browser work. It is read/write by
+default: Ferro can navigate, click, type, select, and press keys while pursuing
+the goal. The browser origin allowlist and bounded execution still apply. A
+simple request needs only a goal. Add a unique `task_id`, exact `policy.origins`,
+an `output_schema`, and optional limits when you want durable receipt recovery,
+validated structured output, and bounded artifact retrieval. Set
+`policy.mode` to `read_only` only when a task must not change the page.
 
-See the [operator guide](docs/bulk-browser-operator.md) for requests, configured
-model profiles, receipt recovery and limitations. Existing chat, `run_task`
-and direct browser tools retain their interfaces. One tab executes at a time.
+Ferro's planner makes a compact plan, executes it deterministically, and
+returns execution metrics instead of sending each intermediate snapshot back
+to the MCP client. Set `model_profile` to `legacy-chat` to use the provider and
+key saved in Ferro Chat settings (for example OpenRouter); the default
+`legacy-mcp` profile continues to use `FERRO_MCP_LLM_*`. See the
+[operator guide](docs/bulk-browser-operator.md) for lead research, model
+profiles, receipt recovery, and limits. One tab executes at a time.
 
 `cmd/ferro-cloud` adds a private single-owner HTTPS deployment option for
 `ferro.sire.run`, with separate MCP and extension credentials. The Chrome

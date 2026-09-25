@@ -11,11 +11,11 @@ import (
 	"github.com/dndungu/ferro/internal/core"
 )
 
-func TestRequestV2RejectsInvalidUnknownTrailingAndUnsupportedSchema(t *testing.T) {
+func TestRequestRejectsInvalidUnknownTrailingAndUnsupportedSchema(t *testing.T) {
 	base := `{"schema":"ferro.task/v2","task_id":"t-1","goal":"read","model_profile":"p","policy":{"mode":"read_only","origins":["https://EXAMPLE.com:443/"]},"output_schema":{"type":"object"}}`
 	for _, tc := range []struct{ name, raw string }{{"valid", base}, {"unknown", base[:len(base)-1] + `,"x":1}`}, {"trailing", base + ` {}`}, {"unsupported schema keyword", strings.Replace(base, `"type":"object"`, `"$ref":"https://x"`, 1)}} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, e := ValidateTaskRequestV2([]byte(tc.raw))
+			_, e := ValidateTaskRequest([]byte(tc.raw))
 			if tc.name == "valid" && e != nil {
 				t.Fatal(e)
 			}
@@ -25,40 +25,54 @@ func TestRequestV2RejectsInvalidUnknownTrailingAndUnsupportedSchema(t *testing.T
 		})
 	}
 }
-func TestRequestV2LimitZeroAndEnum(t *testing.T) {
+
+func TestTaskPolicyDefaultsToReadWrite(t *testing.T) {
+	raw := `{"task_id":"task_default_mode","goal":"search and read results","policy":{"origins":["https://example.com"]},"output_schema":{"type":"object"}}`
+	request, err := ValidateTaskRequest([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if request.Policy.Mode != "read_write" {
+		t.Fatalf("default mode=%q, want read_write", request.Policy.Mode)
+	}
+	if request.ModelProfile != "legacy-mcp" {
+		t.Fatalf("default model profile=%q, want legacy-mcp", request.ModelProfile)
+	}
+}
+func TestRequestLimitZeroAndEnum(t *testing.T) {
 	base := `{"schema":"ferro.task/v2","task_id":"t","goal":"g","model_profile":"p","policy":{"mode":"read_only","origins":["https://example.com"]},"output_schema":{"type":"object"},"limits":{"actions":0}}`
-	if _, e := ValidateTaskRequestV2([]byte(base)); e == nil {
+	if _, e := ValidateTaskRequest([]byte(base)); e == nil {
 		t.Fatal("explicit zero limit accepted")
 	}
 	raw := []byte(strings.Replace(base, `"limits":{"actions":0}`, `"evidence":"huge"`, 1))
-	if _, e := ValidateTaskRequestV2(raw); e == nil {
+	if _, e := ValidateTaskRequest(raw); e == nil {
 		t.Fatal("invalid evidence accepted")
 	}
 }
 
-func TestRequestV2RejectsOverflowAndMalformedTrailing(t *testing.T) {
+func TestRequestRejectsOverflowAndMalformedTrailing(t *testing.T) {
 	for _, raw := range []string{
 		`{"schema":"ferro.task/v2","task_id":"t","goal":"g","model_profile":"p","policy":{"mode":"read_only","origins":["https://example.com"]},"output_schema":{"type":"object"},"limits":{"actions":9223372036854775808}}`,
 		`{"schema":"ferro.task/v2","task_id":"t","goal":"g","model_profile":"p","policy":{"mode":"read_only","origins":["https://example.com"]},"output_schema":{"type":"object"}} {`,
 	} {
-		if _, err := ValidateTaskRequestV2([]byte(raw)); err == nil {
+		if _, err := ValidateTaskRequest([]byte(raw)); err == nil {
 			t.Fatalf("accepted invalid input: %s", raw)
 		}
 	}
 }
 func TestReceiptFixtureJSONRoundTrip(t *testing.T) {
-	r := ReceiptV2{TaskID: "t", State: ReceiptUncertainV2}
+	r := Receipt{TaskID: "t", State: ReceiptUncertain}
 	b, e := json.Marshal(r)
 	if e != nil {
 		t.Fatal(e)
 	}
-	var got ReceiptV2
-	if e = json.Unmarshal(b, &got); e != nil || got.State != ReceiptUncertainV2 {
+	var got Receipt
+	if e = json.Unmarshal(b, &got); e != nil || got.State != ReceiptUncertain {
 		t.Fatalf("%s %v", b, e)
 	}
 }
 
-func TestRequestV2WireRegressions(t *testing.T) {
+func TestRequestWireRegressions(t *testing.T) {
 	base := `{"schema":"ferro.task/v2","task_id":"t-1","goal":"read","model_profile":"p","policy":{"mode":"read_only","origins":["https://example.com"]},"output_schema":{"type":"object"}}`
 	tests := []struct {
 		name string
@@ -73,7 +87,7 @@ func TestRequestV2WireRegressions(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := ValidateTaskRequestV2([]byte(tc.raw))
+			_, err := ValidateTaskRequest([]byte(tc.raw))
 			if (tc.name == "valid new profile field") == (err != nil) {
 				t.Fatalf("unexpected validation result: %v", err)
 			}
@@ -81,9 +95,9 @@ func TestRequestV2WireRegressions(t *testing.T) {
 	}
 }
 
-func TestRequestV2CanonicalOriginsAndStartURL(t *testing.T) {
+func TestRequestCanonicalOriginsAndStartURL(t *testing.T) {
 	raw := `{"schema":"ferro.task/v2","task_id":"task_1","goal":"read","start_url":"https://[2001:DB8::1]:443/path?q=1","model_profile":"profile_1","policy":{"mode":"read_only","origins":["https://[2001:db8::1]/"]},"output_schema":{"type":"object"}}`
-	r, err := ValidateTaskRequestV2([]byte(raw))
+	r, err := ValidateTaskRequest([]byte(raw))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,13 +109,13 @@ func TestRequestV2CanonicalOriginsAndStartURL(t *testing.T) {
 		t.Fatal("failed to mutate start_url")
 	}
 	raw = mutated
-	if _, err = ValidateTaskRequestV2([]byte(raw)); err == nil {
+	if _, err = ValidateTaskRequest([]byte(raw)); err == nil {
 		t.Fatal("origin mismatch accepted")
 	}
 }
 
 func TestResolvedProfileCredentialIsNeverSerialized(t *testing.T) {
-	b, err := json.Marshal(ResolvedProfileV2{Credential: "secret-token"})
+	b, err := json.Marshal(ResolvedProfile{Credential: "secret-token"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +134,7 @@ func TestLegacyRunTaskArgsSerializationRemainsStable(t *testing.T) {
 	}
 }
 
-func TestContractFixturesV2(t *testing.T) {
+func TestContractFixtures(t *testing.T) {
 	root := filepath.Join("..", "..", "docs", "contracts", "bulk-v2")
 	requestFiles, err := filepath.Glob(filepath.Join(root, "request-*.json"))
 	if err != nil {
@@ -134,7 +148,7 @@ func TestContractFixturesV2(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, err = ValidateTaskRequestV2(raw)
+			_, err = ValidateTaskRequest(raw)
 			if (err == nil) != wantValid {
 				t.Fatalf("valid=%v, err=%v", wantValid, err)
 			}
@@ -149,11 +163,11 @@ func TestContractFixturesV2(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var result TaskResultV2
+			var result TaskResult
 			if err = json.Unmarshal(raw, &result); err != nil {
 				t.Fatal(err)
 			}
-			err = ValidateTaskResultV2(result)
+			err = ValidateTaskResult(result)
 			if (err == nil) != item.valid {
 				t.Fatalf("valid=%v, err=%v", item.valid, err)
 			}
@@ -164,7 +178,7 @@ func TestContractFixturesV2(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var p ProfileV2
+		var p Profile
 		if err = json.Unmarshal(raw, &p); err != nil {
 			t.Fatal(err)
 		}
@@ -181,7 +195,7 @@ func TestContractFixturesV2(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var receipt ReceiptV2
+		var receipt Receipt
 		if err = json.Unmarshal(raw, &receipt); err != nil {
 			t.Fatal(err)
 		}
@@ -189,11 +203,11 @@ func TestContractFixturesV2(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var roundTrip ReceiptV2
+		var roundTrip Receipt
 		if err = json.Unmarshal(encoded, &roundTrip); err != nil {
 			t.Fatal(err)
 		}
-		if roundTrip.Owner != receipt.Owner || roundTrip.State != ReceiptUncertainV2 || roundTrip.TaskID != receipt.TaskID {
+		if roundTrip.Owner != receipt.Owner || roundTrip.State != ReceiptUncertain || roundTrip.TaskID != receipt.TaskID {
 			t.Fatalf("receipt fixture changed: %s", encoded)
 		}
 	})
@@ -202,7 +216,7 @@ func TestContractFixturesV2(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var usage core.RequestUsageV2
+		var usage core.RequestUsage
 		if err = json.Unmarshal(raw, &usage); err != nil {
 			t.Fatal(err)
 		}
@@ -213,7 +227,7 @@ func TestContractFixturesV2(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var roundTrip core.RequestUsageV2
+		var roundTrip core.RequestUsage
 		if err = json.Unmarshal(encoded, &roundTrip); err != nil {
 			t.Fatal(err)
 		}
@@ -223,71 +237,71 @@ func TestContractFixturesV2(t *testing.T) {
 	})
 }
 
-func TestTaskResultV2ArtifactBackedSuccess(t *testing.T) {
-	result := validTaskResultV2()
+func TestTaskResultArtifactBackedSuccess(t *testing.T) {
+	result := validTaskResult()
 	result.Result = nil
 	result.ResultArtifactID = "result-large"
-	result.Artifacts = []ArtifactV2{{ID: "result-large", SHA256: strings.Repeat("a", 64), MediaType: "application/json", Size: 16385}}
-	if err := ValidateTaskResultV2(result); err != nil {
+	result.Artifacts = []Artifact{{ID: "result-large", SHA256: strings.Repeat("a", 64), MediaType: "application/json", Size: 16385}}
+	if err := ValidateTaskResult(result); err != nil {
 		t.Fatalf("valid artifact-backed success rejected: %v", err)
 	}
 }
 
-func TestTaskResultV2RejectsInvalidArtifactAndResultCombinations(t *testing.T) {
-	base := validTaskResultV2()
+func TestTaskResultRejectsInvalidArtifactAndResultCombinations(t *testing.T) {
+	base := validTaskResult()
 	base.Result = nil
 	base.ResultArtifactID = "result-large"
-	base.Artifacts = []ArtifactV2{{ID: "result-large", SHA256: strings.Repeat("a", 64), MediaType: "application/json", Size: 16385}}
+	base.Artifacts = []Artifact{{ID: "result-large", SHA256: strings.Repeat("a", 64), MediaType: "application/json", Size: 16385}}
 	for _, tc := range []struct {
 		name string
-		edit func(*TaskResultV2)
+		edit func(*TaskResult)
 	}{
-		{"missing reference", func(r *TaskResultV2) { r.Artifacts = nil }},
-		{"duplicate reference", func(r *TaskResultV2) { r.Artifacts = append(r.Artifacts, r.Artifacts[0]) }},
-		{"inline and artifact", func(r *TaskResultV2) { r.Result = json.RawMessage(`{}`) }},
-		{"artifact too small", func(r *TaskResultV2) { r.Artifacts[0].Size = 16384 }},
-		{"artifact wrong media type", func(r *TaskResultV2) { r.Artifacts[0].MediaType = "text/plain" }},
-		{"failure with artifact reference", func(r *TaskResultV2) { r.Status = TaskFailedV2; r.ResultArtifactID = "result-large" }},
+		{"missing reference", func(r *TaskResult) { r.Artifacts = nil }},
+		{"duplicate reference", func(r *TaskResult) { r.Artifacts = append(r.Artifacts, r.Artifacts[0]) }},
+		{"inline and artifact", func(r *TaskResult) { r.Result = json.RawMessage(`{}`) }},
+		{"artifact too small", func(r *TaskResult) { r.Artifacts[0].Size = 16384 }},
+		{"artifact wrong media type", func(r *TaskResult) { r.Artifacts[0].MediaType = "text/plain" }},
+		{"failure with artifact reference", func(r *TaskResult) { r.Status = TaskFailed; r.ResultArtifactID = "result-large" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := base
-			r.Artifacts = append([]ArtifactV2(nil), base.Artifacts...)
+			r.Artifacts = append([]Artifact(nil), base.Artifacts...)
 			tc.edit(&r)
-			if err := ValidateTaskResultV2(r); err == nil {
+			if err := ValidateTaskResult(r); err == nil {
 				t.Fatal("invalid artifact/result combination accepted")
 			}
 		})
 	}
 }
 
-func TestTaskResultV2RejectsNegativeBudgetAndMonetaryAmounts(t *testing.T) {
+func TestTaskResultRejectsNegativeBudgetAndMonetaryAmounts(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		edit func(*TaskResultV2)
+		edit func(*TaskResult)
 	}{
-		{"negative counter", func(r *TaskResultV2) { r.Budget.Actions = -1 }},
-		{"negative reported usage", func(r *TaskResultV2) { v := int64(-1); r.Budget.ReportedUsage.InputTokens = &v }},
-		{"negative reserved money", func(r *TaskResultV2) { v := int64(-1); r.Budget.ReservedMicroUSD = &v }},
-		{"negative billed money", func(r *TaskResultV2) { v := int64(-1); r.Budget.ReportedUsage.BilledMicroUSD = &v }},
-		{"unsupported currency", func(r *TaskResultV2) { r.Budget.Currency = "EUR" }},
-		{"empty currency with monetary value", func(r *TaskResultV2) { v := int64(0); r.Budget.ReservedMicroUSD = &v }},
+		{"negative counter", func(r *TaskResult) { r.Budget.Actions = -1 }},
+		{"negative reported usage", func(r *TaskResult) { v := int64(-1); r.Budget.ReportedUsage.InputTokens = &v }},
+		{"negative reserved money", func(r *TaskResult) { v := int64(-1); r.Budget.ReservedMicroUSD = &v }},
+		{"negative billed money", func(r *TaskResult) { v := int64(-1); r.Budget.ReportedUsage.BilledMicroUSD = &v }},
+		{"unsupported currency", func(r *TaskResult) { r.Budget.Currency = "EUR" }},
+		{"empty currency with monetary value", func(r *TaskResult) { v := int64(0); r.Budget.ReservedMicroUSD = &v }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := validTaskResultV2()
+			r := validTaskResult()
 			tc.edit(&r)
-			if err := ValidateTaskResultV2(r); err == nil {
+			if err := ValidateTaskResult(r); err == nil {
 				t.Fatal("invalid budget accepted")
 			}
 		})
 	}
 }
 
-func TestTaskResultV2PreservesUnknownAndZeroBudgetMoney(t *testing.T) {
-	r := validTaskResultV2()
+func TestTaskResultPreservesUnknownAndZeroBudgetMoney(t *testing.T) {
+	r := validTaskResult()
 	r.Budget.Currency = "USD"
 	zero := int64(0)
 	r.Budget.ReservedMicroUSD = &zero
-	if err := ValidateTaskResultV2(r); err != nil {
+	if err := ValidateTaskResult(r); err != nil {
 		t.Fatalf("zero monetary amount with USD rejected: %v", err)
 	}
 	if r.Budget.UnresolvedMicroUSD != nil || r.Budget.ReportedUsage.BilledMicroUSD != nil {
@@ -295,46 +309,46 @@ func TestTaskResultV2PreservesUnknownAndZeroBudgetMoney(t *testing.T) {
 	}
 }
 
-func TestTaskResultV2AllowsTruthfulUsageOverrun(t *testing.T) {
-	r := validTaskResultV2()
+func TestTaskResultAllowsTruthfulUsageOverrun(t *testing.T) {
+	r := validTaskResult()
 	r.Budget.Actions = r.EffectiveLimits.Actions + 1
 	used := r.EffectiveLimits.MaxInputTokens + 1
 	r.Budget.ReportedUsage.InputTokens = &used
-	if err := ValidateTaskResultV2(r); err != nil {
+	if err := ValidateTaskResult(r); err != nil {
 		t.Fatalf("truthful usage overrun rejected: %v", err)
 	}
 }
 
-func TestTaskResultV2RejectsInvalidUTF8InResultAndArtifactMetadata(t *testing.T) {
+func TestTaskResultRejectsInvalidUTF8InResultAndArtifactMetadata(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		edit func(*TaskResultV2)
+		edit func(*TaskResult)
 	}{
-		{"result", func(r *TaskResultV2) { r.Result = json.RawMessage{'{', '"', 0xff, '"', ':', '1', '}'} }},
-		{"partial result", func(r *TaskResultV2) {
-			r.Status = TaskFailedV2
+		{"result", func(r *TaskResult) { r.Result = json.RawMessage{'{', '"', 0xff, '"', ':', '1', '}'} }},
+		{"partial result", func(r *TaskResult) {
+			r.Status = TaskFailed
 			r.Result = nil
 			r.PartialResult = json.RawMessage{'{', '"', 0xff, '"', ':', '1', '}'}
 		}},
-		{"artifact media type", func(r *TaskResultV2) {
-			r.Artifacts = []ArtifactV2{{ID: "a", SHA256: strings.Repeat("a", 64), MediaType: string([]byte{0xff}), Size: 1}}
+		{"artifact media type", func(r *TaskResult) {
+			r.Artifacts = []Artifact{{ID: "a", SHA256: strings.Repeat("a", 64), MediaType: string([]byte{0xff}), Size: 1}}
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			r := validTaskResultV2()
+			r := validTaskResult()
 			tc.edit(&r)
-			if err := ValidateTaskResultV2(r); err == nil {
+			if err := ValidateTaskResult(r); err == nil {
 				t.Fatal("invalid UTF-8 accepted")
 			}
 		})
 	}
 }
 
-func validTaskResultV2() TaskResultV2 {
-	return TaskResultV2{
-		Schema: "ferro.result/v2", TaskID: "task", ExecutionID: "exec", Status: TaskSucceededV2,
+func validTaskResult() TaskResult {
+	return TaskResult{
+		Schema: "ferro.result/v2", TaskID: "task", ExecutionID: "exec", Status: TaskSucceeded,
 		StartedAt: time.Date(2026, 9, 24, 12, 0, 0, 0, time.UTC), EndedAt: time.Date(2026, 9, 24, 12, 0, 1, 0, time.UTC),
-		ModelProfile: "profile", ProfileRevision: "revision", EffectiveLimits: core.DefaultLimitsV2(),
-		Result: json.RawMessage(`{}`), Validation: "valid", SideEffectState: SideEffectNoneV2,
+		ModelProfile: "profile", ProfileRevision: "revision", EffectiveLimits: core.DefaultLimits(),
+		Result: json.RawMessage(`{}`), Validation: "valid", SideEffectState: SideEffectNone,
 	}
 }

@@ -98,8 +98,8 @@ func TestAWSConditionKeysAndTrustBoundaries(t *testing.T) {
 		t.Fatal(err)
 	}
 	condition := efsPolicy.Statement[0].Condition
-	if condition["Bool"]["aws:SecureTransport"] != "true" || condition["StringEquals"]["elasticfilesystem:AccessPointArn"] == "" {
-		t.Fatalf("EFS policy missing supported TLS/access-point conditions: %#v", condition)
+	if condition["StringEquals"]["elasticfilesystem:AccessPointArn"] == "" {
+		t.Fatalf("EFS policy is not scoped to an access point: %#v", condition)
 	}
 	if _, exists := condition["StringEquals"]["elasticfilesystem:EncryptedInTransit"]; exists {
 		t.Fatal("EFS policy contains unsupported EncryptedInTransit condition key")
@@ -152,16 +152,19 @@ func TestEFSResourcePolicyEnforcesOnlyTaskRoleAccess(t *testing.T) {
 	for _, statement := range policy.Statement {
 		bySid[statement["Sid"].(string)] = statement
 	}
-	for _, sid := range []string{"DenyInsecureTransport", "DenyUnexpectedAccessPoint", "DenyUnexpectedPrincipal", "AllowTaskRoleViaAccessPointTLS"} {
+	for _, sid := range []string{"AllowTaskRoleViaAccessPoint"} {
 		if bySid[sid] == nil {
 			t.Fatalf("missing filesystem policy statement %q: %#v", sid, policy.Statement)
 		}
 	}
-	if bySid["DenyUnexpectedPrincipal"]["NotPrincipal"].(map[string]any)["AWS"] != "task-role-arn" {
-		t.Fatalf("filesystem policy does not deny other principals: %#v", bySid["DenyUnexpectedPrincipal"])
+	if _, exists := bySid["DenyUnexpectedPrincipal"]; exists {
+		t.Fatalf("filesystem policy must rely on the exact-principal allow and avoid a NotPrincipal deny: %#v", bySid["DenyUnexpectedPrincipal"])
 	}
-	if bySid["AllowTaskRoleViaAccessPointTLS"]["Principal"].(map[string]any)["AWS"] != "task-role-arn" {
-		t.Fatalf("filesystem policy allow is not scoped to task role: %#v", bySid["AllowTaskRoleViaAccessPointTLS"])
+	if bySid["AllowTaskRoleViaAccessPoint"]["Principal"].(map[string]any)["AWS"] != "task-role-arn" {
+		t.Fatalf("filesystem policy allow is not scoped to task role: %#v", bySid["AllowTaskRoleViaAccessPoint"])
+	}
+	if bySid["AllowTaskRoleViaAccessPoint"]["Condition"].(map[string]any)["StringEquals"].(map[string]any)["elasticfilesystem:AccessPointArn"] != "ap-arn" {
+		t.Fatalf("filesystem policy allow is not scoped to the access point: %#v", bySid["AllowTaskRoleViaAccessPoint"])
 	}
 }
 

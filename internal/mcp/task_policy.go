@@ -14,39 +14,43 @@ import (
 	"github.com/dndungu/ferro/internal/core"
 )
 
-type taskPolicyDriverV2 struct {
+type taskPolicyDriver struct {
 	driver  core.PageDriver
 	origins []string
-	guard   TaskPolicyGuardV2
-	budget  core.BudgetControllerV2
+	mode    string
+	guard   TaskPolicyGuard
+	budget  core.BudgetController
 }
 
-// NewTaskPolicyDriverV2 wraps a browser driver with read-only origin and
-// action-budget checks. It is an automation guard, not network egress control.
-func NewTaskPolicyDriverV2(driver core.PageDriver, policy TaskPolicyV2, guard TaskPolicyGuardV2, budget core.BudgetControllerV2) (core.PageDriver, error) {
-	if isNilPolicyDependencyV2(driver) || isNilPolicyDependencyV2(guard) || isNilPolicyDependencyV2(budget) {
+// NewTaskPolicyDriver wraps a browser driver with origin and action-budget
+// checks. Read and write browser operations are permitted within that scope.
+func NewTaskPolicyDriver(driver core.PageDriver, policy TaskPolicy, guard TaskPolicyGuard, budget core.BudgetController) (core.PageDriver, error) {
+	if isNilPolicyDependency(driver) || isNilPolicyDependency(guard) || isNilPolicyDependency(budget) {
 		return nil, fmt.Errorf("driver, policy guard, and budget are required")
 	}
-	if policy.Mode != "read_only" {
+	if policy.Mode == "" {
+		policy.Mode = "read_write"
+	}
+	if policy.Mode != "read_write" && policy.Mode != "read_only" {
 		return nil, fmt.Errorf("unsupported task policy")
 	}
 	for _, raw := range policy.Origins {
 		u, err := url.Parse(raw)
-		if err != nil || u.Host == "" || !validTaskURLAuthorityV2(u.Host) {
+		if err != nil || u.Host == "" || !validTaskURLAuthority(u.Host) {
 			return nil, fmt.Errorf("invalid task policy origin")
 		}
 	}
-	origins, err := canonicalOriginsV2(policy.Origins)
+	origins, err := canonicalOrigins(policy.Origins)
 	if err != nil {
 		return nil, fmt.Errorf("invalid task policy origins: %w", err)
 	}
-	return &taskPolicyDriverV2{driver: driver, origins: origins, guard: guard, budget: budget}, nil
+	return &taskPolicyDriver{driver: driver, origins: origins, mode: policy.Mode, guard: guard, budget: budget}, nil
 }
 
-func (d *taskPolicyDriverV2) Navigate(ctx context.Context, target string) error {
-	origin, err := taskURLOriginV2(target)
+func (d *taskPolicyDriver) Navigate(ctx context.Context, target string) error {
+	origin, err := taskURLOrigin(target)
 	if err != nil || !d.permitsOrigin(origin) {
-		return originDeniedV2()
+		return originDenied()
 	}
 	if err := d.guard.Check(ctx); err != nil {
 		return err
@@ -58,7 +62,7 @@ func (d *taskPolicyDriverV2) Navigate(ctx context.Context, target string) error 
 		return err
 	}
 	operationErr := d.driver.Navigate(ctx, target)
-	if uncertainOperationV2(operationErr) {
+	if uncertainOperation(operationErr) {
 		return operationErr
 	}
 	if err := d.guard.Check(ctx); err != nil {
@@ -70,35 +74,53 @@ func (d *taskPolicyDriverV2) Navigate(ctx context.Context, target string) error 
 	return operationErr
 }
 
-func (d *taskPolicyDriverV2) Click(ctx context.Context, selector string) error {
-	return readOnlyDeniedV2()
+func (d *taskPolicyDriver) Click(ctx context.Context, selector string) error {
+	if d.mode == "read_only" {
+		return readOnlyDenied()
+	}
+	return d.run(ctx, func() error { return d.driver.Click(ctx, selector) })
 }
 
-func (d *taskPolicyDriverV2) Fill(ctx context.Context, selector, text string) error {
-	return readOnlyDeniedV2()
+func (d *taskPolicyDriver) Fill(ctx context.Context, selector, text string) error {
+	if d.mode == "read_only" {
+		return readOnlyDenied()
+	}
+	return d.run(ctx, func() error { return d.driver.Fill(ctx, selector, text) })
 }
 
-func (d *taskPolicyDriverV2) Select(ctx context.Context, selector, value string) (string, error) {
-	return "", readOnlyDeniedV2()
+func (d *taskPolicyDriver) Select(ctx context.Context, selector, value string) (string, error) {
+	if d.mode == "read_only" {
+		return "", readOnlyDenied()
+	}
+	var selected string
+	err := d.run(ctx, func() error {
+		var err error
+		selected, err = d.driver.Select(ctx, selector, value)
+		return err
+	})
+	return selected, err
 }
 
-func (d *taskPolicyDriverV2) Key(ctx context.Context, key string) error {
-	return readOnlyDeniedV2()
+func (d *taskPolicyDriver) Key(ctx context.Context, key string) error {
+	if d.mode == "read_only" {
+		return readOnlyDenied()
+	}
+	return d.run(ctx, func() error { return d.driver.Key(ctx, key) })
 }
 
-func (d *taskPolicyDriverV2) Scroll(ctx context.Context, target string) error {
+func (d *taskPolicyDriver) Scroll(ctx context.Context, target string) error {
 	return d.run(ctx, func() error { return d.driver.Scroll(ctx, target) })
 }
 
-func (d *taskPolicyDriverV2) WaitVisible(ctx context.Context, selector string) error {
+func (d *taskPolicyDriver) WaitVisible(ctx context.Context, selector string) error {
 	return d.run(ctx, func() error { return d.driver.WaitVisible(ctx, selector) })
 }
 
-func (d *taskPolicyDriverV2) Settle(ctx context.Context) error {
+func (d *taskPolicyDriver) Settle(ctx context.Context) error {
 	return d.run(ctx, func() error { return d.driver.Settle(ctx) })
 }
 
-func (d *taskPolicyDriverV2) ExtractField(ctx context.Context, selector string) (string, error) {
+func (d *taskPolicyDriver) ExtractField(ctx context.Context, selector string) (string, error) {
 	var value string
 	err := d.run(ctx, func() error {
 		var err error
@@ -111,7 +133,7 @@ func (d *taskPolicyDriverV2) ExtractField(ctx context.Context, selector string) 
 	return value, err
 }
 
-func (d *taskPolicyDriverV2) ExtractText(ctx context.Context) (string, error) {
+func (d *taskPolicyDriver) ExtractText(ctx context.Context) (string, error) {
 	var value string
 	err := d.run(ctx, func() error {
 		var err error
@@ -124,7 +146,7 @@ func (d *taskPolicyDriverV2) ExtractText(ctx context.Context) (string, error) {
 	return value, err
 }
 
-func (d *taskPolicyDriverV2) Snapshot(ctx context.Context, maxElements int) (*core.Snapshot, error) {
+func (d *taskPolicyDriver) Snapshot(ctx context.Context, maxElements int) (*core.Snapshot, error) {
 	if err := d.checkCurrentOrigin(ctx); err != nil {
 		return nil, err
 	}
@@ -135,7 +157,7 @@ func (d *taskPolicyDriverV2) Snapshot(ctx context.Context, maxElements int) (*co
 		return nil, err
 	}
 	snapshot, operationErr := d.driver.Snapshot(ctx, maxElements)
-	if uncertainOperationV2(operationErr) {
+	if uncertainOperation(operationErr) {
 		return nil, operationErr
 	}
 	if err := d.guard.Check(ctx); err != nil {
@@ -153,7 +175,7 @@ func (d *taskPolicyDriverV2) Snapshot(ctx context.Context, maxElements int) (*co
 	return snapshot, nil
 }
 
-func (d *taskPolicyDriverV2) run(ctx context.Context, operation func() error) error {
+func (d *taskPolicyDriver) run(ctx context.Context, operation func() error) error {
 	if err := d.checkCurrentOrigin(ctx); err != nil {
 		return err
 	}
@@ -164,7 +186,7 @@ func (d *taskPolicyDriverV2) run(ctx context.Context, operation func() error) er
 		return err
 	}
 	operationErr := operation()
-	if uncertainOperationV2(operationErr) {
+	if uncertainOperation(operationErr) {
 		return operationErr
 	}
 	if err := d.guard.Check(ctx); err != nil {
@@ -176,7 +198,7 @@ func (d *taskPolicyDriverV2) run(ctx context.Context, operation func() error) er
 	return operationErr
 }
 
-func (d *taskPolicyDriverV2) checkCurrentOrigin(ctx context.Context) error {
+func (d *taskPolicyDriver) checkCurrentOrigin(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -184,7 +206,7 @@ func (d *taskPolicyDriverV2) checkCurrentOrigin(ctx context.Context) error {
 		return err
 	}
 	snapshot, err := d.driver.Snapshot(ctx, 0)
-	if uncertainOperationV2(err) {
+	if uncertainOperation(err) {
 		return err
 	}
 	if guardErr := d.guard.Check(ctx); guardErr != nil {
@@ -199,38 +221,38 @@ func (d *taskPolicyDriverV2) checkCurrentOrigin(ctx context.Context) error {
 	return d.requirePermittedURL(snapshot.URL)
 }
 
-func (d *taskPolicyDriverV2) requirePermittedURL(raw string) error {
-	origin, err := taskURLOriginV2(raw)
+func (d *taskPolicyDriver) requirePermittedURL(raw string) error {
+	origin, err := taskURLOrigin(raw)
 	if err != nil || !d.permitsOrigin(origin) {
-		return originDeniedV2()
+		return originDenied()
 	}
 	return nil
 }
 
-func (d *taskPolicyDriverV2) permitsOrigin(origin string) bool {
+func (d *taskPolicyDriver) permitsOrigin(origin string) bool {
 	i := sort.SearchStrings(d.origins, origin)
 	return i < len(d.origins) && d.origins[i] == origin
 }
 
-func (d *taskPolicyDriverV2) admit(ctx context.Context) error {
+func (d *taskPolicyDriver) admit(ctx context.Context) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	return d.budget.AdmitAction(ctx)
 }
 
-func taskURLOriginV2(raw string) (string, error) {
+func taskURLOrigin(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Opaque != "" || u.User != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return "", fmt.Errorf("invalid browser URL")
 	}
-	if !validTaskURLAuthorityV2(u.Host) {
+	if !validTaskURLAuthority(u.Host) {
 		return "", fmt.Errorf("invalid browser URL authority")
 	}
-	return canonicalOriginV2(u.Scheme + "://" + u.Host)
+	return canonicalOrigin(u.Scheme + "://" + u.Host)
 }
 
-func validTaskURLAuthorityV2(authority string) bool {
+func validTaskURLAuthority(authority string) bool {
 	port := ""
 	portSpecified := false
 	if strings.HasPrefix(authority, "[") {
@@ -266,15 +288,15 @@ func validTaskURLAuthorityV2(authority string) bool {
 	return err == nil && n >= 1 && n <= 65535
 }
 
-func readOnlyDeniedV2() error {
+func readOnlyDenied() error {
 	return &core.StopError{Code: "read_only", Message: "This task is read-only."}
 }
 
-func originDeniedV2() error {
+func originDenied() error {
 	return &core.StopError{Code: "origin_denied", Message: "The browser page is outside the permitted origins."}
 }
 
-func isNilPolicyDependencyV2(value any) bool {
+func isNilPolicyDependency(value any) bool {
 	if value == nil {
 		return true
 	}
@@ -289,7 +311,7 @@ func isNilPolicyDependencyV2(value any) bool {
 
 // A post-operation guard may deny the result, but must never erase evidence
 // that a dispatched browser operation has an unknown outcome.
-func uncertainOperationV2(err error) bool {
+func uncertainOperation(err error) bool {
 	var stopped *core.StopError
 	if !errors.As(err, &stopped) {
 		return false

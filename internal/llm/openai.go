@@ -51,7 +51,7 @@ type OpenAICompatible struct {
 	schemaFallback atomic.Bool
 }
 
-var _ MetadataCompleterV2 = (*OpenAICompatible)(nil)
+var _ MetadataCompleter = (*OpenAICompatible)(nil)
 
 const metadataBodyLimit = 2 << 20
 const metadataErrorBodyLimit = 8 << 10
@@ -84,8 +84,8 @@ type metadataUsage struct {
 
 // CompleteWithUsage makes one metadata-bearing provider attempt. Unlike the
 // legacy schema path, it never retries or follows redirects.
-func (o *OpenAICompatible) CompleteWithUsage(ctx context.Context, system, user string) (core.CompletionV2, error) {
-	result := core.CompletionV2{Transmission: core.TransmissionNotSentV2}
+func (o *OpenAICompatible) CompleteWithUsage(ctx context.Context, system, user string) (core.Completion, error) {
+	result := core.Completion{Transmission: core.TransmissionNotSent}
 	if o.UsageCostCurrency != "" && o.UsageCostCurrency != "USD" {
 		return result, fmt.Errorf("llm: unsupported usage cost currency")
 	}
@@ -112,13 +112,13 @@ func (o *OpenAICompatible) CompleteWithUsage(ctx context.Context, system, user s
 		httpReq.Header.Set("Authorization", "Bearer "+o.APIKey)
 	}
 	client := &http.Client{Timeout: timeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-	result.Transmission = core.TransmissionSentUnknownV2
+	result.Transmission = core.TransmissionSentUnknown
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return result, fmt.Errorf("llm: provider transport failed")
 	}
 	defer func() { _ = resp.Body.Close() }()
-	result.Transmission = core.TransmissionResponseReceivedV2
+	result.Transmission = core.TransmissionResponseReceived
 	result.ProviderRequestID = boundedString(resp.Header.Get("x-request-id"), 256)
 	limit := int64(metadataBodyLimit)
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -164,7 +164,7 @@ func (o *OpenAICompatible) CompleteWithUsage(ctx context.Context, system, user s
 
 // decodeMetadataEnvelope keeps top-level usage and identity parsing independent
 // from choice/content validation so malformed content cannot erase valid spend.
-func decodeMetadataEnvelope(data []byte, result *core.CompletionV2, o *OpenAICompatible) (json.RawMessage, error) {
+func decodeMetadataEnvelope(data []byte, result *core.Completion, o *OpenAICompatible) (json.RawMessage, error) {
 	var envelope metadataResponseEnvelope
 	if err := json.Unmarshal(data, &envelope); err != nil {
 		return nil, fmt.Errorf("llm: decode provider response")
@@ -210,7 +210,7 @@ func boundedString(s string, max int) string {
 	return s
 }
 
-func decodeMetadataUsage(dst *core.RequestUsageV2, u *metadataUsage, parseCost bool) error {
+func decodeMetadataUsage(dst *core.RequestUsage, u *metadataUsage, parseCost bool) error {
 	type field struct {
 		name string
 		src  *json.Number

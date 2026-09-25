@@ -15,7 +15,7 @@ import (
 )
 
 func TestProtectionEndpointRejectsRemoteAndAmbiguousTargets(t *testing.T) {
-	for _, raw := range []string{"https://169.254.170.2", "http://example.com", "http://169.254.170.3", "http://user@127.0.0.1", "http://127.0.0.1/other", "http://127.0.0.1?q=1", "http://127.0.0.1#x"} {
+	for _, raw := range []string{"https://169.254.170.2", "http://example.com", "http://169.254.170.3", "http://user@127.0.0.1", "http://127.0.0.1/other", "http://127.0.0.1/api/../other", "http://127.0.0.1/api/task/extra", "http://127.0.0.1?q=1", "http://127.0.0.1#x"} {
 		if _, err := protectionEndpoint(raw); err == nil {
 			t.Fatalf("accepted %s", raw)
 		}
@@ -24,6 +24,13 @@ func TestProtectionEndpointRejectsRemoteAndAmbiguousTargets(t *testing.T) {
 		if _, err := protectionEndpoint(raw); err != nil {
 			t.Fatal(err)
 		}
+	}
+	endpoint, err := protectionEndpoint("http://169.254.170.2/api/abc-123/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if endpoint != "http://169.254.170.2/api/abc-123/task-protection/v1/state" {
+		t.Fatalf("task-specific Fargate agent path was not preserved: %q", endpoint)
 	}
 }
 
