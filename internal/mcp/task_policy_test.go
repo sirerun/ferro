@@ -32,8 +32,10 @@ func (b *policyBudget) AdmitAction(context.Context) error {
 }
 
 type policyDriverSpy struct {
-	url   string
-	calls map[string]int
+	url          string
+	calls        map[string]int
+	selectStatus string
+	clickErr     error
 }
 
 func newPolicyDriverSpy(url string) *policyDriverSpy {
@@ -46,13 +48,16 @@ func (d *policyDriverSpy) Navigate(_ context.Context, target string) error {
 	d.url = target
 	return nil
 }
-func (d *policyDriverSpy) Click(context.Context, string) error { d.called("click"); return nil }
+func (d *policyDriverSpy) Click(context.Context, string) error { d.called("click"); return d.clickErr }
 func (d *policyDriverSpy) Fill(context.Context, string, string) error {
 	d.called("fill")
 	return nil
 }
 func (d *policyDriverSpy) Select(context.Context, string, string) (string, error) {
 	d.called("select")
+	if d.selectStatus != "" {
+		return d.selectStatus, nil
+	}
 	return "ok", nil
 }
 func (d *policyDriverSpy) Key(context.Context, string) error    { d.called("key"); return nil }
@@ -122,6 +127,41 @@ func TestTaskPolicyDefaultModeAllowsBrowserWrites(t *testing.T) {
 	if driver.calls["click"] != 1 {
 		t.Fatalf("click count=%d, want 1", driver.calls["click"])
 	}
+}
+
+func TestPolicy_KnownNoOpsDoNotCreateSideEffects(t *testing.T) {
+	newWrapper := func(t *testing.T, driver *policyDriverSpy, tracker *sideEffectTracker) core.PageDriver {
+		t.Helper()
+		wrapped, err := NewTaskPolicyDriver(driver, TaskPolicy{Mode: "read_write", Origins: []string{"https://allowed.example"}}, policyGuardFunc(func(context.Context) error { return nil }), &policyBudget{}, tracker.observe)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return wrapped
+	}
+	t.Run("select status no-op", func(t *testing.T) {
+		driver := newPolicyDriverSpy("https://allowed.example/start")
+		driver.selectStatus = "no-option"
+		var tracker sideEffectTracker
+		wrapped := newWrapper(t, driver, &tracker)
+		if status, err := wrapped.Select(context.Background(), "#x", "missing"); err != nil || status != "no-option" {
+			t.Fatalf("Select()=(%q,%v), want known no-op", status, err)
+		}
+		if got := tracker.state(); got != SideEffectNone {
+			t.Fatalf("no-option marked as side effect: %s", got)
+		}
+	})
+	t.Run("login rejection", func(t *testing.T) {
+		driver := newPolicyDriverSpy("https://allowed.example/start")
+		driver.clickErr = &core.StopError{Code: "login_required", Message: "sign in first"}
+		var tracker sideEffectTracker
+		wrapped := newWrapper(t, driver, &tracker)
+		if err := wrapped.Click(context.Background(), "#x"); err == nil {
+			t.Fatal("Click() succeeded on a login-blocked page")
+		}
+		if got := tracker.state(); got != SideEffectNone {
+			t.Fatalf("known pre-execution rejection marked as side effect: %s", got)
+		}
+	})
 }
 
 func TestPolicy_ReadMethodsDelegate(t *testing.T) {

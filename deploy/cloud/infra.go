@@ -609,10 +609,13 @@ func efsFileSystemPolicy(fileSystemARN, accessPointARN, taskRoleARN string) (str
 		return "", errors.New("EFS filesystem, access point, and task role ARNs are required")
 	}
 	resource := []string{fileSystemARN}
+	// EFS NFS authorization enforces only its documented client condition keys.
+	// Keep principal scoping in this exact Allow and the task-role identity policy;
+	// do not add unsupported global condition keys to a wildcard Deny.
 	return marshalIAM(map[string]any{
 		"Version": "2012-10-17",
 		"Statement": []any{
-			map[string]any{"Sid": "AllowTaskRoleViaAccessPoint", "Effect": "Allow", "Principal": map[string]string{"AWS": taskRoleARN}, "Action": []string{"elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"}, "Resource": resource, "Condition": map[string]any{"StringEquals": map[string]string{"elasticfilesystem:AccessPointArn": accessPointARN}}},
+			map[string]any{"Sid": "AllowTaskRoleViaAccessPointTLS", "Effect": "Allow", "Principal": map[string]string{"AWS": taskRoleARN}, "Action": []string{"elasticfilesystem:ClientMount", "elasticfilesystem:ClientWrite"}, "Resource": resource, "Condition": map[string]any{"StringEquals": map[string]string{"elasticfilesystem:AccessPointArn": accessPointARN}, "Bool": map[string]string{"aws:SecureTransport": "true"}}},
 		},
 	})
 }
