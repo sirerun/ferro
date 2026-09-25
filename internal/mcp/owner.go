@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -407,9 +408,11 @@ func hasAdvancedTaskFields(args json.RawMessage) bool {
 	if err := json.Unmarshal(args, &fields); err != nil {
 		return false // The ordinary request decoder reports malformed JSON.
 	}
-	for _, name := range []string{"task_id", "schema", "policy", "output_schema", "limits", "replay_key", "evidence"} {
-		if _, ok := fields[name]; ok {
-			return true
+	for field := range fields {
+		for _, name := range []string{"task_id", "schema", "policy", "output_schema", "limits", "replay_key", "evidence"} {
+			if strings.EqualFold(field, name) {
+				return true
+			}
 		}
 	}
 	return false

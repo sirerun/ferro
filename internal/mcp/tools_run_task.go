@@ -1,9 +1,11 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 
 	"github.com/dndungu/ferro"
 )
@@ -62,7 +64,16 @@ func (o *Owner) taskProfileClientV1(ctx context.Context, name string) (ferro.LLM
 // runTaskSimple handles the compact goal-only request shape.
 func (o *Owner) runTaskSimple(ctx context.Context, args json.RawMessage) (any, error) {
 	var in RunTaskArgs
-	if err := json.Unmarshal(args, &in); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(args))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&in); err != nil {
+		return nil, fmt.Errorf("decode run_task args: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		if err == nil {
+			return nil, fmt.Errorf("decode run_task args: multiple JSON values")
+		}
 		return nil, fmt.Errorf("decode run_task args: %w", err)
 	}
 	if in.Goal == "" {

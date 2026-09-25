@@ -251,6 +251,7 @@ func (o *Owner) runTaskWithReceipt(ctx context.Context, raw json.RawMessage) (an
 		return receiptResponse(receipt), nil
 	}
 	record := ExecutionRecord{Owner: privateReceiptOwner, TaskID: in.TaskID, ExecutionID: receipt.ExecutionID, Profile: profile.Profile.Name, ProfileRevision: profile.Profile.Revision, Model: profile.Model, Limits: limits, StartedAt: started, Status: TaskFailed, Validation: "not_run", SideEffectState: SideEffectNone}
+	var sideEffects sideEffectTracker
 	runCtx, actionCancel := o.actionCtx(ctx)
 	defer actionCancel()
 	runCtx, cancel := context.WithDeadline(runCtx, started.Add(time.Duration(limits.RuntimeMS)*time.Millisecond))
@@ -265,7 +266,9 @@ func (o *Owner) runTaskWithReceipt(ctx context.Context, raw json.RawMessage) (an
 		if err := guard.Check(runCtx); err != nil {
 			return nil, err
 		}
-		driver, err := NewTaskPolicyDriver(o.driver, *in.Policy, guard, budget)
+		driver, err := NewTaskPolicyDriver(o.driver, *in.Policy, guard, budget, func(state SideEffectState, completed bool) {
+			sideEffects.observe(state, completed)
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -338,8 +341,11 @@ func (o *Owner) runTaskWithReceipt(ctx context.Context, raw json.RawMessage) (an
 	}
 	if runErr != nil {
 		record.Status, record.Error, record.SideEffectState = classifyTaskFailure(runErr)
+		record.SideEffectState = mergeSideEffectState(record.SideEffectState, sideEffects.state())
 		record.Validation = "invalid"
 		record.Result = nil
+	} else {
+		record.SideEffectState = mergeSideEffectState(record.SideEffectState, sideEffects.state())
 	}
 	record.EndedAt = time.Now().UTC()
 	record.Budget = budget.Snapshot()
@@ -410,6 +416,45 @@ func classifyTaskFailure(err error) (TaskStatus, *TaskError, SideEffectState) {
 		}
 	}
 	return status, e, effects
+}
+
+func mergeSideEffectState(a, b SideEffectState) SideEffectState {
+	if a == SideEffectUnknown || b == SideEffectUnknown {
+		return SideEffectUnknown
+	}
+	if a == SideEffectConfirmed || b == SideEffectConfirmed {
+		return SideEffectConfirmed
+	}
+	return SideEffectNone
+}
+
+type sideEffectTracker struct {
+	pending   bool
+	unknown   bool
+	confirmed bool
+}
+
+func (t *sideEffectTracker) observe(state SideEffectState, completed bool) {
+	if !completed {
+		t.pending = true
+		return
+	}
+	t.pending = false
+	if state == SideEffectUnknown {
+		t.unknown = true
+	} else if state == SideEffectConfirmed {
+		t.confirmed = true
+	}
+}
+
+func (t sideEffectTracker) state() SideEffectState {
+	if t.pending || t.unknown {
+		return SideEffectUnknown
+	}
+	if t.confirmed {
+		return SideEffectConfirmed
+	}
+	return SideEffectNone
 }
 
 func (o *Owner) initializeTasks() error {

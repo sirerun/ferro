@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -116,6 +117,7 @@ func TestRunTaskRejectsAdvancedFieldsWithoutTaskIDBeforeExecution(t *testing.T) 
 		`"task_id":""`,
 		`"task_id":null`,
 		`"policy":{"mode":"read_only","origins":["https://allowed.example"]}`,
+		`"Policy":{"mode":"read_only","origins":["https://allowed.example"]}`,
 		`"limits":{"actions":1}`,
 		`"output_schema":{"type":"object"}`,
 		`"replay_key":"retry"`,
@@ -134,6 +136,60 @@ func TestRunTaskRejectsAdvancedFieldsWithoutTaskIDBeforeExecution(t *testing.T) 
 		})
 	}
 }
+
+func TestRunTaskSimpleRejectsUnknownFieldsBeforeExecution(t *testing.T) {
+	o, driver, providerCalls := runtimeFixture(t, runtimePlan)
+	_, failed, err := o.Call(context.Background(), "run_task", json.RawMessage(`{"goal":"inspect the page","polciy":{"mode":"read_only"}}`))
+	if err != nil || !failed {
+		t.Fatalf("unknown request field was accepted: failed=%v err=%v", failed, err)
+	}
+	if providerCalls.Load() != 0 || len(driver.calls) != 0 {
+		t.Fatalf("unknown request field performed work: provider_calls=%d browser_calls=%v", providerCalls.Load(), driver.calls)
+	}
+}
+
+type failingKeyDriver struct{ *runtimeDriver }
+
+func (d *failingKeyDriver) Key(context.Context, string) error {
+	d.called("key")
+	return errors.New("key response lost")
+}
+
+func TestRuntime_RecordsBrowserSideEffects(t *testing.T) {
+	plan := `{"steps":[{"kind":"key","text":"Enter"},{"kind":"done","result":{"value":"submitted"}}]}`
+	t.Run("successful mutation", func(t *testing.T) {
+		o, _, _ := runtimeFixture(t, plan)
+		in := runtimeRequest("clicked")
+		in.Policy.Mode = "read_write"
+		result := callRuntime(t, o, in)
+		if result.Status != TaskSucceeded || result.SideEffectState != SideEffectConfirmed {
+			t.Fatalf("successful write receipt lost side-effect state: %+v", result)
+		}
+	})
+	t.Run("uncertain mutation failure", func(t *testing.T) {
+		o, driver, _ := runtimeFixture(t, plan)
+		failing := &failingKeyDriver{runtimeDriver: driver}
+		o.driver = failing
+		in := runtimeRequest("uncertain-click")
+		in.Policy.Mode = "read_write"
+		result := callRuntime(t, o, in)
+		if result.Status != TaskFailed || result.SideEffectState != SideEffectUnknown {
+			t.Fatalf("failed dispatched write must be marked unknown: %+v", result)
+		}
+	})
+}
+
+func TestSideEffectTrackerKeepsEarlierUncertaintyAfterLaterSuccess(t *testing.T) {
+	var tracker sideEffectTracker
+	tracker.observe(SideEffectUnknown, false)
+	tracker.observe(SideEffectUnknown, true)
+	tracker.observe(SideEffectUnknown, false)
+	tracker.observe(SideEffectConfirmed, true)
+	if got := tracker.state(); got != SideEffectUnknown {
+		t.Fatalf("later success erased an earlier uncertain write: state=%s", got)
+	}
+}
+
 func TestRuntime_WarmReplayReadsCurrentFacts(t *testing.T) {
 	o, d, calls := runtimeFixture(t, runtimePlan)
 	in := runtimeRequest("warm1")

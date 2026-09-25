@@ -15,16 +15,17 @@ import (
 )
 
 type taskPolicyDriver struct {
-	driver  core.PageDriver
-	origins []string
-	mode    string
-	guard   TaskPolicyGuard
-	budget  core.BudgetController
+	driver       core.PageDriver
+	origins      []string
+	mode         string
+	guard        TaskPolicyGuard
+	budget       core.BudgetController
+	onSideEffect func(SideEffectState, bool)
 }
 
 // NewTaskPolicyDriver wraps a browser driver with origin and action-budget
 // checks. Read and write browser operations are permitted within that scope.
-func NewTaskPolicyDriver(driver core.PageDriver, policy TaskPolicy, guard TaskPolicyGuard, budget core.BudgetController) (core.PageDriver, error) {
+func NewTaskPolicyDriver(driver core.PageDriver, policy TaskPolicy, guard TaskPolicyGuard, budget core.BudgetController, observers ...func(SideEffectState, bool)) (core.PageDriver, error) {
 	if isNilPolicyDependency(driver) || isNilPolicyDependency(guard) || isNilPolicyDependency(budget) {
 		return nil, fmt.Errorf("driver, policy guard, and budget are required")
 	}
@@ -44,7 +45,17 @@ func NewTaskPolicyDriver(driver core.PageDriver, policy TaskPolicy, guard TaskPo
 	if err != nil {
 		return nil, fmt.Errorf("invalid task policy origins: %w", err)
 	}
-	return &taskPolicyDriver{driver: driver, origins: origins, mode: policy.Mode, guard: guard, budget: budget}, nil
+	wrapped := &taskPolicyDriver{driver: driver, origins: origins, mode: policy.Mode, guard: guard, budget: budget}
+	if len(observers) != 0 {
+		wrapped.onSideEffect = observers[0]
+	}
+	return wrapped, nil
+}
+
+func (d *taskPolicyDriver) observeSideEffect(state SideEffectState, completed bool) {
+	if d.onSideEffect != nil {
+		d.onSideEffect(state, completed)
+	}
 }
 
 func (d *taskPolicyDriver) Navigate(ctx context.Context, target string) error {
@@ -78,14 +89,14 @@ func (d *taskPolicyDriver) Click(ctx context.Context, selector string) error {
 	if d.mode == "read_only" {
 		return readOnlyDenied()
 	}
-	return d.run(ctx, func() error { return d.driver.Click(ctx, selector) })
+	return d.runMutation(ctx, func() error { return d.driver.Click(ctx, selector) })
 }
 
 func (d *taskPolicyDriver) Fill(ctx context.Context, selector, text string) error {
 	if d.mode == "read_only" {
 		return readOnlyDenied()
 	}
-	return d.run(ctx, func() error { return d.driver.Fill(ctx, selector, text) })
+	return d.runMutation(ctx, func() error { return d.driver.Fill(ctx, selector, text) })
 }
 
 func (d *taskPolicyDriver) Select(ctx context.Context, selector, value string) (string, error) {
@@ -93,10 +104,10 @@ func (d *taskPolicyDriver) Select(ctx context.Context, selector, value string) (
 		return "", readOnlyDenied()
 	}
 	var selected string
-	err := d.run(ctx, func() error {
+	err := d.runMutationOutcome(ctx, func() (bool, error) {
 		var err error
 		selected, err = d.driver.Select(ctx, selector, value)
-		return err
+		return selected == "ok", err
 	})
 	return selected, err
 }
@@ -105,7 +116,7 @@ func (d *taskPolicyDriver) Key(ctx context.Context, key string) error {
 	if d.mode == "read_only" {
 		return readOnlyDenied()
 	}
-	return d.run(ctx, func() error { return d.driver.Key(ctx, key) })
+	return d.runMutation(ctx, func() error { return d.driver.Key(ctx, key) })
 }
 
 func (d *taskPolicyDriver) Scroll(ctx context.Context, target string) error {
@@ -196,6 +207,57 @@ func (d *taskPolicyDriver) run(ctx context.Context, operation func() error) erro
 		return err
 	}
 	return operationErr
+}
+
+func (d *taskPolicyDriver) runMutation(ctx context.Context, operation func() error) error {
+	return d.runMutationOutcome(ctx, func() (bool, error) {
+		err := operation()
+		return err == nil, err
+	})
+}
+
+func (d *taskPolicyDriver) runMutationOutcome(ctx context.Context, operation func() (bool, error)) error {
+	if err := d.checkCurrentOrigin(ctx); err != nil {
+		return err
+	}
+	if err := d.admit(ctx); err != nil {
+		return err
+	}
+	if err := d.guard.Check(ctx); err != nil {
+		return err
+	}
+	d.observeSideEffect(SideEffectUnknown, false)
+	changed, operationErr := operation()
+	if operationErr == nil && changed {
+		d.observeSideEffect(SideEffectConfirmed, true)
+	} else if operationErr == nil || knownPreExecutionRejection(operationErr) {
+		d.observeSideEffect(SideEffectNone, true)
+	} else {
+		d.observeSideEffect(SideEffectUnknown, true)
+	}
+	if uncertainOperation(operationErr) {
+		return operationErr
+	}
+	if err := d.guard.Check(ctx); err != nil {
+		return err
+	}
+	if err := d.checkCurrentOrigin(ctx); err != nil {
+		return err
+	}
+	return operationErr
+}
+
+func knownPreExecutionRejection(err error) bool {
+	var stopped *core.StopError
+	if !errors.As(err, &stopped) {
+		return false
+	}
+	switch stopped.Code {
+	case "blocked", "login_required", "origin_denied", "read_only", "stale_ref":
+		return true
+	default:
+		return false
+	}
 }
 
 func (d *taskPolicyDriver) checkCurrentOrigin(ctx context.Context) error {

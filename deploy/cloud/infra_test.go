@@ -137,7 +137,7 @@ func TestAWSConditionKeysAndTrustBoundaries(t *testing.T) {
 	}
 }
 
-func TestEFSResourcePolicyEnforcesOnlyTaskRoleAccess(t *testing.T) {
+func TestEFSResourcePolicyScopesTaskRoleAccessPointAndTLS(t *testing.T) {
 	policyJSON, err := efsFileSystemPolicy("fs-arn", "ap-arn", "task-role-arn")
 	if err != nil {
 		t.Fatal(err)
@@ -152,19 +152,17 @@ func TestEFSResourcePolicyEnforcesOnlyTaskRoleAccess(t *testing.T) {
 	for _, statement := range policy.Statement {
 		bySid[statement["Sid"].(string)] = statement
 	}
-	for _, sid := range []string{"AllowTaskRoleViaAccessPoint"} {
+	for _, sid := range []string{"AllowTaskRoleViaAccessPointTLS"} {
 		if bySid[sid] == nil {
 			t.Fatalf("missing filesystem policy statement %q: %#v", sid, policy.Statement)
 		}
 	}
-	if _, exists := bySid["DenyUnexpectedPrincipal"]; exists {
-		t.Fatalf("filesystem policy must rely on the exact-principal allow and avoid a NotPrincipal deny: %#v", bySid["DenyUnexpectedPrincipal"])
+	allow := bySid["AllowTaskRoleViaAccessPointTLS"]
+	if allow["Principal"].(map[string]any)["AWS"] != "task-role-arn" || allow["Condition"].(map[string]any)["StringEquals"].(map[string]any)["elasticfilesystem:AccessPointArn"] != "ap-arn" || allow["Condition"].(map[string]any)["Bool"].(map[string]any)["aws:SecureTransport"] != "true" {
+		t.Fatalf("filesystem policy allow is not scoped to role, access point, and TLS: %#v", allow)
 	}
-	if bySid["AllowTaskRoleViaAccessPoint"]["Principal"].(map[string]any)["AWS"] != "task-role-arn" {
-		t.Fatalf("filesystem policy allow is not scoped to task role: %#v", bySid["AllowTaskRoleViaAccessPoint"])
-	}
-	if bySid["AllowTaskRoleViaAccessPoint"]["Condition"].(map[string]any)["StringEquals"].(map[string]any)["elasticfilesystem:AccessPointArn"] != "ap-arn" {
-		t.Fatalf("filesystem policy allow is not scoped to the access point: %#v", bySid["AllowTaskRoleViaAccessPoint"])
+	if len(policy.Statement) != 1 {
+		t.Fatalf("filesystem policy has unsupported or unexpected statements: %#v", policy.Statement)
 	}
 }
 
