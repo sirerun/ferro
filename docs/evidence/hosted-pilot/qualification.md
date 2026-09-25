@@ -33,3 +33,9 @@ Independent reviews and coordinator checks corrected reconnect poll restart, for
 4. Record cold-start duration, AWS resource inventory, operating cost, and rollback evidence. Preserve EFS and credentials on rollback.
 
 The AWS deployment identity component is a pinned, human-approved AMSL candidate. Its optional consumer integration is present; the pilot bootstrap used the existing operator identity. Live GitHub OIDC assumption/denial and component adoption qualification remain pending. Account/auth/billing work is owned by the separate Go AMSL effort.
+
+## Current deployed runtime — 2026-09-24
+
+PR [20](https://github.com/sirerun/ferro/pull/20) was merged to `main` as `76283a3cc0a19fd09857cf8305d482d14cb0461e`. The ARM64 image for that commit is `sha256:d877c6e98b0dd04eb56946cd44109e7e915757241f18274279519b787bd8e4d6`. Pulumi update 9 completed successfully: ECS task definition revision 4 references that image, the service update completed, and the wake Lambda is active with a successful code update.
+
+The service remains asleep at desired count zero with no running or pending tasks. A public `GET /healthz` returned 503 in that state, as expected until an authenticated wake starts the task. The new task revision has not yet been started for an authenticated MCP smoke test; real Chrome pairing and browser work remain required before declaring the hosted runtime fully qualified.
