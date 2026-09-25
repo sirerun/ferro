@@ -253,8 +253,10 @@ extension supports its `/bridge` endpoint as well as localhost. See the
 [AWS container deployment guide](deploy/cloud/README.md) and
 [qualification plan](docs/plan-private-container-pilot.md). Connect wakes the
 service; it sleeps after the last tab disconnects and active work drains. The
-private pilot is still undergoing live deployment qualification. It does not
-provide public signup, billing or multi-tenant access.
+private pilot has passed its initial AWS deployment and MCP endpoint checks;
+pairing a Chrome tab with the hosted bridge and exercising browser work remain
+open qualification steps. It does not provide public signup, billing or
+multi-tenant access.
 
 ## MCP server
 

@@ -2,7 +2,7 @@
 
 This is a minimal non-root image for the single-owner `ferro-cloud` service. It builds with the official Go 1.25.5 Alpine image pinned by multi-platform index digest and runs a statically linked `CGO_ENABLED=0` binary in `scratch` with only the CA bundle copied into the runtime image. It does not include Chrome or a browser binary; the service uses the paired extension backend.
 
-**Status: the ARM64 image has been built and smoke-tested locally. Live AWS runtime qualification is pending.** The separate [cloud stack](../cloud/README.md) provisions AWS resources and an authenticated wake endpoint. The runtime uses ECS task protection and drains idle work before scaling its service to zero.
+**Status: the private AWS pilot is deployed and its TLS, authenticated wake, MCP initialization, and tool listing have passed live checks.** The ECS service currently sleeps at desired count zero. Pairing a real Chrome tab to the hosted bridge and completing end-to-end browser work remain open qualification steps. The separate [cloud stack](../cloud/README.md) provisions AWS resources and an authenticated wake endpoint. The runtime uses ECS task protection and drains idle work before scaling its service to zero.
 
 Build from the repository root so the Dockerfile can read the Go module and source tree:
 
