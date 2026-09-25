@@ -21,8 +21,7 @@ func NewServer(c caller) *sdk.Server {
 	_, _ = rand.Read(nonce[:])
 	c = &identifiedCaller{caller: c, namespace: hex.EncodeToString(nonce[:])}
 	server := sdk.NewServer(&sdk.Implementation{Name: "ferro-mcp", Version: "0.1.0"}, nil)
-	registerRunTaskTool(server, c)
-	registerTaskToolsV2(server, c)
+	registerTaskTools(server, c)
 	registerPrimitiveTools(server, c)
 	registerSessionTools(server, c)
 	return server
@@ -34,6 +33,9 @@ func NewServer(c caller) *sdk.Server {
 // generate its JSON input schema via reflection, same as the prototype's
 // runTaskArgs).
 func addRelayTool[Args any](server *sdk.Server, tool *sdk.Tool, c caller) {
+	if tool.Annotations == nil {
+		tool.Annotations = &sdk.ToolAnnotations{ReadOnlyHint: false}
+	}
 	sdk.AddTool(server, tool, func(ctx context.Context, req *sdk.CallToolRequest, args Args) (*sdk.CallToolResult, any, error) {
 		argsJSON, err := json.Marshal(args)
 		if err != nil {

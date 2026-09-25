@@ -8,15 +8,15 @@ import (
 	"testing"
 )
 
-type metadataClientSpyV2 struct {
+type metadataClientSpy struct {
 	calls          int
-	completion     CompletionV2
+	completion     Completion
 	err            error
 	systems, users []string
 	texts          []string
 }
 
-func (s *metadataClientSpyV2) CompleteWithUsage(_ context.Context, system, user string) (CompletionV2, error) {
+func (s *metadataClientSpy) CompleteWithUsage(_ context.Context, system, user string) (Completion, error) {
 	s.calls++
 	s.systems = append(s.systems, system)
 	s.users = append(s.users, user)
@@ -28,38 +28,38 @@ func (s *metadataClientSpyV2) CompleteWithUsage(_ context.Context, system, user 
 	return completion, s.err
 }
 
-type budgetSpyV2 struct {
+type budgetSpy struct {
 	kinds           []string
 	inputs, outputs []int64
-	reconciled      []CompletionV2
+	reconciled      []Completion
 	admitErr        error
 }
 
-func (s *budgetSpyV2) Admit(_ context.Context, kind string, input, output int64) (ReservationV2, error) {
+func (s *budgetSpy) Admit(_ context.Context, kind string, input, output int64) (Reservation, error) {
 	s.kinds = append(s.kinds, kind)
 	s.inputs = append(s.inputs, input)
 	s.outputs = append(s.outputs, output)
 	if s.admitErr != nil {
-		return ReservationV2{}, s.admitErr
+		return Reservation{}, s.admitErr
 	}
-	return ReservationV2{ID: "r", Kind: kind, EstimatedInput: input, MaxOutput: output}, nil
+	return Reservation{ID: "r", Kind: kind, EstimatedInput: input, MaxOutput: output}, nil
 }
-func (s *budgetSpyV2) Reconcile(_ string, c CompletionV2) error {
+func (s *budgetSpy) Reconcile(_ string, c Completion) error {
 	s.reconciled = append(s.reconciled, c)
 	return nil
 }
-func (*budgetSpyV2) AdmitAction(context.Context) error { return nil }
-func (*budgetSpyV2) Snapshot() BudgetSnapshotV2        { return BudgetSnapshotV2{} }
+func (*budgetSpy) AdmitAction(context.Context) error { return nil }
+func (*budgetSpy) Snapshot() BudgetSnapshot          { return BudgetSnapshot{} }
 
-func TestBudgetedClientV2ChargesKindsAndPromptRestrictions(t *testing.T) {
-	provider := &metadataClientSpyV2{completion: CompletionV2{Text: "ok", Transmission: TransmissionResponseReceivedV2}}
-	budget := &budgetSpyV2{}
-	client, err := NewBudgetedClientV2(provider, budget, DefaultLimitsV2())
+func TestBudgetedClientChargesKindsAndPromptRestrictions(t *testing.T) {
+	provider := &metadataClientSpy{completion: Completion{Text: "ok", Transmission: TransmissionResponseReceived}}
+	budget := &budgetSpy{}
+	client, err := NewBudgetedClient(provider, budget, DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, kind := range []string{budgetKindPlanningV2, budgetKindParseRetryV2, budgetKindRepairV2, budgetKindExtractionV2} {
-		if _, err = client.Complete(withBudgetRequestKindV2(context.Background(), kind), "sys", "page"); err != nil {
+	for _, kind := range []string{budgetKindPlanning, budgetKindParseRetry, budgetKindRepair, budgetKindExtraction} {
+		if _, err = client.Complete(withBudgetRequestKind(context.Background(), kind), "sys", "page"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -69,7 +69,7 @@ func TestBudgetedClientV2ChargesKindsAndPromptRestrictions(t *testing.T) {
 	if provider.calls != 4 || len(budget.reconciled) != 4 {
 		t.Fatalf("provider=%d reconciles=%d", provider.calls, len(budget.reconciled))
 	}
-	if budget.outputs[0] != DefaultLimitsV2().MaxOutputTokens || budget.inputs[0] < int64((len(provider.systems[0])+len(provider.users[0])+3)/4+32) {
+	if budget.outputs[0] != DefaultLimits().MaxOutputTokens || budget.inputs[0] < int64((len(provider.systems[0])+len(provider.users[0])+3)/4+32) {
 		t.Fatalf("limits estimate mismatch: inputs=%v outputs=%v", budget.inputs, budget.outputs)
 	}
 	if !strings.Contains(provider.systems[0], "read_only") || !strings.Contains(provider.users[0], "untrusted") {
@@ -80,38 +80,38 @@ func TestBudgetedClientV2ChargesKindsAndPromptRestrictions(t *testing.T) {
 	}
 }
 
-func TestBudgetedClientV2RejectsBeforeProviderAndReconcilesUnknown(t *testing.T) {
-	provider := &metadataClientSpyV2{}
-	budget := &budgetSpyV2{admitErr: ErrBudgetExhaustedV2}
-	client, err := NewBudgetedClientV2(provider, budget, DefaultLimitsV2())
+func TestBudgetedClientRejectsBeforeProviderAndReconcilesUnknown(t *testing.T) {
+	provider := &metadataClientSpy{}
+	budget := &budgetSpy{admitErr: ErrBudgetExhausted}
+	client, err := NewBudgetedClient(provider, budget, DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = client.Complete(context.Background(), "s", "u")
-	if !errors.Is(err, ErrBudgetExhaustedV2) || provider.calls != 0 {
+	if !errors.Is(err, ErrBudgetExhausted) || provider.calls != 0 {
 		t.Fatalf("err=%v calls=%d", err, provider.calls)
 	}
 	budget.admitErr = nil
 	provider.err = errors.New("secret provider detail")
-	provider.completion.Transmission = TransmissionSentUnknownV2
+	provider.completion.Transmission = TransmissionSentUnknown
 	_, err = client.Complete(context.Background(), "s", "u")
 	var stop *StopError
 	if !errors.As(err, &stop) || stop.Code != "provider_error" || strings.Contains(err.Error(), "secret") {
 		t.Fatalf("unsafe provider error: %v", err)
 	}
-	if len(budget.reconciled) != 1 || budget.reconciled[0].Transmission != TransmissionSentUnknownV2 {
+	if len(budget.reconciled) != 1 || budget.reconciled[0].Transmission != TransmissionSentUnknown {
 		t.Fatalf("reconcile=%+v", budget.reconciled)
 	}
 }
 
-type blockedMetadataClientV2 struct {
+type blockedMetadataClient struct {
 	started chan struct{}
 	release chan struct{}
-	usage   RequestUsageV2
+	usage   RequestUsage
 	err     error
 }
 
-func (c *blockedMetadataClientV2) CompleteWithUsage(ctx context.Context, _, _ string) (CompletionV2, error) {
+func (c *blockedMetadataClient) CompleteWithUsage(ctx context.Context, _, _ string) (Completion, error) {
 	close(c.started)
 	providerErr := c.err
 	if providerErr == nil {
@@ -120,12 +120,12 @@ func (c *blockedMetadataClientV2) CompleteWithUsage(ctx context.Context, _, _ st
 	} else {
 		<-c.release
 	}
-	return CompletionV2{
-		Usage: c.usage, Transmission: TransmissionSentUnknownV2,
+	return Completion{
+		Usage: c.usage, Transmission: TransmissionSentUnknown,
 	}, fmt.Errorf("provider-secret-do-not-leak: %w", providerErr)
 }
 
-func TestBudgetedClientV2PropagatesCancellationAfterReconcile(t *testing.T) {
+func TestBudgetedClientPropagatesCancellationAfterReconcile(t *testing.T) {
 	tests := []struct {
 		name          string
 		providerErr   error
@@ -148,9 +148,9 @@ func TestBudgetedClientV2PropagatesCancellationAfterReconcile(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			input, billed := int64(27), int64(0)
-			provider := &blockedMetadataClientV2{started: make(chan struct{}), release: make(chan struct{}), usage: RequestUsageV2{InputTokens: &input, BilledMicroUSD: &billed}, err: tc.providerErr}
-			budget := &budgetSpyV2{}
-			client, err := NewBudgetedClientV2(provider, budget, DefaultLimitsV2())
+			provider := &blockedMetadataClient{started: make(chan struct{}), release: make(chan struct{}), usage: RequestUsage{InputTokens: &input, BilledMicroUSD: &billed}, err: tc.providerErr}
+			budget := &budgetSpy{}
+			client, err := NewBudgetedClient(provider, budget, DefaultLimits())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -173,7 +173,7 @@ func TestBudgetedClientV2PropagatesCancellationAfterReconcile(t *testing.T) {
 				t.Fatalf("reconciliations=%d, want exactly one", len(budget.reconciled))
 			}
 			usage := budget.reconciled[0].Usage
-			if usage.InputTokens == nil || *usage.InputTokens != 27 || usage.BilledMicroUSD == nil || *usage.BilledMicroUSD != 0 || budget.reconciled[0].Transmission != TransmissionSentUnknownV2 {
+			if usage.InputTokens == nil || *usage.InputTokens != 27 || usage.BilledMicroUSD == nil || *usage.BilledMicroUSD != 0 || budget.reconciled[0].Transmission != TransmissionSentUnknown {
 				t.Fatalf("cancellation usage was lost: %+v", budget.reconciled[0])
 			}
 		})
@@ -181,12 +181,12 @@ func TestBudgetedClientV2PropagatesCancellationAfterReconcile(t *testing.T) {
 }
 
 func TestRunnerTagsPlanningRetryRepairAndExtractionRequests(t *testing.T) {
-	provider := &metadataClientSpyV2{completion: CompletionV2{Transmission: TransmissionResponseReceivedV2}, texts: []string{
+	provider := &metadataClientSpy{completion: Completion{Transmission: TransmissionResponseReceived}, texts: []string{
 		"invalid", `{"steps":[{"kind":"done","result":"ok"}]}`,
 		`{"kind":"wait","for":"dom_settle"}`, `{"result":"ok"}`,
 	}}
-	budget := &budgetSpyV2{}
-	client, err := NewBudgetedClientV2(provider, budget, DefaultLimitsV2())
+	budget := &budgetSpy{}
+	client, err := NewBudgetedClient(provider, budget, DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,16 +209,16 @@ func TestRunnerTagsPlanningRetryRepairAndExtractionRequests(t *testing.T) {
 
 func TestRunnerPreservesBudgetFailureFromRepair(t *testing.T) {
 	driver := &driverFixture{fail: errors.New("element vanished")}
-	provider := &metadataClientSpyV2{}
-	budget := &budgetSpyV2{admitErr: ErrBudgetExhaustedV2}
-	client, err := NewBudgetedClientV2(provider, budget, DefaultLimitsV2())
+	provider := &metadataClientSpy{}
+	budget := &budgetSpy{admitErr: ErrBudgetExhausted}
+	client, err := NewBudgetedClient(provider, budget, DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := &Runner{LLM: client, Executor: NewExecutor(WaitStrategy{}).WithDriver(driver), MaxRepairs: 1}
 	plan := &Plan{Steps: []Action{{Kind: KindFill, Ref: 1, Text: "x"}, {Kind: KindDone, Result: "ok"}}}
 	_, _, runErr := r.executeWithRepairs(context.Background(), context.Background(), plan, &Snapshot{}, 20, nil)
-	if runErr == nil || !errors.Is(runErr, ErrBudgetExhaustedV2) || provider.calls != 0 {
+	if runErr == nil || !errors.Is(runErr, ErrBudgetExhausted) || provider.calls != 0 {
 		t.Fatalf("runErr=%v calls=%d", runErr, provider.calls)
 	}
 }
@@ -242,43 +242,43 @@ func TestFreshReplayOnlyRequiresExtractTemplates(t *testing.T) {
 				steps = append([]Action{{Kind: KindExtract, Fields: map[string]string{"value": "#v"}}}, steps...)
 			}
 			p := &Plan{Steps: steps}
-			if got := freshReplayPlanEligibleV2(p); got != tc.want {
+			if got := freshReplayPlanEligible(p); got != tc.want {
 				t.Fatalf("eligible=%v want %v", got, tc.want)
 			}
 		})
 	}
 }
 
-type freshReplayDriverV2 struct {
+type freshReplayDriver struct {
 	PageDriver
 	value string
 }
 
-func (*freshReplayDriverV2) Snapshot(context.Context, int) (*Snapshot, error) {
+func (*freshReplayDriver) Snapshot(context.Context, int) (*Snapshot, error) {
 	return &Snapshot{URL: "https://fresh.test"}, nil
 }
-func (d *freshReplayDriverV2) ExtractField(context.Context, string) (string, error) {
+func (d *freshReplayDriver) ExtractField(context.Context, string) (string, error) {
 	return d.value, nil
 }
 
-type replayPlanLLMV2 struct{ calls int }
+type replayPlanLLM struct{ calls int }
 
-func (l *replayPlanLLMV2) Complete(context.Context, string, string) (string, error) {
+func (l *replayPlanLLM) Complete(context.Context, string, string) (string, error) {
 	l.calls++
 	return `{"steps":[{"kind":"extract","fields":{"value":"#value"}},{"kind":"done","result":"{{extract.last.value}}"}]}`, nil
 }
 
-type literalPlanLLMV2 struct{ calls int }
+type literalPlanLLM struct{ calls int }
 
-func (l *literalPlanLLMV2) Complete(context.Context, string, string) (string, error) {
+func (l *literalPlanLLM) Complete(context.Context, string, string) (string, error) {
 	l.calls++
 	return `{"steps":[{"kind":"done","result":"literal-` + []string{"one", "two"}[l.calls-1] + `"}]}`, nil
 }
 
 func TestFreshReplayOnlyReplaysExtractionPlanWithCurrentValue(t *testing.T) {
 	cache := NewResolutionCache("")
-	driver := &freshReplayDriverV2{value: "first"}
-	llm := &replayPlanLLMV2{}
+	driver := &freshReplayDriver{value: "first"}
+	llm := &replayPlanLLM{}
 	r := &Runner{LLM: llm, Executor: NewExecutor(WaitStrategy{}).WithDriver(driver).WithCache(cache)}
 	task := Task{Goal: "report current value", ReplayKey: "stable", FreshReplayOnly: true}
 	first, _, err := r.RunDriver(context.Background(), driver, 20, task)
@@ -294,8 +294,8 @@ func TestFreshReplayOnlyReplaysExtractionPlanWithCurrentValue(t *testing.T) {
 
 func TestFreshReplayOnlyDoesNotCacheLiteralDoneData(t *testing.T) {
 	cache := NewResolutionCache("")
-	driver := &freshReplayDriverV2{}
-	llm := &literalPlanLLMV2{}
+	driver := &freshReplayDriver{}
+	llm := &literalPlanLLM{}
 	r := &Runner{LLM: llm, Executor: NewExecutor(WaitStrategy{}).WithDriver(driver).WithCache(cache)}
 	task := Task{Goal: "literal", ReplayKey: "literal", FreshReplayOnly: true}
 	first, _, err := r.RunDriver(context.Background(), driver, 20, task)
@@ -310,8 +310,8 @@ func TestFreshReplayOnlyDoesNotCacheLiteralDoneData(t *testing.T) {
 
 func TestRunnerPreservesProviderDeadlineFromRepair(t *testing.T) {
 	driver := &driverFixture{fail: errors.New("element vanished")}
-	provider := &metadataClientSpyV2{err: fmt.Errorf("provider-private-detail: %w", context.DeadlineExceeded)}
-	client, err := NewBudgetedClientV2(provider, &budgetSpyV2{}, DefaultLimitsV2())
+	provider := &metadataClientSpy{err: fmt.Errorf("provider-private-detail: %w", context.DeadlineExceeded)}
+	client, err := NewBudgetedClient(provider, &budgetSpy{}, DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -329,18 +329,18 @@ func TestRunnerPreservesProviderDeadlineFromRepair(t *testing.T) {
 	}
 }
 
-type cancellingRepairProviderV2 struct{ cancel context.CancelFunc }
+type cancellingRepairProvider struct{ cancel context.CancelFunc }
 
-func (p cancellingRepairProviderV2) CompleteWithUsage(context.Context, string, string) (CompletionV2, error) {
+func (p cancellingRepairProvider) CompleteWithUsage(context.Context, string, string) (Completion, error) {
 	p.cancel()
-	return CompletionV2{Transmission: TransmissionResponseReceivedV2}, context.Canceled
+	return Completion{Transmission: TransmissionResponseReceived}, context.Canceled
 }
 func TestRunnerPreservesTaskCancellationDuringRepair(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	driver := &driverFixture{fail: errors.New("element vanished")}
-	budget := &budgetSpyV2{}
-	client, err := NewBudgetedClientV2(cancellingRepairProviderV2{cancel}, budget, DefaultLimitsV2())
+	budget := &budgetSpy{}
+	client, err := NewBudgetedClient(cancellingRepairProvider{cancel}, budget, DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}

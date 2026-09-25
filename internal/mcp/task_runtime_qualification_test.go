@@ -23,7 +23,7 @@ import (
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func qualificationSessionV2(t *testing.T, o *Owner) (*sdk.ClientSession, context.Context) {
+func qualificationSession(t *testing.T, o *Owner) (*sdk.ClientSession, context.Context) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	t.Cleanup(cancel)
@@ -42,7 +42,7 @@ func qualificationSessionV2(t *testing.T, o *Owner) (*sdk.ClientSession, context
 	return session, ctx
 }
 
-func qualificationArgsV2(t *testing.T, value any) map[string]any {
+func qualificationArgs(t *testing.T, value any) map[string]any {
 	t.Helper()
 	raw, err := json.Marshal(value)
 	if err != nil {
@@ -55,7 +55,7 @@ func qualificationArgsV2(t *testing.T, value any) map[string]any {
 	return args
 }
 
-func qualificationCallV2(t *testing.T, session *sdk.ClientSession, ctx context.Context, name string, args map[string]any) (*sdk.CallToolResult, string) {
+func qualificationCall(t *testing.T, session *sdk.ClientSession, ctx context.Context, name string, args map[string]any) (*sdk.CallToolResult, string) {
 	t.Helper()
 	result, err := session.CallTool(ctx, &sdk.CallToolParams{Name: name, Arguments: args})
 	if err != nil {
@@ -71,7 +71,7 @@ func qualificationCallV2(t *testing.T, session *sdk.ClientSession, ctx context.C
 	return result, text.Text
 }
 
-func qualifiedProviderV2(t *testing.T, o *Owner, handler http.HandlerFunc) *atomic.Int64 {
+func qualifiedProvider(t *testing.T, o *Owner, handler http.HandlerFunc) *atomic.Int64 {
 	t.Helper()
 	count := new(atomic.Int64)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { count.Add(1); handler(w, r) }))
@@ -81,7 +81,7 @@ func qualifiedProviderV2(t *testing.T, o *Owner, handler http.HandlerFunc) *atom
 	o.cfg.LLMAPIKey = ""
 	return count
 }
-func writeCompletionV2(w http.ResponseWriter, plan string, usage bool) {
+func writeCompletion(w http.ResponseWriter, plan string, usage bool) {
 	w.Header().Set("Content-Type", "application/json")
 	out := map[string]any{"choices": []any{map[string]any{"message": map[string]any{"content": plan}}}}
 	if usage {
@@ -89,76 +89,76 @@ func writeCompletionV2(w http.ResponseWriter, plan string, usage bool) {
 	}
 	_ = json.NewEncoder(w).Encode(out)
 }
-func readMCPResultV2(t *testing.T, text string) TaskResultV2 {
+func readMCPResult(t *testing.T, text string) TaskResult {
 	t.Helper()
-	var result TaskResultV2
+	var result TaskResult
 	if err := json.Unmarshal([]byte(text), &result); err != nil {
 		t.Fatalf("decode result: %v: %s", err, text)
 	}
-	if err := ValidateTaskResultV2(result); err != nil {
+	if err := ValidateTaskResult(result); err != nil {
 		t.Fatalf("invalid task result: %v: %s", err, text)
 	}
 	return result
 }
 
-func TestTaskRuntimeV2Qualification_InvalidSchemaAndDeniedOriginDoNoProviderWork(t *testing.T) {
+func TestTaskRuntimeQualification_InvalidSchemaAndDeniedOriginDoNoProviderWork(t *testing.T) {
 	t.Run("invalid schema preflight", func(t *testing.T) {
-		o, driver, _ := runtimeFixtureV2(t, runtimePlanV2)
-		calls := qualifiedProviderV2(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletionV2(w, runtimePlanV2, true) })
-		session, ctx := qualificationSessionV2(t, o)
-		in := runtimeRequestV2("invalid_schema")
+		o, driver, _ := runtimeFixture(t, runtimePlan)
+		calls := qualifiedProvider(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletion(w, runtimePlan, true) })
+		session, ctx := qualificationSession(t, o)
+		in := runtimeRequest("invalid_schema")
 		in.OutputSchema = json.RawMessage(`{"$ref":"https://example.org/remote.json"}`)
-		result, _ := qualificationCallV2(t, session, ctx, "run_task_v2", qualificationArgsV2(t, in))
+		result, _ := qualificationCall(t, session, ctx, "run_task", qualificationArgs(t, in))
 		if !result.IsError || calls.Load() != 0 || driver.calls["extract_field"] != 0 {
 			t.Fatalf("isError=%v provider=%d driver=%v", result.IsError, calls.Load(), driver.calls)
 		}
 	})
 	t.Run("service origin denied", func(t *testing.T) {
-		o, driver, _ := runtimeFixtureV2(t, runtimePlanV2)
+		o, driver, _ := runtimeFixture(t, runtimePlan)
 		if err := os.WriteFile(o.cfg.AllowlistPath(), []byte(`[]`), 0600); err != nil {
 			t.Fatal(err)
 		}
-		calls := qualifiedProviderV2(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletionV2(w, runtimePlanV2, true) })
-		session, ctx := qualificationSessionV2(t, o)
-		result, text := qualificationCallV2(t, session, ctx, "run_task_v2", qualificationArgsV2(t, runtimeRequestV2("service_denied")))
+		calls := qualifiedProvider(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletion(w, runtimePlan, true) })
+		session, ctx := qualificationSession(t, o)
+		result, text := qualificationCall(t, session, ctx, "run_task", qualificationArgs(t, runtimeRequest("service_denied")))
 		if result.IsError {
 			t.Fatalf("expected admitted blocked envelope, got %s", text)
 		}
-		out := readMCPResultV2(t, text)
-		if out.Status != TaskBlockedV2 || calls.Load() != 0 || driver.calls["extract_field"] != 0 {
+		out := readMCPResult(t, text)
+		if out.Status != TaskBlocked || calls.Load() != 0 || driver.calls["extract_field"] != 0 {
 			t.Fatalf("status=%s provider=%d driver=%v", out.Status, calls.Load(), driver.calls)
 		}
 	})
 }
 
-func TestTaskRuntimeV2Qualification_MalformedPlanStopsAtExactRequestCeiling(t *testing.T) {
-	o, _, _ := runtimeFixtureV2(t, runtimePlanV2)
-	calls := qualifiedProviderV2(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletionV2(w, "not a plan", true) })
+func TestTaskRuntimeQualification_MalformedPlanStopsAtExactRequestCeiling(t *testing.T) {
+	o, _, _ := runtimeFixture(t, runtimePlan)
+	calls := qualifiedProvider(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletion(w, "not a plan", true) })
 	one := int64(1)
-	in := runtimeRequestV2("malformed_plan")
+	in := runtimeRequest("malformed_plan")
 	in.Limits.ModelRequests = &one
 	in.Limits.PlanningPasses = &one
-	session, ctx := qualificationSessionV2(t, o)
-	result, text := qualificationCallV2(t, session, ctx, "run_task_v2", qualificationArgsV2(t, in))
+	session, ctx := qualificationSession(t, o)
+	result, text := qualificationCall(t, session, ctx, "run_task", qualificationArgs(t, in))
 	if result.IsError {
 		t.Fatalf("run task transport error: %s", text)
 	}
-	out := readMCPResultV2(t, text)
-	if out.Status != TaskBudgetExhaustedV2 || out.Budget.Requests != 1 || calls.Load() != 1 {
+	out := readMCPResult(t, text)
+	if out.Status != TaskBudgetExhausted || out.Budget.Requests != 1 || calls.Load() != 1 {
 		t.Fatalf("status=%s requests=%d provider=%d result=%s", out.Status, out.Budget.Requests, calls.Load(), text)
 	}
 }
 
-func TestTaskRuntimeV2Qualification_MissingProviderUsageRemainsUnknown(t *testing.T) {
-	o, _, _ := runtimeFixtureV2(t, runtimePlanV2)
-	calls := qualifiedProviderV2(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletionV2(w, runtimePlanV2, false) })
-	session, ctx := qualificationSessionV2(t, o)
-	result, text := qualificationCallV2(t, session, ctx, "run_task_v2", qualificationArgsV2(t, runtimeRequestV2("usage_unknown")))
+func TestTaskRuntimeQualification_MissingProviderUsageRemainsUnknown(t *testing.T) {
+	o, _, _ := runtimeFixture(t, runtimePlan)
+	calls := qualifiedProvider(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletion(w, runtimePlan, false) })
+	session, ctx := qualificationSession(t, o)
+	result, text := qualificationCall(t, session, ctx, "run_task", qualificationArgs(t, runtimeRequest("usage_unknown")))
 	if result.IsError {
 		t.Fatalf("MCP returned error: %s", text)
 	}
-	out := readMCPResultV2(t, text)
-	if out.Status != TaskSucceededV2 || calls.Load() != 1 || out.Usage.InputTokens != nil || out.Usage.OutputTokens != nil || out.Usage.TotalTokens != nil {
+	out := readMCPResult(t, text)
+	if out.Status != TaskSucceeded || calls.Load() != 1 || out.Usage.InputTokens != nil || out.Usage.OutputTokens != nil || out.Usage.TotalTokens != nil {
 		t.Fatalf("usage fabricated or task failed: %+v calls=%d", out.Usage, calls.Load())
 	}
 	if out.Budget.UncertainRequests != 1 {
@@ -166,9 +166,9 @@ func TestTaskRuntimeV2Qualification_MissingProviderUsageRemainsUnknown(t *testin
 	}
 }
 
-func TestTaskRuntimeV2Qualification_LostProviderResponseRetainsUnknownReceipt(t *testing.T) {
-	o, _, _ := runtimeFixtureV2(t, runtimePlanV2)
-	calls := qualifiedProviderV2(t, o, func(w http.ResponseWriter, _ *http.Request) {
+func TestTaskRuntimeQualification_LostProviderResponseRetainsUnknownReceipt(t *testing.T) {
+	o, _, _ := runtimeFixture(t, runtimePlan)
+	calls := qualifiedProvider(t, o, func(w http.ResponseWriter, _ *http.Request) {
 		hijacker, ok := w.(http.Hijacker)
 		if !ok {
 			t.Error("fixture HTTP server does not support hijacking")
@@ -181,54 +181,54 @@ func TestTaskRuntimeV2Qualification_LostProviderResponseRetainsUnknownReceipt(t 
 		}
 		_ = conn.Close() // request arrived; response and usage were lost
 	})
-	session, ctx := qualificationSessionV2(t, o)
-	result, text := qualificationCallV2(t, session, ctx, "run_task_v2", qualificationArgsV2(t, runtimeRequestV2("provider_response_lost")))
+	session, ctx := qualificationSession(t, o)
+	result, text := qualificationCall(t, session, ctx, "run_task", qualificationArgs(t, runtimeRequest("provider_response_lost")))
 	if result.IsError {
 		t.Fatalf("expected durable result envelope after provider loss: %s", text)
 	}
-	out := readMCPResultV2(t, text)
-	if out.Status == TaskSucceededV2 || len(out.Result) != 0 || out.ResultArtifactID != "" || out.Budget.UncertainRequests != 1 || out.Usage.TotalTokens != nil || calls.Load() != 1 {
+	out := readMCPResult(t, text)
+	if out.Status == TaskSucceeded || len(out.Result) != 0 || out.ResultArtifactID != "" || out.Budget.UncertainRequests != 1 || out.Usage.TotalTokens != nil || calls.Load() != 1 {
 		t.Fatalf("lost provider response fabricated success or lost uncertainty: %+v provider=%d", out, calls.Load())
 	}
 }
 
-type disconnectedExtractDriverV2 struct {
+type disconnectedExtractDriver struct {
 	core.PageDriver
 	calls atomic.Int64
 }
 
-func (d *disconnectedExtractDriverV2) ExtractField(context.Context, string) (string, error) {
+func (d *disconnectedExtractDriver) ExtractField(context.Context, string) (string, error) {
 	d.calls.Add(1)
 	return "", &core.StopError{Code: "disconnected", Message: "fixture transport disconnected"}
 }
 
-func TestTaskRuntimeV2Qualification_BrowserDisconnectReturnsUncertainReceipt(t *testing.T) {
-	o, driver, _ := runtimeFixtureV2(t, runtimePlanV2)
-	disconnected := &disconnectedExtractDriverV2{PageDriver: driver}
+func TestTaskRuntimeQualification_BrowserDisconnectReturnsUncertainReceipt(t *testing.T) {
+	o, driver, _ := runtimeFixture(t, runtimePlan)
+	disconnected := &disconnectedExtractDriver{PageDriver: driver}
 	o.driver = disconnected
-	calls := qualifiedProviderV2(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletionV2(w, runtimePlanV2, true) })
-	session, ctx := qualificationSessionV2(t, o)
-	_, text := qualificationCallV2(t, session, ctx, "run_task_v2", qualificationArgsV2(t, runtimeRequestV2("browser_disconnect")))
-	receipt := readMCPResultV2(t, text)
-	if receipt.Status != TaskOutcomeUncertainV2 || receipt.SideEffectState != SideEffectUnknownV2 || receipt.Error == nil || receipt.Error.Retry != "reconcile_only" || receipt.Result != nil || receipt.ResultArtifactID != "" || calls.Load() != 1 || disconnected.calls.Load() != 1 {
+	calls := qualifiedProvider(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletion(w, runtimePlan, true) })
+	session, ctx := qualificationSession(t, o)
+	_, text := qualificationCall(t, session, ctx, "run_task", qualificationArgs(t, runtimeRequest("browser_disconnect")))
+	receipt := readMCPResult(t, text)
+	if receipt.Status != TaskOutcomeUncertain || receipt.SideEffectState != SideEffectUnknown || receipt.Error == nil || receipt.Error.Retry != "reconcile_only" || receipt.Result != nil || receipt.ResultArtifactID != "" || calls.Load() != 1 || disconnected.calls.Load() != 1 {
 		t.Fatalf("disconnect was not retained as uncertain: %+v provider=%d extraction=%d", receipt, calls.Load(), disconnected.calls.Load())
 	}
 }
 
-func TestTaskRuntimeV2Qualification_LargeExtractedResultReadBackByMCP(t *testing.T) {
-	o, driver, _ := runtimeFixtureV2(t, runtimePlanV2)
+func TestTaskRuntimeQualification_LargeExtractedResultReadBackByMCP(t *testing.T) {
+	o, driver, _ := runtimeFixture(t, runtimePlan)
 	driver.value = strings.Repeat("x", 20000)
-	calls := qualifiedProviderV2(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletionV2(w, runtimePlanV2, true) })
-	in := runtimeRequestV2("large_artifact")
-	in.Evidence = EvidenceArtifactsV2
+	calls := qualifiedProvider(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletion(w, runtimePlan, true) })
+	in := runtimeRequest("large_artifact")
+	in.Evidence = EvidenceArtifacts
 	in.OutputSchema = json.RawMessage(`{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}`)
-	session, ctx := qualificationSessionV2(t, o)
-	result, text := qualificationCallV2(t, session, ctx, "run_task_v2", qualificationArgsV2(t, in))
+	session, ctx := qualificationSession(t, o)
+	result, text := qualificationCall(t, session, ctx, "run_task", qualificationArgs(t, in))
 	if result.IsError {
 		t.Fatalf("run task error: %s", text)
 	}
-	out := readMCPResultV2(t, text)
-	if out.Status != TaskSucceededV2 || len(out.Result) != 0 || out.ResultArtifactID == "" || calls.Load() != 1 {
+	out := readMCPResult(t, text)
+	if out.Status != TaskSucceeded || len(out.Result) != 0 || out.ResultArtifactID == "" || calls.Load() != 1 {
 		t.Fatalf("artifact result: %+v calls=%d", out, calls.Load())
 	}
 	meta := out.Artifacts[0]
@@ -242,7 +242,7 @@ func TestTaskRuntimeV2Qualification_LargeExtractedResultReadBackByMCP(t *testing
 			limit = meta.Size - offset
 		}
 		args := map[string]any{"execution_id": out.ExecutionID, "artifact_id": meta.ID, "offset": offset, "limit": limit}
-		_, chunkText := qualificationCallV2(t, session, ctx, "read_task_artifact", args)
+		_, chunkText := qualificationCall(t, session, ctx, "read_task_artifact", args)
 		var response struct {
 			Data   string `json:"data"`
 			Offset int64  `json:"offset"`
@@ -271,116 +271,116 @@ func TestTaskRuntimeV2Qualification_LargeExtractedResultReadBackByMCP(t *testing
 	}
 }
 
-func TestTaskRuntimeV2Qualification_WarmReplayExtractsCurrentFactsThroughMCP(t *testing.T) {
-	o, driver, _ := runtimeFixtureV2(t, runtimePlanV2)
-	calls := qualifiedProviderV2(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletionV2(w, runtimePlanV2, true) })
-	session, ctx := qualificationSessionV2(t, o)
-	firstRequest := runtimeRequestV2("mcp_warm_first")
+func TestTaskRuntimeQualification_WarmReplayExtractsCurrentFactsThroughMCP(t *testing.T) {
+	o, driver, _ := runtimeFixture(t, runtimePlan)
+	calls := qualifiedProvider(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletion(w, runtimePlan, true) })
+	session, ctx := qualificationSession(t, o)
+	firstRequest := runtimeRequest("mcp_warm_first")
 	firstRequest.ReplayLabel = "same-work"
-	first, firstText := qualificationCallV2(t, session, ctx, "run_task_v2", qualificationArgsV2(t, firstRequest))
+	first, firstText := qualificationCall(t, session, ctx, "run_task", qualificationArgs(t, firstRequest))
 	if first.IsError {
 		t.Fatalf("first MCP run: %s", firstText)
 	}
-	firstResult := readMCPResultV2(t, firstText)
-	if firstResult.Status != TaskSucceededV2 || string(firstResult.Result) != `{"value":"first"}` {
+	firstResult := readMCPResult(t, firstText)
+	if firstResult.Status != TaskSucceeded || string(firstResult.Result) != `{"value":"first"}` {
 		t.Fatalf("first result=%+v", firstResult)
 	}
 	driver.value = "current-after-replay"
 	secondRequest := firstRequest
 	secondRequest.TaskID = "mcp_warm_second"
-	second, secondText := qualificationCallV2(t, session, ctx, "run_task_v2", qualificationArgsV2(t, secondRequest))
+	second, secondText := qualificationCall(t, session, ctx, "run_task", qualificationArgs(t, secondRequest))
 	if second.IsError {
 		t.Fatalf("second MCP run: %s", secondText)
 	}
-	secondResult := readMCPResultV2(t, secondText)
-	if secondResult.Status != TaskSucceededV2 || string(secondResult.Result) != `{"value":"current-after-replay"}` || secondResult.Budget.Requests != 0 || calls.Load() != 1 || driver.calls["extract_field"] != 2 {
+	secondResult := readMCPResult(t, secondText)
+	if secondResult.Status != TaskSucceeded || string(secondResult.Result) != `{"value":"current-after-replay"}` || secondResult.Budget.Requests != 0 || calls.Load() != 1 || driver.calls["extract_field"] != 2 {
 		t.Fatalf("MCP warm replay stale/called model: result=%+v provider=%d driver=%v", secondResult, calls.Load(), driver.calls)
 	}
 }
 
-type repairFailExtractDriverV2 struct{ *runtimeDriverV2 }
+type repairFailExtractDriver struct{ *runtimeDriver }
 
-func (d *repairFailExtractDriverV2) ExtractField(context.Context, string) (string, error) {
+func (d *repairFailExtractDriver) ExtractField(context.Context, string) (string, error) {
 	d.called("extract_field")
 	return "", fmt.Errorf("fixture extraction failure")
 }
 
-func TestTaskRuntimeV2Qualification_InitialAndRepairedMutationPlansNeverDispatch(t *testing.T) {
+func TestTaskRuntimeQualification_InitialAndRepairedMutationPlansNeverDispatch(t *testing.T) {
 	initialMutation := `{"steps":[{"kind":"key","text":"Enter"},{"kind":"done","result":{"value":"x"}}]}`
 	t.Run("initial plan", func(t *testing.T) {
-		o, driver, _ := runtimeFixtureV2(t, initialMutation)
-		calls := qualifiedProviderV2(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletionV2(w, initialMutation, true) })
-		session, ctx := qualificationSessionV2(t, o)
-		result, text := qualificationCallV2(t, session, ctx, "run_task_v2", qualificationArgsV2(t, runtimeRequestV2("initial_mutation")))
+		o, driver, _ := runtimeFixture(t, initialMutation)
+		calls := qualifiedProvider(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletion(w, initialMutation, true) })
+		session, ctx := qualificationSession(t, o)
+		result, text := qualificationCall(t, session, ctx, "run_task", qualificationArgs(t, runtimeRequest("initial_mutation")))
 		if result.IsError {
 			t.Fatalf("MCP: %s", text)
 		}
-		out := readMCPResultV2(t, text)
-		if out.Status != TaskBlockedV2 || calls.Load() != 1 || driver.calls["key"] != 0 {
+		out := readMCPResult(t, text)
+		if out.Status != TaskBlocked || calls.Load() != 1 || driver.calls["key"] != 0 {
 			t.Fatalf("initial mutation dispatched: %+v provider=%d driver=%v", out, calls.Load(), driver.calls)
 		}
 	})
 	t.Run("repair proposal", func(t *testing.T) {
 		firstPlan := `{"steps":[{"kind":"extract","fields":{"value":"#value"}},{"kind":"done","result":"{{extract.last}}"}]}`
-		o, base, _ := runtimeFixtureV2(t, firstPlan)
-		driver := &repairFailExtractDriverV2{runtimeDriverV2: base}
+		o, base, _ := runtimeFixture(t, firstPlan)
+		driver := &repairFailExtractDriver{runtimeDriver: base}
 		o.driver = driver
 		var requests atomic.Int64
-		calls := qualifiedProviderV2(t, o, func(w http.ResponseWriter, _ *http.Request) {
+		calls := qualifiedProvider(t, o, func(w http.ResponseWriter, _ *http.Request) {
 			if requests.Add(1) == 1 {
-				writeCompletionV2(w, firstPlan, true)
+				writeCompletion(w, firstPlan, true)
 			} else {
-				writeCompletionV2(w, `{"kind":"key","text":"Enter"}`, true)
+				writeCompletion(w, `{"kind":"key","text":"Enter"}`, true)
 			}
 		})
-		session, ctx := qualificationSessionV2(t, o)
-		result, text := qualificationCallV2(t, session, ctx, "run_task_v2", qualificationArgsV2(t, runtimeRequestV2("repair_mutation")))
+		session, ctx := qualificationSession(t, o)
+		result, text := qualificationCall(t, session, ctx, "run_task", qualificationArgs(t, runtimeRequest("repair_mutation")))
 		if result.IsError {
 			t.Fatalf("MCP: %s", text)
 		}
-		out := readMCPResultV2(t, text)
-		if out.Status != TaskBlockedV2 || calls.Load() != 2 || driver.calls["key"] != 0 {
+		out := readMCPResult(t, text)
+		if out.Status != TaskBlocked || calls.Load() != 2 || driver.calls["key"] != 0 {
 			t.Fatalf("repair mutation dispatched: %+v provider=%d driver=%v", out, calls.Load(), driver.calls)
 		}
 	})
 	t.Run("blocked replay candidate is never cached", func(t *testing.T) {
 		mutation := `{"steps":[{"kind":"key","text":"Enter"},{"kind":"done","result":{"value":"x"}}]}`
-		valid := runtimePlanV2
-		o, driver, _ := runtimeFixtureV2(t, mutation)
+		valid := runtimePlan
+		o, driver, _ := runtimeFixture(t, mutation)
 		var requests atomic.Int64
-		calls := qualifiedProviderV2(t, o, func(w http.ResponseWriter, _ *http.Request) {
+		calls := qualifiedProvider(t, o, func(w http.ResponseWriter, _ *http.Request) {
 			if requests.Add(1) == 1 {
-				writeCompletionV2(w, mutation, true)
+				writeCompletion(w, mutation, true)
 			} else {
-				writeCompletionV2(w, valid, true)
+				writeCompletion(w, valid, true)
 			}
 		})
-		session, ctx := qualificationSessionV2(t, o)
-		first := runtimeRequestV2("replay_mutation_first")
+		session, ctx := qualificationSession(t, o)
+		first := runtimeRequest("replay_mutation_first")
 		first.ReplayLabel = "same-replay"
-		one, text := qualificationCallV2(t, session, ctx, "run_task_v2", qualificationArgsV2(t, first))
+		one, text := qualificationCall(t, session, ctx, "run_task", qualificationArgs(t, first))
 		if one.IsError {
 			t.Fatalf("first MCP: %s", text)
 		}
 		first.TaskID = "replay_mutation_second"
-		two, text := qualificationCallV2(t, session, ctx, "run_task_v2", qualificationArgsV2(t, first))
+		two, text := qualificationCall(t, session, ctx, "run_task", qualificationArgs(t, first))
 		if two.IsError {
 			t.Fatalf("second MCP: %s", text)
 		}
-		out := readMCPResultV2(t, text)
-		if out.Status != TaskSucceededV2 || calls.Load() != 2 || driver.calls["key"] != 0 {
+		out := readMCPResult(t, text)
+		if out.Status != TaskSucceeded || calls.Load() != 2 || driver.calls["key"] != 0 {
 			t.Fatalf("unsafe replay or mutation call: %+v provider=%d driver=%v", out, calls.Load(), driver.calls)
 		}
 	})
 }
 
-func TestTaskRuntimeV2QualificationRestartChild(t *testing.T) {
+func TestTaskRuntimeQualificationRestartChild(t *testing.T) {
 	if os.Getenv("FERRO_G03_RESTART_CHILD") != "1" {
 		return
 	}
 	home := os.Getenv("FERRO_G03_RESTART_HOME")
 	providerURL := os.Getenv("FERRO_G03_RESTART_PROVIDER")
-	o, base, _ := runtimeFixtureV2(t, runtimePlanV2)
+	o, base, _ := runtimeFixture(t, runtimePlan)
 	if err := o.receipts.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -394,17 +394,17 @@ func TestTaskRuntimeV2QualificationRestartChild(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := OpenReceiptStoreV2(filepath.Join(home, "tasks-v2"), 256<<20)
+	store, err := OpenReceiptStore(filepath.Join(home, "tasks-v2"), 256<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
 	o.cfg.Home, o.cfg.LLMBaseURL, o.cfg.LLMModel = home, providerURL, "qualification-fixture"
 	o.allow, o.receipts = allow, store
-	blocking := &restartBlockingDriverV2{runtimeDriverV2: base, entered: make(chan struct{})}
+	blocking := &restartBlockingDriver{runtimeDriver: base, entered: make(chan struct{})}
 	o.driver = blocking
-	session, ctx := qualificationSessionV2(t, o)
-	args := qualificationArgsV2(t, runtimeRequestV2("restart_inflight"))
-	go func() { _, _ = session.CallTool(ctx, &sdk.CallToolParams{Name: "run_task_v2", Arguments: args}) }()
+	session, ctx := qualificationSession(t, o)
+	args := qualificationArgs(t, runtimeRequest("restart_inflight"))
+	go func() { _, _ = session.CallTool(ctx, &sdk.CallToolParams{Name: "run_task", Arguments: args}) }()
 	select {
 	case <-blocking.entered:
 		fmt.Fprintln(os.Stdout, "READY")
@@ -414,27 +414,27 @@ func TestTaskRuntimeV2QualificationRestartChild(t *testing.T) {
 	select {} // The parent kills this process to simulate an unclean crash.
 }
 
-type restartBlockingDriverV2 struct {
-	*runtimeDriverV2
+type restartBlockingDriver struct {
+	*runtimeDriver
 	entered chan struct{}
 	once    sync.Once
 }
 
-func (d *restartBlockingDriverV2) ExtractField(context.Context, string) (string, error) {
+func (d *restartBlockingDriver) ExtractField(context.Context, string) (string, error) {
 	d.called("extract_field")
 	d.once.Do(func() { close(d.entered) })
 	select {} // The parent kills the subprocess while execution is in flight.
 }
 
-func TestTaskRuntimeV2Qualification_RestartReconcilesInflightReceiptWithoutRedispatch(t *testing.T) {
+func TestTaskRuntimeQualification_RestartReconcilesInflightReceiptWithoutRedispatch(t *testing.T) {
 	home := t.TempDir()
 	var providerCalls atomic.Int64
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		providerCalls.Add(1)
-		writeCompletionV2(w, runtimePlanV2, true)
+		writeCompletion(w, runtimePlan, true)
 	}))
 	defer provider.Close()
-	cmd := exec.Command(os.Args[0], "-test.run=^TestTaskRuntimeV2QualificationRestartChild$")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestTaskRuntimeQualificationRestartChild$")
 	cmd.Env = append(os.Environ(), "FERRO_G03_RESTART_CHILD=1", "FERRO_G03_RESTART_HOME="+home, "FERRO_G03_RESTART_PROVIDER="+provider.URL)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -465,57 +465,57 @@ func TestTaskRuntimeV2Qualification_RestartReconcilesInflightReceiptWithoutRedis
 	if err = cmd.Wait(); err == nil {
 		t.Fatal("crashed subprocess exited successfully after kill")
 	}
-	store, err := OpenReceiptStoreV2(filepath.Join(home, "tasks-v2"), 256<<20)
+	store, err := OpenReceiptStore(filepath.Join(home, "tasks-v2"), 256<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	o := &Owner{cfg: Config{Home: home, BlockTimeout: time.Minute}, receipts: store, gate: make(chan struct{}, 1), stopCh: make(chan struct{})}
-	session, ctx := qualificationSessionV2(t, o)
-	_, receiptText := qualificationCallV2(t, session, ctx, "get_task_receipt", map[string]any{"task_id": "restart_inflight"})
-	var receipt ReceiptV2
+	session, ctx := qualificationSession(t, o)
+	_, receiptText := qualificationCall(t, session, ctx, "get_task_receipt", map[string]any{"task_id": "restart_inflight"})
+	var receipt Receipt
 	if err = json.Unmarshal([]byte(receiptText), &receipt); err != nil {
 		t.Fatalf("decode recovered receipt: %v: %s", err, receiptText)
 	}
-	if receipt.State != ReceiptUncertainV2 || receipt.TaskID != "restart_inflight" {
+	if receipt.State != ReceiptUncertain || receipt.TaskID != "restart_inflight" {
 		t.Fatalf("in-flight receipt not reconciled: %+v", receipt)
 	}
 	// A duplicate after restart returns that uncertain receipt; it must not dispatch.
-	_, duplicateText := qualificationCallV2(t, session, ctx, "run_task_v2", qualificationArgsV2(t, runtimeRequestV2("restart_inflight")))
-	var duplicate ReceiptV2
+	_, duplicateText := qualificationCall(t, session, ctx, "run_task", qualificationArgs(t, runtimeRequest("restart_inflight")))
+	var duplicate Receipt
 	if err = json.Unmarshal([]byte(duplicateText), &duplicate); err != nil {
 		t.Fatalf("decode duplicate response: %v: %s", err, duplicateText)
 	}
-	if duplicate.State != ReceiptUncertainV2 || providerCalls.Load() != 1 {
+	if duplicate.State != ReceiptUncertain || providerCalls.Load() != 1 {
 		t.Fatalf("restart redispatched: state=%s provider calls=%d", duplicate.State, providerCalls.Load())
 	}
 }
 
-func TestTaskRuntimeV2DuplicateReceiptBypassesOtherSessionLease(t *testing.T) {
-	o, driver, providerCalls := runtimeFixtureV2(t, runtimePlanV2)
-	sessionA, ctxA := qualificationSessionV2(t, o)
-	sessionB, ctxB := qualificationSessionV2(t, o)
-	in := runtimeRequestV2("lease_duplicate")
-	args := qualificationArgsV2(t, in)
+func TestTaskRuntimeDuplicateReceiptBypassesOtherSessionLease(t *testing.T) {
+	o, driver, providerCalls := runtimeFixture(t, runtimePlan)
+	sessionA, ctxA := qualificationSession(t, o)
+	sessionB, ctxB := qualificationSession(t, o)
+	in := runtimeRequest("lease_duplicate")
+	args := qualificationArgs(t, in)
 
-	first, _ := qualificationCallV2(t, sessionA, ctxA, "run_task_v2", args)
+	first, _ := qualificationCall(t, sessionA, ctxA, "run_task", args)
 	if first.IsError {
 		t.Fatal("initial task failed")
 	}
-	_, leaseText := qualificationCallV2(t, sessionB, ctxB, "acquire_tab", map[string]any{})
+	_, leaseText := qualificationCall(t, sessionB, ctxB, "acquire_tab", map[string]any{})
 	if !strings.Contains(leaseText, "acquired") {
 		t.Fatalf("session B did not acquire the tab: %s", leaseText)
 	}
 
-	duplicate, duplicateText := qualificationCallV2(t, sessionA, ctxA, "run_task_v2", args)
+	duplicate, duplicateText := qualificationCall(t, sessionA, ctxA, "run_task", args)
 	if duplicate.IsError {
 		t.Fatalf("same task did not return its receipt: %s", duplicateText)
 	}
-	var repeated TaskResultV2
+	var repeated TaskResult
 	if err := json.Unmarshal([]byte(duplicateText), &repeated); err != nil {
 		t.Fatalf("decode repeated result: %v: %s", err, duplicateText)
 	}
-	var initial TaskResultV2
+	var initial TaskResult
 	if err := json.Unmarshal([]byte(first.Content[0].(*sdk.TextContent).Text), &initial); err != nil {
 		t.Fatalf("decode initial result: %v", err)
 	}
@@ -525,36 +525,36 @@ func TestTaskRuntimeV2DuplicateReceiptBypassesOtherSessionLease(t *testing.T) {
 
 	changed := in
 	changed.Goal = "a different request"
-	conflict, conflictText := qualificationCallV2(t, sessionA, ctxA, "run_task_v2", qualificationArgsV2(t, changed))
+	conflict, conflictText := qualificationCall(t, sessionA, ctxA, "run_task", qualificationArgs(t, changed))
 	if !conflict.IsError || providerCalls.Load() != 1 || driver.calls["extract_field"] != 1 {
 		t.Fatalf("changed same-key request was not rejected without execution: isError=%v text=%s provider=%d actions=%v", conflict.IsError, conflictText, providerCalls.Load(), driver.calls)
 	}
-	receipt, err := o.receipts.Lookup(context.Background(), privateReceiptOwnerV2, in.TaskID)
+	receipt, err := o.receipts.Lookup(context.Background(), privateReceiptOwner, in.TaskID)
 	if err != nil || receipt.ExecutionID != initial.ExecutionID {
 		t.Fatalf("receipt principal or identity changed: receipt=%+v err=%v", receipt, err)
 	}
 }
 
-func TestTaskRuntimeV2Qualification_ConcurrentDuplicateAndChangedInput(t *testing.T) {
-	o, _, _ := runtimeFixtureV2(t, runtimePlanV2)
+func TestTaskRuntimeQualification_ConcurrentDuplicateAndChangedInput(t *testing.T) {
+	o, _, _ := runtimeFixture(t, runtimePlan)
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
-	calls := qualifiedProviderV2(t, o, func(w http.ResponseWriter, _ *http.Request) {
+	calls := qualifiedProvider(t, o, func(w http.ResponseWriter, _ *http.Request) {
 		entered <- struct{}{}
 		<-release
-		writeCompletionV2(w, runtimePlanV2, true)
+		writeCompletion(w, runtimePlan, true)
 	})
-	session, ctx := qualificationSessionV2(t, o)
-	in := runtimeRequestV2("concurrent_duplicate")
-	args := qualificationArgsV2(t, in)
+	session, ctx := qualificationSession(t, o)
+	in := runtimeRequest("concurrent_duplicate")
+	args := qualificationArgs(t, in)
 	first := make(chan struct {
 		res  *sdk.CallToolResult
 		text string
 	}, 1)
 	go func() {
-		res, text := qualificationCallSafeV2(session, ctx, "run_task_v2", args)
+		res, text := qualificationCallSafe(session, ctx, "run_task", args)
 		first <- struct {
 			res  *sdk.CallToolResult
 			text string
@@ -565,7 +565,7 @@ func TestTaskRuntimeV2Qualification_ConcurrentDuplicateAndChangedInput(t *testin
 	case <-ctx.Done():
 		t.Fatal("provider was not entered")
 	}
-	secondSession, secondCtx := qualificationSessionV2(t, o)
+	secondSession, secondCtx := qualificationSession(t, o)
 	duplicateStarted := make(chan struct{})
 	duplicate := make(chan struct {
 		res  *sdk.CallToolResult
@@ -573,7 +573,7 @@ func TestTaskRuntimeV2Qualification_ConcurrentDuplicateAndChangedInput(t *testin
 	}, 1)
 	go func() {
 		close(duplicateStarted)
-		res, text := qualificationCallSafeV2(secondSession, secondCtx, "run_task_v2", args)
+		res, text := qualificationCallSafe(secondSession, secondCtx, "run_task", args)
 		duplicate <- struct {
 			res  *sdk.CallToolResult
 			text string
@@ -586,7 +586,7 @@ func TestTaskRuntimeV2Qualification_ConcurrentDuplicateAndChangedInput(t *testin
 		if got.res == nil || got.res.IsError {
 			t.Fatalf("original call failed: %s", got.text)
 		}
-		_ = readMCPResultV2(t, got.text)
+		_ = readMCPResult(t, got.text)
 	case <-ctx.Done():
 		t.Fatal("original call did not finish")
 	}
@@ -600,7 +600,7 @@ func TestTaskRuntimeV2Qualification_ConcurrentDuplicateAndChangedInput(t *testin
 	}
 	changed := in
 	changed.Goal = "changed input"
-	conflict, conflictText := qualificationCallV2(t, secondSession, secondCtx, "run_task_v2", qualificationArgsV2(t, changed))
+	conflict, conflictText := qualificationCall(t, secondSession, secondCtx, "run_task", qualificationArgs(t, changed))
 	if !conflict.IsError || calls.Load() != 1 {
 		t.Fatalf("changed input did not conflict: isError=%v calls=%d %s", conflict.IsError, calls.Load(), conflictText)
 	}
@@ -609,7 +609,7 @@ func TestTaskRuntimeV2Qualification_ConcurrentDuplicateAndChangedInput(t *testin
 	}
 }
 
-func qualificationCallSafeV2(session *sdk.ClientSession, ctx context.Context, name string, args map[string]any) (*sdk.CallToolResult, string) {
+func qualificationCallSafe(session *sdk.ClientSession, ctx context.Context, name string, args map[string]any) (*sdk.CallToolResult, string) {
 	result, err := session.CallTool(ctx, &sdk.CallToolParams{Name: name, Arguments: args})
 	if err != nil {
 		return nil, err.Error()
@@ -624,48 +624,48 @@ func qualificationCallSafeV2(session *sdk.ClientSession, ctx context.Context, na
 	return result, text.Text
 }
 
-func TestTaskRuntimeV2Qualification_OriginRevocationAfterProviderPreventsAction(t *testing.T) {
-	o, driver, _ := runtimeFixtureV2(t, runtimePlanV2)
-	calls := qualifiedProviderV2(t, o, func(w http.ResponseWriter, _ *http.Request) {
-		writeCompletionV2(w, runtimePlanV2, true)
+func TestTaskRuntimeQualification_OriginRevocationAfterProviderPreventsAction(t *testing.T) {
+	o, driver, _ := runtimeFixture(t, runtimePlan)
+	calls := qualifiedProvider(t, o, func(w http.ResponseWriter, _ *http.Request) {
+		writeCompletion(w, runtimePlan, true)
 		if err := os.WriteFile(o.cfg.AllowlistPath(), []byte(`[]`), 0600); err != nil {
 			t.Errorf("revoke allowlist: %v", err)
 		}
 	})
-	session, ctx := qualificationSessionV2(t, o)
-	result, text := qualificationCallV2(t, session, ctx, "run_task_v2", qualificationArgsV2(t, runtimeRequestV2("revoked_after_plan")))
+	session, ctx := qualificationSession(t, o)
+	result, text := qualificationCall(t, session, ctx, "run_task", qualificationArgs(t, runtimeRequest("revoked_after_plan")))
 	if result.IsError {
 		t.Fatalf("MCP call: %s", text)
 	}
-	out := readMCPResultV2(t, text)
-	if out.Status != TaskBlockedV2 || calls.Load() != 1 || driver.calls["extract_field"] != 0 {
+	out := readMCPResult(t, text)
+	if out.Status != TaskBlocked || calls.Load() != 1 || driver.calls["extract_field"] != 0 {
 		t.Fatalf("post-revocation execution: status=%s provider=%d driver=%v", out.Status, calls.Load(), driver.calls)
 	}
 }
 
-func TestTaskRuntimeV2Qualification_FreshMCPClientRecoversAfterStoreRestart(t *testing.T) {
-	o, _, _ := runtimeFixtureV2(t, runtimePlanV2)
-	calls := qualifiedProviderV2(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletionV2(w, runtimePlanV2, true) })
-	firstSession, ctx := qualificationSessionV2(t, o)
-	result, text := qualificationCallV2(t, firstSession, ctx, "run_task_v2", qualificationArgsV2(t, runtimeRequestV2("restart_recovery")))
+func TestTaskRuntimeQualification_FreshMCPClientRecoversAfterStoreRestart(t *testing.T) {
+	o, _, _ := runtimeFixture(t, runtimePlan)
+	calls := qualifiedProvider(t, o, func(w http.ResponseWriter, _ *http.Request) { writeCompletion(w, runtimePlan, true) })
+	firstSession, ctx := qualificationSession(t, o)
+	result, text := qualificationCall(t, firstSession, ctx, "run_task", qualificationArgs(t, runtimeRequest("restart_recovery")))
 	if result.IsError {
 		t.Fatalf("run task: %s", text)
 	}
-	original := readMCPResultV2(t, text)
+	original := readMCPResult(t, text)
 	if err := o.receipts.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err := OpenReceiptStoreV2(filepath.Join(o.cfg.Home, "tasks-v2"), 256<<20)
+	store, err := OpenReceiptStore(filepath.Join(o.cfg.Home, "tasks-v2"), 256<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
 	o.receipts = store
-	freshSession, freshCtx := qualificationSessionV2(t, o)
-	receiptCall, receiptText := qualificationCallV2(t, freshSession, freshCtx, "get_task_receipt", map[string]any{"task_id": "restart_recovery"})
+	freshSession, freshCtx := qualificationSession(t, o)
+	receiptCall, receiptText := qualificationCall(t, freshSession, freshCtx, "get_task_receipt", map[string]any{"task_id": "restart_recovery"})
 	if receiptCall.IsError || !strings.Contains(receiptText, original.ExecutionID) || calls.Load() != 1 {
 		t.Fatalf("fresh client recovery failed: isError=%v calls=%d text=%s", receiptCall.IsError, calls.Load(), receiptText)
 	}
-	var recovered TaskResultV2
+	var recovered TaskResult
 	if err := json.Unmarshal([]byte(receiptText), &recovered); err != nil || recovered.ExecutionID != original.ExecutionID {
 		t.Fatalf("receipt did not return terminal result: %v %s", err, receiptText)
 	}

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-func TestRuntimeV2_DispatchedNavigationCancellationRemainsUncertain(t *testing.T) {
+func TestRuntime_DispatchedNavigationCancellationRemainsUncertain(t *testing.T) {
 	home := shortTempDir(t)
 	if err := os.WriteFile(filepath.Join(home, "allowlist.json"), []byte(`["https://allowed.example"]`), 0600); err != nil {
 		t.Fatal(err)
@@ -43,14 +43,14 @@ func TestRuntimeV2_DispatchedNavigationCancellationRemainsUncertain(t *testing.T
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	in := runtimeRequestV2("navigation-cancel")
+	in := runtimeRequest("navigation-cancel")
 	in.StartURL = "https://allowed.example/page"
 	raw, _ := json.Marshal(in)
 	done := make(chan struct{})
 	var text string
 	var failed bool
 	var callErr error
-	go func() { defer close(done); text, failed, callErr = owner.Call(ctx, "run_task_v2", raw) }()
+	go func() { defer close(done); text, failed, callErr = owner.Call(ctx, "run_task", raw) }()
 	dispatched := bridgeCall("GET", "/next")
 	body, err := io.ReadAll(dispatched.Body)
 	dispatched.Body.Close()
@@ -78,15 +78,15 @@ func TestRuntimeV2_DispatchedNavigationCancellationRemainsUncertain(t *testing.T
 	if failed || callErr != nil {
 		t.Fatalf("call failed=%v err=%v text=%s", failed, callErr, text)
 	}
-	var result TaskResultV2
+	var result TaskResult
 	if err = json.Unmarshal([]byte(text), &result); err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != TaskOutcomeUncertainV2 || result.SideEffectState != SideEffectUnknownV2 || result.Error == nil || result.Error.Retry != "reconcile_only" {
+	if result.Status != TaskOutcomeUncertain || result.SideEffectState != SideEffectUnknown || result.Error == nil || result.Error.Retry != "reconcile_only" {
 		t.Fatalf("uncertain navigation erased: %+v", result)
 	}
-	receipt, err := owner.receipts.Lookup(context.Background(), privateReceiptOwnerV2, in.TaskID)
-	if err != nil || receipt.Result == nil || receipt.Result.Status != TaskOutcomeUncertainV2 {
+	receipt, err := owner.receipts.Lookup(context.Background(), privateReceiptOwner, in.TaskID)
+	if err != nil || receipt.Result == nil || receipt.Result.Status != TaskOutcomeUncertain {
 		t.Fatalf("uncertain receipt lost: %+v %v", receipt, err)
 	}
 }

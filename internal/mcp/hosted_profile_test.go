@@ -8,12 +8,12 @@ import (
 
 func TestDeploymentDeadlineChangesEffectiveProfileAndRevision(t *testing.T) {
 	cfg := Config{LLMBaseURL: "https://api.example.com/v1", LLMModel: "configured-model"}
-	normal, err := (&Owner{cfg: cfg}).resolveTaskProfileV2(context.Background(), "legacy-mcp")
+	normal, err := (&Owner{cfg: cfg}).resolveTaskProfile(context.Background(), "legacy-mcp")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cfg.BlockTimeout = 45 * time.Second
-	bounded, err := (&Owner{cfg: cfg}).resolveTaskProfileV2(context.Background(), "legacy-mcp")
+	bounded, err := (&Owner{cfg: cfg}).resolveTaskProfile(context.Background(), "legacy-mcp")
 	if err != nil {
 		t.Fatal(err)
 	}

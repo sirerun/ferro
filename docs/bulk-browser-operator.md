@@ -1,6 +1,6 @@
-# Bounded read-only task operator guide
+# Browser task operator guide
 
-This guide describes the additive `ferro.task/v2` MCP tools. The existing `run_task` tool and direct browser tools keep their legacy wire behavior. The v2 task tools are local, bounded, read-only execution; they are not a general browser scripting interface or a hosted multi-tenant service. See the [frozen contract](contracts/bulk-v2.md) for field-level rules and the [accepted decision](adr/009-bounded-task-contract.md) for design boundaries.
+Use the single unversioned `run_task` MCP tool for goal-level browser work. It is read/write by default, with existing origin checks, execution budgets, and task serialization applied. A simple request needs only a goal. Add `task_id`, exact `policy.origins`, `output_schema`, limits, and `evidence` to enable durable receipt recovery and structured output. The optional `policy.mode` can be set to `read_only` for a task that must not change the page. Direct browser tools remain available for precise one-step actions.
 
 **Qualification status:** the contract and implementation are under fixture qualification. A passing contract/example check is not evidence that a browser installation, live site, account, provider, or deployment has been qualified. Do not treat these examples as proof of an installed or live workflow.
 
@@ -8,9 +8,25 @@ This guide describes the additive `ferro.task/v2` MCP tools. The existing `run_t
 
 Use `list_model_profiles` to see the configured profile names and immutable revisions available to this installation. It returns public descriptions and read-only capability; it does not return endpoints, credential references, or credential values. The initial runtime exposes the compatibility names `legacy-mcp` and `legacy-chat`, when each can be resolved. `legacy-mcp` uses the existing MCP model settings from `FERRO_MCP_LLM_BASE_URL`, `FERRO_MCP_LLM_MODEL`, and optional `FERRO_MCP_LLM_API_KEY`. `legacy-chat` uses the saved chat model in the private `chat-model.json` under the configured Ferro home; when that file is absent, it uses the same MCP settings. These are mappings to existing settings, not arbitrary per-request profiles or automatic model selection. Configure the existing settings through the supported installation process; never place a key in a task request or example.
 
-Submit one `run_task_v2` request with a unique `task_id`, a concise goal, a configured `model_profile`, an output schema, and an explicit read-only policy with exact allowed origins. The optional `start_url` must fall within those origins. Optional limits can tighten the service limits; they cannot raise them. `replay_key` is only a caller label, not authorization or a guarantee that a cached result will be reused. Omitted evidence mode means `compact`; use `artifacts` when you need retrievable large evidence or output.
+For receipt-backed work, submit `run_task` with a unique `task_id`, a concise goal, a configured `model_profile`, an output schema, and exact allowed origins. The default task mode is read/write; set `policy.mode` to `read_only` only when needed. The optional `start_url` must fall within the allowed origins. Optional limits can tighten the service limits; they cannot raise them. `replay_key` is only a caller label, not authorization or a guarantee that a cached result will be reused. Omitted evidence mode means `compact`; use `artifacts` when you need retrievable large evidence or output.
 
-V2 allows navigation, snapshots, extraction, scrolling, waiting, and settling. Click, fill, select, and key actions are denied, including if suggested by an initial, repaired, or replayed plan. Origin checks constrain Ferro's browser operations; they do not claim network-level egress confinement. A task holds the installation's browser/tab lease while it runs. The lease and pairing generation are transient execution authority; the stable receipt owner is the private installation owner. A client/session identifier is not a durable receipt identity and is not an authorization credential.
+For research that needs to enter a query, click filters, or paginate, call `run_task` once with the goal rather than sending every snapshot and click through the MCP client. Its optional `model_profile` defaults to `legacy-mcp`; set it to `legacy-chat` to use the model and key saved in Ferro Chat settings. OpenRouter is supported through its OpenAI-compatible endpoint. Ferro sends a compact page snapshot and the task goal to that model for a short declarative plan, then executes the plan locally and returns model-call, token, repair, and planning metrics. The caller receives the useful result without every intermediate snapshot. Keep consequential actions such as messages, invitations, and purchases explicit in the goal so the user can decide when they are appropriate.
+
+For lead research, ask for a small, structured result in one focused goal (for example, at most ten matching profiles with name, role, company, source URL, and a short match reason), and tell the planner to stop at login challenges or unavailable content. The MCP caller remains responsible for deciding which search to run next, deduplicating results across calls, and reviewing evidence. The service owns one connected tab at a time.
+
+Example `run_task` arguments for a tab already on an authorized search page:
+
+```json
+{
+  "goal": "Find up to 10 profiles matching the requested criteria. Use search, filters, result links, and pagination only. Do not send messages, invitations, or submit unrelated forms. Return a compact JSON object with a leads array; each item should include name, role, company, profile URL, and a one-sentence match reason.",
+  "model_profile": "legacy-chat",
+  "max_plannings": 2
+}
+```
+
+Replace the matching criteria with the user's actual request. Keep the browser on a signed-in tab, allowlist the exact site origin, and review the returned profiles before acting on them. This example is a prompt pattern, not a dedicated LinkedIn integration or a guarantee that the page exposes every field.
+
+The default read/write task can navigate, snapshot, extract, scroll, wait, click, fill, select, and press keys. An explicit read-only policy blocks the write actions, including actions suggested by repaired plans. Origin checks constrain Ferro's browser operations; they do not claim network-level egress confinement. A task holds the installation's browser/tab lease while it runs. The lease and pairing generation are transient execution authority; the stable receipt owner is the private installation owner. A client/session identifier is not a durable receipt identity and is not an authorization credential.
 
 Each model request is admitted against the request, token, runtime, repair, and planning limits. Calls have no automatic provider retry. Actual usage and transmission state are recorded separately: a missing usage number means **unknown**, while an explicit `0` means the provider reported zero. A missing cost is not a zero-cost assertion. If cost reporting is unavailable, the receipt keeps it unknown; do not derive cost from text length or infer a dollar amount from token counts. The implementation does not enforce a monetary reserve or hard-dollar ceiling.
 
@@ -32,7 +48,7 @@ For large output, the [artifact request](examples/bulk-v2/artifact-request.json)
 
 ## Migration checklist
 
-1. Keep existing `run_task`, chat, and direct-tool clients unchanged while adopting the additive v2 tools.
+1. Use `run_task` for goal-level tasks and the direct tools for precise individual actions.
 2. Configure and verify the intended existing `legacy-mcp` or `legacy-chat` model settings; use `list_model_profiles` to record the public profile revision. Do not copy credentials into requests, logs, or examples.
 3. Start with a unique task ID, exact origins, a restrictive output schema, and limits no higher than the service defaults. Preserve the original request for conflict-safe recovery.
 4. Add receipt lookup by `task_id` before any caller retry path. Make the external scheduler own retry timing; never automatically resubmit uncertain work.
@@ -42,11 +58,11 @@ For large output, the [artifact request](examples/bulk-v2/artifact-request.json)
 
 ## Rollback checklist
 
-1. Stop submitting new v2 tasks from the caller or scheduler; do not delete receipts to make a retry appear new.
+1. Stop submitting new receipt-backed tasks from the caller or scheduler; do not delete receipts to make a retry appear new.
 2. Look up each known task ID and reconcile admitted, running, or uncertain work. Do not replay a task whose outcome remains uncertain.
 3. Preserve receipt and artifact storage for audit and recovery. Use explicit cleanup only for eligible reconciled terminal records.
-4. Route future work through the existing legacy workflow only after confirming that doing so will not duplicate a v2 operation. Legacy behavior remains available, but it is not a substitute for recovering v2 receipts.
-5. Revert caller-side v2 adoption independently of installed configuration. This guide makes no installation, settings, or live browser changes.
+4. Use the simple goal-only request shape only after confirming that doing so will not duplicate receipt-backed work. It does not replace recovering existing receipts.
+5. Revert caller-side receipt-backed task adoption independently of installed configuration. This guide makes no installation, settings, or live browser changes.
 
 ## Limits and qualification
 

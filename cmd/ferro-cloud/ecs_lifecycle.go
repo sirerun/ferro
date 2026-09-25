@@ -31,7 +31,10 @@ type ecsIdleController struct {
 	service  string
 }
 
-var ecsServiceARN = regexp.MustCompile(`^arn:aws:ecs:([a-z0-9-]+):[0-9]{12}:service/([A-Za-z0-9_-]+)/([A-Za-z0-9_-]+)$`)
+var (
+	ecsServiceARN    = regexp.MustCompile(`^arn:aws:ecs:([a-z0-9-]+):[0-9]{12}:service/([A-Za-z0-9_-]+)/([A-Za-z0-9_-]+)$`)
+	ecsAgentTaskPath = regexp.MustCompile(`^/api/[A-Za-z0-9-]+/?$`)
+)
 
 func newECSIdleController(ctx context.Context, serviceARN, region, agentURI string) (*ecsIdleController, error) {
 	parts := ecsServiceARN.FindStringSubmatch(serviceARN)
@@ -51,12 +54,15 @@ func newECSIdleController(ctx context.Context, serviceARN, region, agentURI stri
 
 func protectionEndpoint(raw string) (string, error) {
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "http" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
-		return "", errors.New("ECS agent URI must be a local HTTP origin")
+	if err != nil || u.Scheme != "http" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
+		return "", errors.New("ECS agent URI must be a local HTTP URL")
 	}
 	ip, err := netip.ParseAddr(u.Hostname())
 	if err != nil || ip.Zone() != "" || (!ip.IsLoopback() && ip.String() != "169.254.170.2") {
 		return "", errors.New("ECS agent URI must identify the local ECS agent")
+	}
+	if u.Path != "" && u.Path != "/" && !ecsAgentTaskPath.MatchString(u.Path) {
+		return "", errors.New("ECS agent URI path must be empty or the Fargate task agent path")
 	}
 	return strings.TrimSuffix(raw, "/") + "/task-protection/v1/state", nil
 }

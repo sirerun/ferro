@@ -15,119 +15,119 @@ import (
 	"github.com/dndungu/ferro/internal/core"
 )
 
-type profileResolverV2 struct {
-	source      ProfileSourceV2
-	credentials CredentialResolverV2
+type profileResolver struct {
+	source      ProfileSource
+	credentials CredentialResolver
 }
 
-func (r ResolvedProfileV2) MarshalJSON() ([]byte, error) {
-	profile := cloneProfileV2(r.Profile)
+func (r ResolvedProfile) MarshalJSON() ([]byte, error) {
+	profile := cloneProfile(r.Profile)
 	profile.CredentialRef = ""
 	return json.Marshal(struct {
-		Profile  ProfileV2 `json:"profile"`
-		Endpoint string    `json:"endpoint"`
-		Model    string    `json:"model"`
+		Profile  Profile `json:"profile"`
+		Endpoint string  `json:"endpoint"`
+		Model    string  `json:"model"`
 	}{Profile: profile, Endpoint: r.Endpoint, Model: r.Model})
 }
 
-// NewProfileResolverV2 constructs a resolver backed by configured profiles and
+// NewProfileResolver constructs a resolver backed by configured profiles and
 // a private credential store.
-func NewProfileResolverV2(source ProfileSourceV2, credentials CredentialResolverV2) (ProfileResolverV2, error) {
-	if isNilProfileDependencyV2(source) || isNilProfileDependencyV2(credentials) {
+func NewProfileResolver(source ProfileSource, credentials CredentialResolver) (ProfileResolver, error) {
+	if isNilProfileDependency(source) || isNilProfileDependency(credentials) {
 		return nil, fmt.Errorf("profile source and credential resolver are required")
 	}
-	return &profileResolverV2{source: source, credentials: credentials}, nil
+	return &profileResolver{source: source, credentials: credentials}, nil
 }
 
-func (r *profileResolverV2) Resolve(ctx context.Context, name string) (ResolvedProfileV2, error) {
+func (r *profileResolver) Resolve(ctx context.Context, name string) (ResolvedProfile, error) {
 	if err := ctx.Err(); err != nil {
-		return ResolvedProfileV2{}, err
+		return ResolvedProfile{}, err
 	}
-	if !validTaskIDV2(name) {
-		return ResolvedProfileV2{}, fmt.Errorf("invalid profile name")
+	if !validTaskID(name) {
+		return ResolvedProfile{}, fmt.Errorf("invalid profile name")
 	}
 	profile, err := r.source.LoadProfile(ctx, name)
 	if err != nil {
 		// The source may contain arbitrary private diagnostics. Never expose them.
-		return ResolvedProfileV2{}, fmt.Errorf("profile %q is unavailable", name)
+		return ResolvedProfile{}, fmt.Errorf("profile %q is unavailable", name)
 	}
 	if err := ctx.Err(); err != nil {
-		return ResolvedProfileV2{}, err
+		return ResolvedProfile{}, err
 	}
-	profile = cloneProfileV2(profile)
+	profile = cloneProfile(profile)
 	if profile.Name != name {
-		return ResolvedProfileV2{}, fmt.Errorf("profile %q is unavailable", name)
+		return ResolvedProfile{}, fmt.Errorf("profile %q is unavailable", name)
 	}
-	normalizedEndpoint, err := normalizeProfileEndpointV2(profile.Endpoint)
+	normalizedEndpoint, err := normalizeProfileEndpoint(profile.Endpoint)
 	if err != nil {
-		return ResolvedProfileV2{}, fmt.Errorf("invalid profile configuration")
+		return ResolvedProfile{}, fmt.Errorf("invalid profile configuration")
 	}
 	profile.Endpoint = normalizedEndpoint
 	if strings.TrimSpace(profile.Model) == "" || profile.Model != strings.TrimSpace(profile.Model) {
-		return ResolvedProfileV2{}, fmt.Errorf("invalid profile configuration")
+		return ResolvedProfile{}, fmt.Errorf("invalid profile configuration")
 	}
 	if !utf8Valid([]byte(profile.Model)) || !utf8Valid([]byte(profile.CredentialRef)) {
-		return ResolvedProfileV2{}, fmt.Errorf("invalid profile configuration")
+		return ResolvedProfile{}, fmt.Errorf("invalid profile configuration")
 	}
-	if err := profile.Limits.ValidateV2(); err != nil {
-		return ResolvedProfileV2{}, fmt.Errorf("invalid profile configuration")
+	if err := profile.Limits.Validate(); err != nil {
+		return ResolvedProfile{}, fmt.Errorf("invalid profile configuration")
 	}
-	wantRevision, err := profileRevisionV2(profile)
-	if err != nil || !isLowerSHA256V2(profile.Revision) || profile.Revision != wantRevision {
-		return ResolvedProfileV2{}, fmt.Errorf("invalid profile revision")
+	wantRevision, err := profileRevision(profile)
+	if err != nil || !isLowerSHA256(profile.Revision) || profile.Revision != wantRevision {
+		return ResolvedProfile{}, fmt.Errorf("invalid profile revision")
 	}
 	credential := ""
 	if profile.CredentialRef != "" {
 		if err := ctx.Err(); err != nil {
-			return ResolvedProfileV2{}, err
+			return ResolvedProfile{}, err
 		}
 		credential, err = r.credentials.ResolveCredential(ctx, profile.CredentialRef)
 		if err != nil {
 			// Credential store errors may contain the reference or secret.
-			return ResolvedProfileV2{}, fmt.Errorf("profile credential is unavailable")
+			return ResolvedProfile{}, fmt.Errorf("profile credential is unavailable")
 		}
 		if credential == "" {
-			return ResolvedProfileV2{}, fmt.Errorf("profile credential is unavailable")
+			return ResolvedProfile{}, fmt.Errorf("profile credential is unavailable")
 		}
 	}
-	return ResolvedProfileV2{
-		Profile: cloneProfileV2(profile), Endpoint: profile.Endpoint,
+	return ResolvedProfile{
+		Profile: cloneProfile(profile), Endpoint: profile.Endpoint,
 		Model: profile.Model, Credential: credential,
 	}, nil
 }
 
-// NewLegacyProfileV2 maps the two explicitly supported legacy settings into
+// NewLegacyProfile maps the two explicitly supported legacy settings into
 // an immutable named profile. Callers supply already configured values.
-func NewLegacyProfileV2(name, endpoint, model, credentialRef string, limits core.LimitsV2) (ProfileV2, error) {
+func NewLegacyProfile(name, endpoint, model, credentialRef string, limits core.Limits) (Profile, error) {
 	if name != "legacy-mcp" && name != "legacy-chat" {
-		return ProfileV2{}, fmt.Errorf("unsupported legacy profile name")
+		return Profile{}, fmt.Errorf("unsupported legacy profile name")
 	}
-	normalizedEndpoint, err := normalizeProfileEndpointV2(endpoint)
+	normalizedEndpoint, err := normalizeProfileEndpoint(endpoint)
 	if err != nil || strings.TrimSpace(model) == "" || model != strings.TrimSpace(model) || !utf8Valid([]byte(model)) || !utf8Valid([]byte(credentialRef)) {
-		return ProfileV2{}, fmt.Errorf("invalid legacy profile configuration")
+		return Profile{}, fmt.Errorf("invalid legacy profile configuration")
 	}
-	if err := limits.ValidateV2(); err != nil {
-		return ProfileV2{}, fmt.Errorf("invalid legacy profile limits: %w", err)
+	if err := limits.Validate(); err != nil {
+		return Profile{}, fmt.Errorf("invalid legacy profile limits: %w", err)
 	}
-	profile := ProfileV2{
+	profile := Profile{
 		Name: name, Endpoint: normalizedEndpoint, Model: model,
-		CredentialRef: credentialRef, Limits: cloneLimitsProfileV2(limits),
+		CredentialRef: credentialRef, Limits: cloneLimitsProfile(limits),
 	}
-	revision, err := profileRevisionV2(profile)
+	revision, err := profileRevision(profile)
 	if err != nil {
-		return ProfileV2{}, fmt.Errorf("compute legacy profile revision: %w", err)
+		return Profile{}, fmt.Errorf("compute legacy profile revision: %w", err)
 	}
 	profile.Revision = revision
-	return cloneProfileV2(profile), nil
+	return cloneProfile(profile), nil
 }
 
-// DescribeProfileV2 returns only fields intended for public profile listings.
-func DescribeProfileV2(profile ProfileV2) ProfileDescriptionV2 {
-	return ProfileDescriptionV2{Name: profile.Name, Revision: profile.Revision, Capabilities: []string{"read_only"}}
+// DescribeProfile returns only fields intended for public profile listings.
+func DescribeProfile(profile Profile) ProfileDescription {
+	return ProfileDescription{Name: profile.Name, Revision: profile.Revision, Capabilities: []string{"read_only"}}
 }
 
-func profileRevisionV2(profile ProfileV2) (string, error) {
-	profile = cloneProfileV2(profile)
+func profileRevision(profile Profile) (string, error) {
+	profile = cloneProfile(profile)
 	profile.Revision = ""
 	data, err := json.Marshal(profile)
 	if err != nil {
@@ -137,7 +137,7 @@ func profileRevisionV2(profile ProfileV2) (string, error) {
 	return hex.EncodeToString(digest[:]), nil
 }
 
-func normalizeProfileEndpointV2(raw string) (string, error) {
+func normalizeProfileEndpoint(raw string) (string, error) {
 	u, err := url.Parse(raw)
 	if err != nil || u.Opaque != "" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" {
 		return "", fmt.Errorf("invalid profile endpoint")
@@ -207,12 +207,12 @@ func normalizeProfileEndpointV2(raw string) (string, error) {
 	return strings.TrimRight(u.String(), "/"), nil
 }
 
-func cloneProfileV2(profile ProfileV2) ProfileV2 {
-	profile.Limits = cloneLimitsProfileV2(profile.Limits)
+func cloneProfile(profile Profile) Profile {
+	profile.Limits = cloneLimitsProfile(profile.Limits)
 	return profile
 }
 
-func cloneLimitsProfileV2(limits core.LimitsV2) core.LimitsV2 {
+func cloneLimitsProfile(limits core.Limits) core.Limits {
 	if limits.ReserveMicroUSD != nil {
 		value := *limits.ReserveMicroUSD
 		limits.ReserveMicroUSD = &value
@@ -220,7 +220,7 @@ func cloneLimitsProfileV2(limits core.LimitsV2) core.LimitsV2 {
 	return limits
 }
 
-func isLowerSHA256V2(value string) bool {
+func isLowerSHA256(value string) bool {
 	if len(value) != sha256.Size*2 || value != strings.ToLower(value) {
 		return false
 	}
@@ -228,7 +228,7 @@ func isLowerSHA256V2(value string) bool {
 	return err == nil
 }
 
-func isNilProfileDependencyV2(value any) bool {
+func isNilProfileDependency(value any) bool {
 	if value == nil {
 		return true
 	}

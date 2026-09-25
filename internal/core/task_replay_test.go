@@ -8,21 +8,21 @@ import (
 	"testing"
 )
 
-func replayContextFixtureV2() ReplayContextV2 {
-	return ReplayContextV2{
+func replayContextFixture() ReplayContext {
+	return ReplayContext{
 		Principal: "account-1", ProfileRevision: "profile-revision-1", Model: "model-1",
 		PolicyDigest: "policy-digest-1", SchemaDigest: "schema-digest-1",
 		Compatibility: "compatibility-1", Layout: "layout-1", CallerLabel: "caller-label-1",
 	}
 }
 
-func TestReplayV2_Deterministic(t *testing.T) {
-	ctx := replayContextFixtureV2()
-	first, err := ReplayIdentityV2(ctx)
+func TestReplay_Deterministic(t *testing.T) {
+	ctx := replayContextFixture()
+	first, err := ReplayIdentity(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := ReplayIdentityV2(ctx)
+	second, err := ReplayIdentity(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,14 +39,14 @@ func TestReplayV2_Deterministic(t *testing.T) {
 	}
 }
 
-func TestReplayV2_AccountPartition(t *testing.T) {
-	base := replayContextFixtureV2()
-	want, err := ReplayIdentityV2(base)
+func TestReplay_AccountPartition(t *testing.T) {
+	base := replayContextFixture()
+	want, err := ReplayIdentity(base)
 	if err != nil {
 		t.Fatal(err)
 	}
 	base.Principal = "account-2"
-	got, err := ReplayIdentityV2(base)
+	got, err := ReplayIdentity(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,16 +55,16 @@ func TestReplayV2_AccountPartition(t *testing.T) {
 	}
 }
 
-func TestReplayV2_PolicyPartition(t *testing.T) {
-	base := replayContextFixtureV2()
+func TestReplay_PolicyPartition(t *testing.T) {
+	base := replayContextFixture()
 	base.PolicyDigest = "sha256:sorted-mode-and-canonical-origins"
-	first, err := ReplayIdentityV2(base)
+	first, err := ReplayIdentity(base)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// The caller supplies the digest of normalized policy data. Equivalent
 	// policies therefore have identical identity inputs after normalization.
-	second, err := ReplayIdentityV2(base)
+	second, err := ReplayIdentity(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestReplayV2_PolicyPartition(t *testing.T) {
 		t.Fatalf("same normalized policy digest produced different identity: %q != %q", first, second)
 	}
 	base.PolicyDigest = "sha256:different-origins-or-mode"
-	third, err := ReplayIdentityV2(base)
+	third, err := ReplayIdentity(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,14 +81,14 @@ func TestReplayV2_PolicyPartition(t *testing.T) {
 	}
 }
 
-func TestReplayV2_SchemaPartition(t *testing.T) {
-	base := replayContextFixtureV2()
-	want, err := ReplayIdentityV2(base)
+func TestReplay_SchemaPartition(t *testing.T) {
+	base := replayContextFixture()
+	want, err := ReplayIdentity(base)
 	if err != nil {
 		t.Fatal(err)
 	}
 	base.SchemaDigest = "schema-digest-2"
-	got, err := ReplayIdentityV2(base)
+	got, err := ReplayIdentity(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -97,59 +97,59 @@ func TestReplayV2_SchemaPartition(t *testing.T) {
 	}
 }
 
-func TestReplayV2_MissingPartition(t *testing.T) {
+func TestReplay_MissingPartition(t *testing.T) {
 	fields := []struct {
 		name string
-		set  func(*ReplayContextV2)
+		set  func(*ReplayContext)
 	}{
-		{"principal", func(c *ReplayContextV2) { c.Principal = "" }},
-		{"profile revision", func(c *ReplayContextV2) { c.ProfileRevision = "" }},
-		{"model", func(c *ReplayContextV2) { c.Model = "" }},
-		{"policy digest", func(c *ReplayContextV2) { c.PolicyDigest = "" }},
-		{"schema digest", func(c *ReplayContextV2) { c.SchemaDigest = "" }},
-		{"compatibility", func(c *ReplayContextV2) { c.Compatibility = "" }},
-		{"layout", func(c *ReplayContextV2) { c.Layout = "" }},
+		{"principal", func(c *ReplayContext) { c.Principal = "" }},
+		{"profile revision", func(c *ReplayContext) { c.ProfileRevision = "" }},
+		{"model", func(c *ReplayContext) { c.Model = "" }},
+		{"policy digest", func(c *ReplayContext) { c.PolicyDigest = "" }},
+		{"schema digest", func(c *ReplayContext) { c.SchemaDigest = "" }},
+		{"compatibility", func(c *ReplayContext) { c.Compatibility = "" }},
+		{"layout", func(c *ReplayContext) { c.Layout = "" }},
 	}
 	for _, field := range fields {
 		t.Run(field.name, func(t *testing.T) {
-			ctx := replayContextFixtureV2()
+			ctx := replayContextFixture()
 			field.set(&ctx)
-			key, err := ReplayIdentityV2(ctx)
+			key, err := ReplayIdentity(ctx)
 			if err == nil || key != "" {
 				t.Fatalf("missing %s accepted: key=%q err=%v", field.name, key, err)
 			}
 		})
 	}
-	ctx := ReplayContextV2{}
-	if key, err := ReplayIdentityV2(ctx); err != nil || key != "" {
+	ctx := ReplayContext{}
+	if key, err := ReplayIdentity(ctx); err != nil || key != "" {
 		t.Fatalf("empty caller label must disable replay without error: key=%q err=%v", key, err)
 	}
 }
 
-func TestReplayV2_AllPartitionFieldsChangeIdentity(t *testing.T) {
-	base := replayContextFixtureV2()
-	want, err := ReplayIdentityV2(base)
+func TestReplay_AllPartitionFieldsChangeIdentity(t *testing.T) {
+	base := replayContextFixture()
+	want, err := ReplayIdentity(base)
 	if err != nil {
 		t.Fatal(err)
 	}
 	mutations := []struct {
 		name string
-		set  func(*ReplayContextV2)
+		set  func(*ReplayContext)
 	}{
-		{"principal", func(c *ReplayContextV2) { c.Principal += "-changed" }},
-		{"profile revision", func(c *ReplayContextV2) { c.ProfileRevision += "-changed" }},
-		{"model", func(c *ReplayContextV2) { c.Model += "-changed" }},
-		{"policy digest", func(c *ReplayContextV2) { c.PolicyDigest += "-changed" }},
-		{"schema digest", func(c *ReplayContextV2) { c.SchemaDigest += "-changed" }},
-		{"compatibility", func(c *ReplayContextV2) { c.Compatibility += "-changed" }},
-		{"layout", func(c *ReplayContextV2) { c.Layout += "-changed" }},
-		{"caller label", func(c *ReplayContextV2) { c.CallerLabel += "-changed" }},
+		{"principal", func(c *ReplayContext) { c.Principal += "-changed" }},
+		{"profile revision", func(c *ReplayContext) { c.ProfileRevision += "-changed" }},
+		{"model", func(c *ReplayContext) { c.Model += "-changed" }},
+		{"policy digest", func(c *ReplayContext) { c.PolicyDigest += "-changed" }},
+		{"schema digest", func(c *ReplayContext) { c.SchemaDigest += "-changed" }},
+		{"compatibility", func(c *ReplayContext) { c.Compatibility += "-changed" }},
+		{"layout", func(c *ReplayContext) { c.Layout += "-changed" }},
+		{"caller label", func(c *ReplayContext) { c.CallerLabel += "-changed" }},
 	}
 	for _, mutation := range mutations {
 		t.Run(mutation.name, func(t *testing.T) {
 			ctx := base
 			mutation.set(&ctx)
-			got, err := ReplayIdentityV2(ctx)
+			got, err := ReplayIdentity(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}

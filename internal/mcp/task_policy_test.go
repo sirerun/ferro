@@ -9,18 +9,18 @@ import (
 	"github.com/dndungu/ferro/internal/core"
 )
 
-type policyGuardFuncV2 func(context.Context) error
+type policyGuardFunc func(context.Context) error
 
-func (f policyGuardFuncV2) Check(ctx context.Context) error { return f(ctx) }
+func (f policyGuardFunc) Check(ctx context.Context) error { return f(ctx) }
 
-type policyBudgetV2 struct {
-	core.BudgetControllerV2
+type policyBudget struct {
+	core.BudgetController
 	calls int
 	limit int
 	err   error
 }
 
-func (b *policyBudgetV2) AdmitAction(context.Context) error {
+func (b *policyBudget) AdmitAction(context.Context) error {
 	b.calls++
 	if b.err != nil {
 		return b.err
@@ -31,46 +31,46 @@ func (b *policyBudgetV2) AdmitAction(context.Context) error {
 	return nil
 }
 
-type policyDriverSpyV2 struct {
+type policyDriverSpy struct {
 	url   string
 	calls map[string]int
 }
 
-func newPolicyDriverSpyV2(url string) *policyDriverSpyV2 {
-	return &policyDriverSpyV2{url: url, calls: make(map[string]int)}
+func newPolicyDriverSpy(url string) *policyDriverSpy {
+	return &policyDriverSpy{url: url, calls: make(map[string]int)}
 }
 
-func (d *policyDriverSpyV2) called(method string) { d.calls[method]++ }
-func (d *policyDriverSpyV2) Navigate(_ context.Context, target string) error {
+func (d *policyDriverSpy) called(method string) { d.calls[method]++ }
+func (d *policyDriverSpy) Navigate(_ context.Context, target string) error {
 	d.called("navigate")
 	d.url = target
 	return nil
 }
-func (d *policyDriverSpyV2) Click(context.Context, string) error { d.called("click"); return nil }
-func (d *policyDriverSpyV2) Fill(context.Context, string, string) error {
+func (d *policyDriverSpy) Click(context.Context, string) error { d.called("click"); return nil }
+func (d *policyDriverSpy) Fill(context.Context, string, string) error {
 	d.called("fill")
 	return nil
 }
-func (d *policyDriverSpyV2) Select(context.Context, string, string) (string, error) {
+func (d *policyDriverSpy) Select(context.Context, string, string) (string, error) {
 	d.called("select")
 	return "ok", nil
 }
-func (d *policyDriverSpyV2) Key(context.Context, string) error    { d.called("key"); return nil }
-func (d *policyDriverSpyV2) Scroll(context.Context, string) error { d.called("scroll"); return nil }
-func (d *policyDriverSpyV2) WaitVisible(context.Context, string) error {
+func (d *policyDriverSpy) Key(context.Context, string) error    { d.called("key"); return nil }
+func (d *policyDriverSpy) Scroll(context.Context, string) error { d.called("scroll"); return nil }
+func (d *policyDriverSpy) WaitVisible(context.Context, string) error {
 	d.called("wait")
 	return nil
 }
-func (d *policyDriverSpyV2) Settle(context.Context) error { d.called("settle"); return nil }
-func (d *policyDriverSpyV2) ExtractField(context.Context, string) (string, error) {
+func (d *policyDriverSpy) Settle(context.Context) error { d.called("settle"); return nil }
+func (d *policyDriverSpy) ExtractField(context.Context, string) (string, error) {
 	d.called("extract_field")
 	return "field-value", nil
 }
-func (d *policyDriverSpyV2) ExtractText(context.Context) (string, error) {
+func (d *policyDriverSpy) ExtractText(context.Context) (string, error) {
 	d.called("extract_text")
 	return "visible text", nil
 }
-func (d *policyDriverSpyV2) Snapshot(_ context.Context, maxElements int) (*core.Snapshot, error) {
+func (d *policyDriverSpy) Snapshot(_ context.Context, maxElements int) (*core.Snapshot, error) {
 	if maxElements == 0 {
 		d.called("internal_snapshot")
 	} else {
@@ -79,20 +79,20 @@ func (d *policyDriverSpyV2) Snapshot(_ context.Context, maxElements int) (*core.
 	return &core.Snapshot{URL: d.url}, nil
 }
 
-func policyDriverFixtureV2(t *testing.T, driver *policyDriverSpyV2, guard TaskPolicyGuardV2, budget *policyBudgetV2) core.PageDriver {
+func policyDriverFixture(t *testing.T, driver *policyDriverSpy, guard TaskPolicyGuard, budget *policyBudget) core.PageDriver {
 	t.Helper()
-	wrapped, err := NewTaskPolicyDriverV2(driver, TaskPolicyV2{Mode: "read_only", Origins: []string{"https://allowed.example"}}, guard, budget)
+	wrapped, err := NewTaskPolicyDriver(driver, TaskPolicy{Mode: "read_only", Origins: []string{"https://allowed.example"}}, guard, budget)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return wrapped
 }
 
-func TestPolicyV2_DeniedMethodsNeverDispatch(t *testing.T) {
-	driver := newPolicyDriverSpyV2("https://allowed.example/start")
+func TestPolicy_DeniedMethodsNeverDispatch(t *testing.T) {
+	driver := newPolicyDriverSpy("https://allowed.example/start")
 	guardCalls := 0
-	budget := &policyBudgetV2{}
-	wrapped := policyDriverFixtureV2(t, driver, policyGuardFuncV2(func(context.Context) error { guardCalls++; return nil }), budget)
+	budget := &policyBudget{}
+	wrapped := policyDriverFixture(t, driver, policyGuardFunc(func(context.Context) error { guardCalls++; return nil }), budget)
 	if err := wrapped.Click(context.Background(), "#x"); err == nil {
 		t.Fatal("Click accepted under read-only policy")
 	}
@@ -110,7 +110,21 @@ func TestPolicyV2_DeniedMethodsNeverDispatch(t *testing.T) {
 	}
 }
 
-func TestPolicyV2_ReadMethodsDelegate(t *testing.T) {
+func TestTaskPolicyDefaultModeAllowsBrowserWrites(t *testing.T) {
+	driver := newPolicyDriverSpy("https://allowed.example/start")
+	wrapped, err := NewTaskPolicyDriver(driver, TaskPolicy{Origins: []string{"https://allowed.example"}}, policyGuardFunc(func(context.Context) error { return nil }), &policyBudget{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := wrapped.Click(context.Background(), "#search"); err != nil {
+		t.Fatal(err)
+	}
+	if driver.calls["click"] != 1 {
+		t.Fatalf("click count=%d, want 1", driver.calls["click"])
+	}
+}
+
+func TestPolicy_ReadMethodsDelegate(t *testing.T) {
 	tests := []struct {
 		name string
 		run  func(core.PageDriver) error
@@ -144,10 +158,10 @@ func TestPolicyV2_ReadMethodsDelegate(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			driver := newPolicyDriverSpyV2("https://allowed.example/start")
-			budget := &policyBudgetV2{}
+			driver := newPolicyDriverSpy("https://allowed.example/start")
+			budget := &policyBudget{}
 			guardCalls := 0
-			wrapped := policyDriverFixtureV2(t, driver, policyGuardFuncV2(func(context.Context) error { guardCalls++; return nil }), budget)
+			wrapped := policyDriverFixture(t, driver, policyGuardFunc(func(context.Context) error { guardCalls++; return nil }), budget)
 			if err := tc.run(wrapped); err != nil {
 				t.Fatal(err)
 			}
@@ -164,7 +178,7 @@ func TestPolicyV2_ReadMethodsDelegate(t *testing.T) {
 	}
 }
 
-func TestPolicyV2_OriginDenied(t *testing.T) {
+func TestPolicy_OriginDenied(t *testing.T) {
 	tests := []struct {
 		name   string
 		origin string
@@ -180,9 +194,9 @@ func TestPolicyV2_OriginDenied(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			driver := newPolicyDriverSpyV2(tc.origin)
-			budget := &policyBudgetV2{}
-			wrapped := policyDriverFixtureV2(t, driver, policyGuardFuncV2(func(context.Context) error { return nil }), budget)
+			driver := newPolicyDriverSpy(tc.origin)
+			budget := &policyBudget{}
+			wrapped := policyDriverFixture(t, driver, policyGuardFunc(func(context.Context) error { return nil }), budget)
 			err := tc.call(wrapped)
 			var stop *core.StopError
 			if !errors.As(err, &stop) || stop.Code != "origin_denied" {
@@ -195,11 +209,11 @@ func TestPolicyV2_OriginDenied(t *testing.T) {
 	}
 }
 
-func TestPolicyV2_PairingChanged(t *testing.T) {
-	driver := newPolicyDriverSpyV2("https://allowed.example/start")
-	budget := &policyBudgetV2{}
+func TestPolicy_PairingChanged(t *testing.T) {
+	driver := newPolicyDriverSpy("https://allowed.example/start")
+	budget := &policyBudget{}
 	stop := &core.StopError{Code: "pairing_changed", Message: "pairing changed"}
-	wrapped := policyDriverFixtureV2(t, driver, policyGuardFuncV2(func(context.Context) error { return stop }), budget)
+	wrapped := policyDriverFixture(t, driver, policyGuardFunc(func(context.Context) error { return stop }), budget)
 	err := wrapped.Scroll(context.Background(), "bottom")
 	var got *core.StopError
 	if !errors.As(err, &got) || got.Code != "pairing_changed" {
@@ -210,10 +224,10 @@ func TestPolicyV2_PairingChanged(t *testing.T) {
 	}
 }
 
-func TestPolicyV2_Cancelled(t *testing.T) {
-	driver := newPolicyDriverSpyV2("https://allowed.example/start")
-	budget := &policyBudgetV2{}
-	wrapped := policyDriverFixtureV2(t, driver, policyGuardFuncV2(func(ctx context.Context) error { return ctx.Err() }), budget)
+func TestPolicy_Cancelled(t *testing.T) {
+	driver := newPolicyDriverSpy("https://allowed.example/start")
+	budget := &policyBudget{}
+	wrapped := policyDriverFixture(t, driver, policyGuardFunc(func(ctx context.Context) error { return ctx.Err() }), budget)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if err := wrapped.Scroll(ctx, "bottom"); !errors.Is(err, context.Canceled) {
@@ -224,17 +238,17 @@ func TestPolicyV2_Cancelled(t *testing.T) {
 	}
 }
 
-func TestPolicyV2_ExtractionDropsValueAfterRevocationOrOriginChange(t *testing.T) {
+func TestPolicy_ExtractionDropsValueAfterRevocationOrOriginChange(t *testing.T) {
 	tests := []struct {
 		name   string
-		guard  TaskPolicyGuardV2
-		mutate func(*policyDriverSpyV2)
+		guard  TaskPolicyGuard
+		mutate func(*policyDriverSpy)
 	}{
 		{
 			name: "guard revoked after extraction",
-			guard: func() TaskPolicyGuardV2 {
+			guard: func() TaskPolicyGuard {
 				calls := 0
-				return policyGuardFuncV2(func(context.Context) error {
+				return policyGuardFunc(func(context.Context) error {
 					calls++
 					if calls == 4 {
 						return &core.StopError{Code: "pairing_changed", Message: "pairing changed"}
@@ -242,19 +256,19 @@ func TestPolicyV2_ExtractionDropsValueAfterRevocationOrOriginChange(t *testing.T
 					return nil
 				})
 			}(),
-			mutate: func(*policyDriverSpyV2) {},
+			mutate: func(*policyDriverSpy) {},
 		},
 		{
 			name:   "origin changes during extraction",
-			guard:  policyGuardFuncV2(func(context.Context) error { return nil }),
-			mutate: func(driver *policyDriverSpyV2) { driver.url = "https://outside.example/redirect" },
+			guard:  policyGuardFunc(func(context.Context) error { return nil }),
+			mutate: func(driver *policyDriverSpy) { driver.url = "https://outside.example/redirect" },
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			driver := newPolicyDriverSpyV2("https://allowed.example/start")
-			mutating := &mutatingExtractionDriverV2{policyDriverSpyV2: driver, mutate: tc.mutate}
-			wrapped, err := NewTaskPolicyDriverV2(mutating, TaskPolicyV2{Mode: "read_only", Origins: []string{"https://allowed.example"}}, tc.guard, &policyBudgetV2{})
+			driver := newPolicyDriverSpy("https://allowed.example/start")
+			mutating := &mutatingExtractionDriver{policyDriverSpy: driver, mutate: tc.mutate}
+			wrapped, err := NewTaskPolicyDriver(mutating, TaskPolicy{Mode: "read_only", Origins: []string{"https://allowed.example"}}, tc.guard, &policyBudget{})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -266,12 +280,12 @@ func TestPolicyV2_ExtractionDropsValueAfterRevocationOrOriginChange(t *testing.T
 	}
 }
 
-func TestPolicyV2_NavigationRedirectDenied(t *testing.T) {
-	driver := newPolicyDriverSpyV2("https://allowed.example/start")
-	budget := &policyBudgetV2{}
+func TestPolicy_NavigationRedirectDenied(t *testing.T) {
+	driver := newPolicyDriverSpy("https://allowed.example/start")
+	budget := &policyBudget{}
 	// The fake browser applies a redirect while loading the permitted URL.
-	redirecting := &redirectPolicyDriverV2{policyDriverSpyV2: driver, redirect: "https://outside.example/landing"}
-	wrapped, err := NewTaskPolicyDriverV2(redirecting, TaskPolicyV2{Mode: "read_only", Origins: []string{"https://allowed.example"}}, policyGuardFuncV2(func(context.Context) error { return nil }), budget)
+	redirecting := &redirectPolicyDriver{policyDriverSpy: driver, redirect: "https://outside.example/landing"}
+	wrapped, err := NewTaskPolicyDriver(redirecting, TaskPolicy{Mode: "read_only", Origins: []string{"https://allowed.example"}}, policyGuardFunc(func(context.Context) error { return nil }), budget)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,10 +299,10 @@ func TestPolicyV2_NavigationRedirectDenied(t *testing.T) {
 	}
 }
 
-func TestPolicyV2_ActionCap(t *testing.T) {
-	driver := newPolicyDriverSpyV2("https://allowed.example/start")
-	budget := &policyBudgetV2{limit: 1}
-	wrapped := policyDriverFixtureV2(t, driver, policyGuardFuncV2(func(context.Context) error { return nil }), budget)
+func TestPolicy_ActionCap(t *testing.T) {
+	driver := newPolicyDriverSpy("https://allowed.example/start")
+	budget := &policyBudget{limit: 1}
+	wrapped := policyDriverFixture(t, driver, policyGuardFunc(func(context.Context) error { return nil }), budget)
 	if err := wrapped.Scroll(context.Background(), "bottom"); err != nil {
 		t.Fatal(err)
 	}
@@ -300,38 +314,38 @@ func TestPolicyV2_ActionCap(t *testing.T) {
 	}
 }
 
-func TestPolicyV2_ConstructorRejectsTypedNilAndUnsupportedPolicy(t *testing.T) {
-	var driver *policyDriverSpyV2
-	guard := policyGuardFuncV2(func(context.Context) error { return nil })
-	budget := &policyBudgetV2{}
-	if _, err := NewTaskPolicyDriverV2(driver, TaskPolicyV2{Mode: "read_only", Origins: []string{"https://allowed.example"}}, guard, budget); err == nil {
+func TestPolicy_ConstructorRejectsTypedNilAndUnsupportedPolicy(t *testing.T) {
+	var driver *policyDriverSpy
+	guard := policyGuardFunc(func(context.Context) error { return nil })
+	budget := &policyBudget{}
+	if _, err := NewTaskPolicyDriver(driver, TaskPolicy{Mode: "read_only", Origins: []string{"https://allowed.example"}}, guard, budget); err == nil {
 		t.Fatal("typed nil driver accepted")
 	}
-	if _, err := NewTaskPolicyDriverV2(newPolicyDriverSpyV2("https://allowed.example"), TaskPolicyV2{Mode: "interactive", Origins: []string{"https://allowed.example"}}, guard, budget); err == nil {
+	if _, err := NewTaskPolicyDriver(newPolicyDriverSpy("https://allowed.example"), TaskPolicy{Mode: "interactive", Origins: []string{"https://allowed.example"}}, guard, budget); err == nil {
 		t.Fatal("unsupported policy accepted")
 	}
-	if _, err := NewTaskPolicyDriverV2(newPolicyDriverSpyV2("https://allowed.example"), TaskPolicyV2{Mode: "read_only", Origins: []string{"https://allowed.example:invalid"}}, guard, budget); err == nil {
+	if _, err := NewTaskPolicyDriver(newPolicyDriverSpy("https://allowed.example"), TaskPolicy{Mode: "read_only", Origins: []string{"https://allowed.example:invalid"}}, guard, budget); err == nil {
 		t.Fatal("malformed origin port accepted")
 	}
 }
 
-type redirectPolicyDriverV2 struct {
-	*policyDriverSpyV2
+type redirectPolicyDriver struct {
+	*policyDriverSpy
 	redirect string
 }
 
-type mutatingExtractionDriverV2 struct {
-	*policyDriverSpyV2
-	mutate func(*policyDriverSpyV2)
+type mutatingExtractionDriver struct {
+	*policyDriverSpy
+	mutate func(*policyDriverSpy)
 }
 
-func (d *mutatingExtractionDriverV2) ExtractText(context.Context) (string, error) {
+func (d *mutatingExtractionDriver) ExtractText(context.Context) (string, error) {
 	d.called("extract_text")
-	d.mutate(d.policyDriverSpyV2)
+	d.mutate(d.policyDriverSpy)
 	return "secret-like extracted value", nil
 }
 
-func (d *redirectPolicyDriverV2) Navigate(context.Context, string) error {
+func (d *redirectPolicyDriver) Navigate(context.Context, string) error {
 	d.called("navigate")
 	d.url = d.redirect
 	return nil

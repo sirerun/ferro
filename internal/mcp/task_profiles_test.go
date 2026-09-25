@@ -10,23 +10,23 @@ import (
 	"github.com/dndungu/ferro/internal/core"
 )
 
-type profileSourceFuncV2 func(context.Context, string) (ProfileV2, error)
+type profileSourceFunc func(context.Context, string) (Profile, error)
 
-func (f profileSourceFuncV2) LoadProfile(ctx context.Context, name string) (ProfileV2, error) {
+func (f profileSourceFunc) LoadProfile(ctx context.Context, name string) (Profile, error) {
 	return f(ctx, name)
 }
 
-type credentialResolverFuncV2 func(context.Context, string) (string, error)
+type credentialResolverFunc func(context.Context, string) (string, error)
 
-func (f credentialResolverFuncV2) ResolveCredential(ctx context.Context, ref string) (string, error) {
+func (f credentialResolverFunc) ResolveCredential(ctx context.Context, ref string) (string, error) {
 	return f(ctx, ref)
 }
 
-func TestProfilesV2_UnknownName(t *testing.T) {
+func TestProfiles_UnknownName(t *testing.T) {
 	credentialCalls := 0
-	resolver, err := NewProfileResolverV2(profileSourceFuncV2(func(context.Context, string) (ProfileV2, error) {
-		return ProfileV2{}, errors.New("private store diagnostic")
-	}), credentialResolverFuncV2(func(context.Context, string) (string, error) {
+	resolver, err := NewProfileResolver(profileSourceFunc(func(context.Context, string) (Profile, error) {
+		return Profile{}, errors.New("private store diagnostic")
+	}), credentialResolverFunc(func(context.Context, string) (string, error) {
 		credentialCalls++
 		return "must-not-fetch", nil
 	}))
@@ -41,8 +41,8 @@ func TestProfilesV2_UnknownName(t *testing.T) {
 	}
 }
 
-func TestProfilesV2_ImmutableRevision(t *testing.T) {
-	original, err := NewLegacyProfileV2("legacy-mcp", "HTTPS://EXAMPLE.COM:443/v1/", "exact-model", "credential-ref", core.DefaultLimitsV2())
+func TestProfiles_ImmutableRevision(t *testing.T) {
+	original, err := NewLegacyProfile("legacy-mcp", "HTTPS://EXAMPLE.COM:443/v1/", "exact-model", "credential-ref", core.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,9 +50,9 @@ func TestProfilesV2_ImmutableRevision(t *testing.T) {
 		t.Fatalf("endpoint not normalized: %q", original.Endpoint)
 	}
 	profiles := original
-	resolver, err := NewProfileResolverV2(profileSourceFuncV2(func(context.Context, string) (ProfileV2, error) {
+	resolver, err := NewProfileResolver(profileSourceFunc(func(context.Context, string) (Profile, error) {
 		return profiles, nil
-	}), credentialResolverFuncV2(func(context.Context, string) (string, error) { return "secret", nil }))
+	}), credentialResolverFunc(func(context.Context, string) (string, error) { return "secret", nil }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -70,7 +70,7 @@ func TestProfilesV2_ImmutableRevision(t *testing.T) {
 	}
 	// Revision mismatch is rejected before retrieving credentials.
 	credentialCalls := 0
-	resolver, err = NewProfileResolverV2(profileSourceFuncV2(func(context.Context, string) (ProfileV2, error) { return profiles, nil }), credentialResolverFuncV2(func(context.Context, string) (string, error) {
+	resolver, err = NewProfileResolver(profileSourceFunc(func(context.Context, string) (Profile, error) { return profiles, nil }), credentialResolverFunc(func(context.Context, string) (string, error) {
 		credentialCalls++
 		return "secret", nil
 	}))
@@ -83,14 +83,14 @@ func TestProfilesV2_ImmutableRevision(t *testing.T) {
 
 	// Pointer-valued profile fields are copied before being returned.
 	reserve := int64(7)
-	profile, err := NewLegacyProfileV2("legacy-chat", "https://example.com", "model", "ref", core.LimitsV2{
+	profile, err := NewLegacyProfile("legacy-chat", "https://example.com", "model", "ref", core.Limits{
 		RuntimeMS: 90000, Actions: 20, ModelRequests: 3, Repairs: 1, PlanningPasses: 2,
 		MaxOutputTokens: 2048, MaxInputTokens: 12000, TotalReservedTokens: 24000, ReserveMicroUSD: &reserve,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver, err = NewProfileResolverV2(profileSourceFuncV2(func(context.Context, string) (ProfileV2, error) { return profile, nil }), credentialResolverFuncV2(func(context.Context, string) (string, error) { return "secret", nil }))
+	resolver, err = NewProfileResolver(profileSourceFunc(func(context.Context, string) (Profile, error) { return profile, nil }), credentialResolverFunc(func(context.Context, string) (string, error) { return "secret", nil }))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,26 +104,26 @@ func TestProfilesV2_ImmutableRevision(t *testing.T) {
 	}
 }
 
-func TestProfilesV2_LegacyMapping(t *testing.T) {
+func TestProfiles_LegacyMapping(t *testing.T) {
 	for _, name := range []string{"legacy-mcp", "legacy-chat"} {
-		profile, err := NewLegacyProfileV2(name, "https://EXAMPLE.com:443/v1/", "model-id", "private-ref", core.DefaultLimitsV2())
+		profile, err := NewLegacyProfile(name, "https://EXAMPLE.com:443/v1/", "model-id", "private-ref", core.DefaultLimits())
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		if profile.Name != name || profile.Endpoint != "https://example.com/v1" || profile.Model != "model-id" || profile.CredentialRef != "private-ref" {
 			t.Fatalf("legacy settings were not mapped exactly: %+v", profile)
 		}
-		if !isLowerSHA256V2(profile.Revision) {
+		if !isLowerSHA256(profile.Revision) {
 			t.Fatalf("invalid content revision: %q", profile.Revision)
 		}
 	}
-	if _, err := NewLegacyProfileV2("other", "https://example.com", "model", "ref", core.DefaultLimitsV2()); err == nil {
+	if _, err := NewLegacyProfile("other", "https://example.com", "model", "ref", core.DefaultLimits()); err == nil {
 		t.Fatal("unsupported legacy name accepted")
 	}
 }
 
-func TestProfilesV2_PreservesEscapedEndpointPath(t *testing.T) {
-	profile, err := NewLegacyProfileV2("legacy-mcp", "https://EXAMPLE.com:443/gateway/team%2Fmodel/v1", "model", "ref", core.DefaultLimitsV2())
+func TestProfiles_PreservesEscapedEndpointPath(t *testing.T) {
+	profile, err := NewLegacyProfile("legacy-mcp", "https://EXAMPLE.com:443/gateway/team%2Fmodel/v1", "model", "ref", core.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,15 +132,15 @@ func TestProfilesV2_PreservesEscapedEndpointPath(t *testing.T) {
 	}
 }
 
-func TestProfilesV2_NoKeyLegacyProfile(t *testing.T) {
-	profile, err := NewLegacyProfileV2("legacy-mcp", "http://localhost:8080/v1", "local-model", "", core.DefaultLimitsV2())
+func TestProfiles_NoKeyLegacyProfile(t *testing.T) {
+	profile, err := NewLegacyProfile("legacy-mcp", "http://localhost:8080/v1", "local-model", "", core.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
 	credentialCalls := 0
-	resolver, err := NewProfileResolverV2(profileSourceFuncV2(func(context.Context, string) (ProfileV2, error) {
+	resolver, err := NewProfileResolver(profileSourceFunc(func(context.Context, string) (Profile, error) {
 		return profile, nil
-	}), credentialResolverFuncV2(func(context.Context, string) (string, error) {
+	}), credentialResolverFunc(func(context.Context, string) (string, error) {
 		credentialCalls++
 		return "unexpected", nil
 	}))
@@ -156,16 +156,16 @@ func TestProfilesV2_NoKeyLegacyProfile(t *testing.T) {
 	}
 }
 
-func TestProfilesV2_CanceledContextStopsLookup(t *testing.T) {
-	profile, err := NewLegacyProfileV2("legacy-mcp", "https://example.com", "model", "ref", core.DefaultLimitsV2())
+func TestProfiles_CanceledContextStopsLookup(t *testing.T) {
+	profile, err := NewLegacyProfile("legacy-mcp", "https://example.com", "model", "ref", core.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
 	sourceCalls, credentialCalls := 0, 0
-	resolver, err := NewProfileResolverV2(profileSourceFuncV2(func(context.Context, string) (ProfileV2, error) {
+	resolver, err := NewProfileResolver(profileSourceFunc(func(context.Context, string) (Profile, error) {
 		sourceCalls++
 		return profile, nil
-	}), credentialResolverFuncV2(func(context.Context, string) (string, error) {
+	}), credentialResolverFunc(func(context.Context, string) (string, error) {
 		credentialCalls++
 		return "secret", nil
 	}))
@@ -183,11 +183,11 @@ func TestProfilesV2_CanceledContextStopsLookup(t *testing.T) {
 
 	ctx, cancel = context.WithCancel(context.Background())
 	defer cancel()
-	resolver, err = NewProfileResolverV2(profileSourceFuncV2(func(context.Context, string) (ProfileV2, error) {
+	resolver, err = NewProfileResolver(profileSourceFunc(func(context.Context, string) (Profile, error) {
 		sourceCalls++
 		cancel()
 		return profile, nil
-	}), credentialResolverFuncV2(func(context.Context, string) (string, error) {
+	}), credentialResolverFunc(func(context.Context, string) (string, error) {
 		credentialCalls++
 		return "secret", nil
 	}))
@@ -202,15 +202,15 @@ func TestProfilesV2_CanceledContextStopsLookup(t *testing.T) {
 	}
 }
 
-func TestProfilesV2_SecretRedaction(t *testing.T) {
+func TestProfiles_SecretRedaction(t *testing.T) {
 	secret := "private-token-value"
-	profile, err := NewLegacyProfileV2("legacy-mcp", "https://example.com", "model", "private-reference", core.DefaultLimitsV2())
+	profile, err := NewLegacyProfile("legacy-mcp", "https://example.com", "model", "private-reference", core.DefaultLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	resolver, err := NewProfileResolverV2(profileSourceFuncV2(func(context.Context, string) (ProfileV2, error) {
+	resolver, err := NewProfileResolver(profileSourceFunc(func(context.Context, string) (Profile, error) {
 		return profile, errors.New("source diagnostic contains " + secret)
-	}), credentialResolverFuncV2(func(context.Context, string) (string, error) {
+	}), credentialResolverFunc(func(context.Context, string) (string, error) {
 		return "", errors.New("credential diagnostic contains " + secret)
 	}))
 	if err != nil {
@@ -220,7 +220,7 @@ func TestProfilesV2_SecretRedaction(t *testing.T) {
 		t.Fatalf("source error was not safely redacted: %v", err)
 	}
 
-	resolver, err = NewProfileResolverV2(profileSourceFuncV2(func(context.Context, string) (ProfileV2, error) { return profile, nil }), credentialResolverFuncV2(func(context.Context, string) (string, error) {
+	resolver, err = NewProfileResolver(profileSourceFunc(func(context.Context, string) (Profile, error) { return profile, nil }), credentialResolverFunc(func(context.Context, string) (string, error) {
 		return "", errors.New("credential diagnostic contains " + secret)
 	}))
 	if err != nil {
@@ -230,7 +230,7 @@ func TestProfilesV2_SecretRedaction(t *testing.T) {
 	if err == nil || strings.Contains(err.Error(), secret) || strings.Contains(err.Error(), "credential diagnostic") {
 		t.Fatalf("credential error was not safely redacted: %v", err)
 	}
-	resolved = ResolvedProfileV2{Profile: profile, Endpoint: profile.Endpoint, Model: profile.Model, Credential: secret}
+	resolved = ResolvedProfile{Profile: profile, Endpoint: profile.Endpoint, Model: profile.Model, Credential: secret}
 	encoded, err := json.Marshal(resolved)
 	if err != nil {
 		t.Fatal(err)
@@ -238,7 +238,7 @@ func TestProfilesV2_SecretRedaction(t *testing.T) {
 	if strings.Contains(string(encoded), secret) || strings.Contains(string(encoded), profile.CredentialRef) {
 		t.Fatalf("private profile fields leaked: %s", encoded)
 	}
-	description, err := json.Marshal(DescribeProfileV2(profile))
+	description, err := json.Marshal(DescribeProfile(profile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestProfilesV2_SecretRedaction(t *testing.T) {
 	}
 }
 
-func TestProfilesV2_RejectsMaliciousEndpoints(t *testing.T) {
+func TestProfiles_RejectsMaliciousEndpoints(t *testing.T) {
 	for _, endpoint := range []string{
 		"https://user:password@example.com/v1",
 		"https://example.com/v1?token=secret",
@@ -256,13 +256,13 @@ func TestProfilesV2_RejectsMaliciousEndpoints(t *testing.T) {
 		"http://127.0.0.2.example/v1",
 	} {
 		t.Run(endpoint, func(t *testing.T) {
-			if _, err := NewLegacyProfileV2("legacy-mcp", endpoint, "model", "ref", core.DefaultLimitsV2()); err == nil {
+			if _, err := NewLegacyProfile("legacy-mcp", endpoint, "model", "ref", core.DefaultLimits()); err == nil {
 				t.Fatalf("unsafe endpoint accepted: %q", endpoint)
 			}
 		})
 	}
 	for _, endpoint := range []string{"http://localhost:8080/v1", "http://[::1]:8080/v1"} {
-		if _, err := NewLegacyProfileV2("legacy-mcp", endpoint, "model", "ref", core.DefaultLimitsV2()); err != nil {
+		if _, err := NewLegacyProfile("legacy-mcp", endpoint, "model", "ref", core.DefaultLimits()); err != nil {
 			t.Fatalf("loopback endpoint rejected (%s): %v", endpoint, err)
 		}
 	}

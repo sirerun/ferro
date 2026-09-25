@@ -10,7 +10,7 @@ def main() -> int:
     env = os.environ.copy()
     env["GOWORK"] = "off"
     return subprocess.run(
-        ["go", "test", "./internal/mcp", "-run", "^TestContractFixturesV2$", "-count=1"],
+        ["go", "test", "./internal/mcp", "-run", "^TestContractFixtures$", "-count=1"],
         env=env,
         check=False,
     ).returncode

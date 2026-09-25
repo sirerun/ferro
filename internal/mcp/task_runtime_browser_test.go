@@ -18,7 +18,7 @@ import (
 
 // Only the provider is simulated: this exercises Chrome, the shipped extension,
 // the authenticated bridge, HTTP MCP, the policy driver and durable receipts.
-func TestRuntimeV2_ChromeIntegration(t *testing.T) {
+func TestRuntime_ChromeIntegration(t *testing.T) {
 	if os.Getenv("FERRO_TEST_BROWSER") == "" {
 		t.Skip("set FERRO_TEST_BROWSER=1; requires Chrome")
 	}
@@ -32,7 +32,7 @@ func TestRuntimeV2_ChromeIntegration(t *testing.T) {
 	var calls atomic.Int64
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": runtimePlanV2}}}, "usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}})
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": runtimePlan}}}, "usage": map[string]int{"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}})
 	}))
 	defer provider.Close()
 	home := shortTempDir(t)
@@ -81,28 +81,28 @@ func TestRuntimeV2_ChromeIntegration(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer session.Close()
-	in := runtimeRequestV2("chrome-read")
+	in := runtimeRequest("chrome-read")
 	in.Policy.Origins = []string{fixture.URL}
-	call := func() TaskResultV2 {
+	call := func() TaskResult {
 		t.Helper()
-		response, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "run_task_v2", Arguments: in})
+		response, err := session.CallTool(ctx, &sdk.CallToolParams{Name: "run_task", Arguments: in})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if response.IsError {
 			t.Fatalf("task error: %+v", response.Content)
 		}
-		var result TaskResultV2
+		var result TaskResult
 		if err := json.Unmarshal([]byte(response.Content[0].(*sdk.TextContent).Text), &result); err != nil {
 			t.Fatal(err)
 		}
-		if err := ValidateTaskResultV2(result); err != nil {
+		if err := ValidateTaskResult(result); err != nil {
 			t.Fatal(err)
 		}
 		return result
 	}
 	first := call()
-	if first.Status != TaskSucceededV2 || string(first.Result) != `{"value":"fresh browser fact"}` || first.Usage.TotalTokens == nil || *first.Usage.TotalTokens != 30 {
+	if first.Status != TaskSucceeded || string(first.Result) != `{"value":"fresh browser fact"}` || first.Usage.TotalTokens == nil || *first.Usage.TotalTokens != 30 {
 		t.Fatalf("unexpected browser result: %+v", first)
 	}
 	again := call()

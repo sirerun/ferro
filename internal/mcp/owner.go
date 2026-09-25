@@ -39,7 +39,7 @@ type Owner struct {
 	bridge       *extbridge.Bridge
 	remoteServer *http.Server
 	remoteAddr   string
-	receipts     ReceiptStoreV2
+	receipts     ReceiptStore
 	taskCaches   map[string]*core.ResolutionCache // serialized by gate
 	replayEpoch  string
 
@@ -133,7 +133,7 @@ func NewOwner(ctx context.Context, cfg Config) (*Owner, error) {
 		opts = append(opts, ferro.WithResolutionCache(cfg.CachePath))
 	}
 	o.runner = ferro.NewRunner(client, opts...)
-	if err := o.initializeTasksV2(); err != nil {
+	if err := o.initializeTasks(); err != nil {
 		_ = o.Close()
 		return nil, err
 	}
@@ -299,11 +299,14 @@ func (o *Owner) Call(ctx context.Context, tool string, args json.RawMessage) (st
 		return stopResult("disconnected", "service is stopping")
 	default:
 	}
+	if tool == "run_task" && hasAdvancedTaskFields(args) && !hasTaskID(args) {
+		return stopResult("invalid_input", "receipt-backed fields require task_id; no browser work was started")
+	}
 	if tool == "browser_status" || tool == "cancel_task" {
 		return o.control(ctx, tool)
 	}
 	if tool == "get_task_receipt" || tool == "read_task_artifact" || tool == "cleanup_task_receipts" || tool == "list_model_profiles" {
-		result, err := o.taskControlV2(ctx, tool, args)
+		result, err := o.taskControl(ctx, tool, args)
 		if err != nil {
 			return err.Error(), true, nil
 		}
@@ -313,24 +316,24 @@ func (o *Owner) Call(ctx context.Context, tool string, args json.RawMessage) (st
 		}
 		return string(data), false, nil
 	}
-	if tool == "run_task_v2" && o.receipts != nil {
-		if in, err := ValidateTaskRequestV2(args); err == nil {
-			digest, digestErr := canonicalRequestDigestV2(in)
+	if tool == "run_task" && hasTaskID(args) && o.receipts != nil {
+		if in, err := ValidateTaskRequest(args); err == nil {
+			digest, digestErr := canonicalRequestDigest(in)
 			if digestErr != nil {
 				return digestErr.Error(), true, nil
 			}
-			previous, lookupErr := o.receipts.Lookup(ctx, privateReceiptOwnerV2, in.TaskID)
+			previous, lookupErr := o.receipts.Lookup(ctx, privateReceiptOwner, in.TaskID)
 			if lookupErr == nil {
 				if previous.RequestDigest != digest {
-					return ErrReceiptConflictV2.Error(), true, nil
+					return ErrReceiptConflict.Error(), true, nil
 				}
-				data, marshalErr := json.Marshal(receiptResponseV2(previous))
+				data, marshalErr := json.Marshal(receiptResponse(previous))
 				if marshalErr != nil {
 					return "", false, marshalErr
 				}
 				return string(data), false, nil
 			}
-			if !errors.Is(lookupErr, ErrReceiptNotFoundV2) {
+			if !errors.Is(lookupErr, ErrReceiptNotFound) {
 				return lookupErr.Error(), true, nil
 			}
 		}
@@ -359,7 +362,7 @@ func (o *Owner) Call(ctx context.Context, tool string, args json.RawMessage) (st
 		o.mu.Unlock()
 		return stopResult("tab_busy", "another agent owns this tab; retry after its lease expires")
 	}
-	if o.cfg.Backend == "extension" && tool != "run_task" && tool != "run_task_v2" && o.leaseOwner == "" {
+	if o.cfg.Backend == "extension" && tool != "run_task" && o.leaseOwner == "" {
 		o.mu.Unlock()
 		return stopResult("lease_required", "call acquire_tab before direct browser tools; release_tab when finished")
 	}
@@ -381,7 +384,7 @@ func (o *Owner) Call(ctx context.Context, tool string, args json.RawMessage) (st
 		return err.Error(), true, nil
 	}
 	var body []byte
-	if tool == "run_task_v2" {
+	if tool == "run_task" && hasTaskID(args) {
 		body, err = json.Marshal(result)
 	} else {
 		body, err = json.MarshalIndent(result, "", "  ")
@@ -392,12 +395,33 @@ func (o *Owner) Call(ctx context.Context, tool string, args json.RawMessage) (st
 	return string(body), false, nil
 }
 
+func hasTaskID(args json.RawMessage) bool {
+	var request struct {
+		TaskID string `json:"task_id"`
+	}
+	return json.Unmarshal(args, &request) == nil && request.TaskID != ""
+}
+
+func hasAdvancedTaskFields(args json.RawMessage) bool {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(args, &fields); err != nil {
+		return false // The ordinary request decoder reports malformed JSON.
+	}
+	for _, name := range []string{"task_id", "schema", "policy", "output_schema", "limits", "replay_key", "evidence"} {
+		if _, ok := fields[name]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func (o *Owner) dispatch(ctx context.Context, tool string, args json.RawMessage) (any, error) {
 	switch tool {
 	case "run_task":
-		return o.runTask(ctx, args)
-	case "run_task_v2":
-		return o.runTaskV2(ctx, args)
+		if hasTaskID(args) {
+			return o.runTaskWithReceipt(ctx, args)
+		}
+		return o.runTaskSimple(ctx, args)
 	case "snapshot":
 		return o.snapshot(ctx, args)
 	case "navigate":

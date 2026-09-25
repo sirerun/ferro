@@ -11,7 +11,106 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/dndungu/ferro"
 )
+
+func TestRunTaskCanUseFerroChatModelProfile(t *testing.T) {
+	home := shortTempDir(t)
+	owner := &Owner{cfg: Config{
+		Home: home, LLMBaseURL: "https://mcp.example/v1", LLMModel: "mcp-model", LLMAPIKey: "mcp-key",
+		MaxRepairs: 2,
+	}, runner: ferro.NewRunner(nil)}
+	if err := privateJSON(filepath.Join(home, "chat-model.json"), chatModel{
+		BaseURL: "https://openrouter.ai/api/v1", Model: "openai/gpt-4o-mini", APIKey: "chat-key",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	chatClient, err := owner.taskProfileClientV1(context.Background(), "legacy-chat")
+	if err != nil {
+		t.Fatalf("resolve saved chat profile: %v", err)
+	}
+	client, ok := chatClient.(*ferro.OpenAICompatible)
+	if !ok {
+		t.Fatalf("chat client type = %T", chatClient)
+	}
+	if client.BaseURL != "https://openrouter.ai/api/v1" || client.Model != "openai/gpt-4o-mini" || client.APIKey != "chat-key" {
+		t.Fatalf("chat runner did not use saved settings: endpoint=%q model=%q key=%q", client.BaseURL, client.Model, client.APIKey)
+	}
+
+	legacyRunner, err := owner.runnerForTaskProfileV1(context.Background(), "legacy-mcp")
+	if err != nil {
+		t.Fatalf("resolve default MCP profile: %v", err)
+	}
+	if legacyRunner != owner.runner {
+		t.Fatal("legacy-mcp no longer uses the configured MCP runner")
+	}
+	if _, err := owner.runnerForTaskProfileV1(context.Background(), "unknown"); err == nil {
+		t.Fatal("unknown model profile was accepted")
+	}
+}
+
+func TestRunTaskUsesSelectedChatProfileForMCPGoal(t *testing.T) {
+	home := shortTempDir(t)
+	var calls atomic.Int64
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("provider path = %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer saved-chat-key" {
+			t.Errorf("provider authorization = %q", got)
+		}
+		var request struct {
+			Model string `json:"model"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("decode provider request: %v", err)
+		}
+		if request.Model != "openai/gpt-4o-mini" {
+			t.Errorf("provider model = %q", request.Model)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": `{"steps":[{"kind":"done","result":"3 leads"}]}`}}}})
+	}))
+	t.Cleanup(provider.Close)
+	if err := os.WriteFile(filepath.Join(home, "allowlist.json"), []byte(`["https://allowed.example"]`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	allow, err := NewAllowlist(filepath.Join(home, "allowlist.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := privateJSON(filepath.Join(home, "chat-model.json"), chatModel{
+		BaseURL: provider.URL + "/v1", Model: "openai/gpt-4o-mini", APIKey: "saved-chat-key",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	driver := newPolicyDriverSpy("https://allowed.example/people")
+	owner := &Owner{
+		cfg:   Config{Home: home, Backend: "fixture", BlockTimeout: 15 * time.Second, MaxElements: 100, MaxRepairs: 2},
+		allow: allow, driver: driver, runner: ferro.NewRunner(nil), gate: make(chan struct{}, 1),
+	}
+
+	args, err := json.Marshal(RunTaskArgs{
+		Goal:     "Research up to three matching profiles and return a concise result.",
+		StartURL: "https://allowed.example/people", ModelProfile: "legacy-chat",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text, failed, err := owner.Call(context.Background(), "run_task", args)
+	if err != nil || failed {
+		t.Fatalf("run_task failed=%v err=%v result=%s", failed, err, text)
+	}
+	var output RunTaskOutput
+	if err := json.Unmarshal([]byte(text), &output); err != nil {
+		t.Fatalf("decode output: %v: %s", err, text)
+	}
+	if output.Result != "3 leads" || output.Metrics.LLMCalls != 1 || calls.Load() != 1 {
+		t.Fatalf("unexpected result or model calls: output=%+v calls=%d", output, calls.Load())
+	}
+}
 
 // TestRunTask_GatedByAllowlist is T11.5's acceptance test: a run_task call
 // whose StartURL is allowlisted completes and returns a result plus
