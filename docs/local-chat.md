@@ -101,3 +101,15 @@ releases the previous pairing. Then choose **Open chat**. The paired tab's
 toolbar opens the panel directly. Disconnecting hides the panel without closing
 the webpage. The pairing token stays in Chrome session storage; if Chrome clears
 that storage, enter the token again.
+
+## Reading the model prompts
+
+The system prompts are checked-in text files embedded into the Go binary:
+
+- [Planner](../internal/core/prompts/planner.txt): browser plan schema, examples and rules.
+- [Repair](../internal/core/prompts/repair.txt): repairing one failed browser step.
+- [Structured extraction](../internal/core/prompts/structure.txt): schema-based extraction from page text.
+
+The planner also receives the task goal and current page snapshot in its user
+message. Chat requests may include recent conversation context. Editing an
+embedded prompt requires rebuilding the Go service.
