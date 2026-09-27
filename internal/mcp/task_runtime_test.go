@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dndungu/ferro/internal/core"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 const runtimePlan = `{"steps":[{"kind":"extract","fields":{"value":"#value"}},{"kind":"done","result":"{{extract.last}}"}]}`

@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dndungu/ferro/internal/core"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 func qualificationSession(t *testing.T, o *Owner) (*sdk.ClientSession, context.Context) {

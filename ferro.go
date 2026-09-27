@@ -14,9 +14,9 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/dndungu/ferro/internal/browser"
-	"github.com/dndungu/ferro/internal/core"
-	"github.com/dndungu/ferro/internal/llm"
+	"github.com/sirerun/ferro/internal/browser"
+	"github.com/sirerun/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/llm"
 )
 
 // Task is one unit of automation work: a goal, an optional starting URL,

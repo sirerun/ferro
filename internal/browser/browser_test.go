@@ -11,7 +11,7 @@ import (
 
 	"github.com/chromedp/chromedp"
 
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 // TestSnapshot_InteractiveElements tests the page compiler against inline

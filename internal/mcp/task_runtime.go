@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/dndungu/ferro/internal/core"
-	"github.com/dndungu/ferro/internal/llm"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/sirerun/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/llm"
 )
 
 // All transports currently authorize the same private installation owner.

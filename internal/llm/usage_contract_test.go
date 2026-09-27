@@ -2,7 +2,7 @@ package llm
 
 import (
 	"encoding/json"
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/core"
 	"testing"
 )
 

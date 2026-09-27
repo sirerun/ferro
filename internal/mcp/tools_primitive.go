@@ -10,8 +10,8 @@ import (
 
 	"github.com/chromedp/chromedp"
 
-	"github.com/dndungu/ferro/internal/core"
-	"github.com/dndungu/ferro/internal/extbridge"
+	"github.com/sirerun/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/extbridge"
 )
 
 // Primitive tool argument shapes. Each maps 1:1 onto one core.ActionKind

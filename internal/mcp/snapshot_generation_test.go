@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dndungu/ferro/internal/core"
-	"github.com/dndungu/ferro/internal/extbridge"
+	"github.com/sirerun/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/extbridge"
 )
 
 func TestPinSnapshotRejectsRefsFromPreviousPairing(t *testing.T) {

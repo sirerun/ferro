@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 func receiptFixture(t *testing.T, dir string) (ReceiptStore, RunTaskRequest, string) {

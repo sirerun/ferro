@@ -13,7 +13,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	fmcp "github.com/dndungu/ferro/internal/mcp"
+	fmcp "github.com/sirerun/ferro/internal/mcp"
 )
 
 // shortTempDir returns a fresh, empty directory suitable for $FERRO_MCP_HOME.

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 // --- Tier 1: queue/pairing logic in isolation (no HTTP) ---------------------

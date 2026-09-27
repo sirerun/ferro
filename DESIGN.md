@@ -45,7 +45,7 @@ validation, the DOM-to-snapshot compiler, the zero-LLM executor, ref
 resolution, the repair taxonomy, and the resolution cache. Keeping it
 `internal/` means the module can restructure or rewrite any of that — swap
 `chromedp` for `go-rod`, change the cache format, add vision grounding later
-— without breaking anyone importing `github.com/dndungu/ferro`.
+— without breaking anyone importing `github.com/sirerun/ferro`.
 
 `internal/browser` and `internal/llm` are kept as separate internal
 packages, not folded into `core`, because they are the two places an
