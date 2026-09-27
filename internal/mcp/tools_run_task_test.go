@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dndungu/ferro"
+	"github.com/sirerun/ferro"
 )
 
 func TestRunTaskCanUseFerroChatModelProfile(t *testing.T) {

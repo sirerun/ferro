@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 func chatRequest(t *testing.T, o *Owner, route string, body any, mutate func(*http.Request)) (int, string) {

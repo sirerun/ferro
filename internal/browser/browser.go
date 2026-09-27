@@ -22,7 +22,7 @@ import (
 
 	"github.com/chromedp/chromedp"
 
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 // Browser is a pool of allocated-but-idle chromedp contexts.

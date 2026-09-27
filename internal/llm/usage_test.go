@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 func TestUsage_Reported(t *testing.T) {

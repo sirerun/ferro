@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 func TestCanceledQueueIsNeverDispatched(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/dndungu/ferro/internal/mcp"
+	"github.com/sirerun/ferro/internal/mcp"
 )
 
 // This examples check runs the frozen public validators against the operator

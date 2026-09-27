@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/dndungu/ferro/internal/extbridge"
+	"github.com/sirerun/ferro/internal/extbridge"
 	"log"
 	"net"
 	"net/http"
@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dndungu/ferro"
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 // Owner holds the real ferro.Browser pool and the single shared tab (ADR

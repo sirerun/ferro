@@ -20,7 +20,7 @@ import (
 	"syscall"
 	"time"
 
-	fmcp "github.com/dndungu/ferro/internal/mcp"
+	fmcp "github.com/sirerun/ferro/internal/mcp"
 )
 
 const pilotOrigin = "https://ferro.sire.run"

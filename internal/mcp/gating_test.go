@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 // gatingFixtureServer serves a minimal page with one of each element type

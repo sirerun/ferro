@@ -22,7 +22,7 @@ current work plan and `DESIGN.md` for known sharp edges.
 ## Install
 
 ```sh
-go get github.com/dndungu/ferro
+go get github.com/sirerun/ferro
 ```
 
 Requires Go 1.25 or later and a Chrome or Chromium binary on the machine.
@@ -37,7 +37,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/dndungu/ferro"
+	"github.com/sirerun/ferro"
 )
 
 func main() {
@@ -269,7 +269,7 @@ signed-in Chrome profile. It's a new consumer of the library
 Install the binary:
 
 ```sh
-go install github.com/dndungu/ferro/cmd/ferro-mcp@latest
+go install github.com/sirerun/ferro/cmd/ferro-mcp@latest
 ```
 
 Point an MCP client at it. For Claude Code, add to `.mcp.json`:

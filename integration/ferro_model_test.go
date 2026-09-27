@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dndungu/ferro"
+	"github.com/sirerun/ferro"
 )
 
 // TestRealModel_SmokeGoto is a minimal real-model smoke test: point a real

@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 // Command is the resolved, version-one driver wire format. It deliberately

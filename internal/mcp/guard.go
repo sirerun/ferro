@@ -3,7 +3,7 @@ package mcp
 import (
 	"context"
 
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 // guardedDriver gates every model-generated step, not only the entry URL.

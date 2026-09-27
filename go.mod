@@ -1,4 +1,4 @@
-module github.com/dndungu/ferro
+module github.com/sirerun/ferro
 
 go 1.25.0
 

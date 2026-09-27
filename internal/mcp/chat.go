@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dndungu/ferro"
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 // Chat is a local consumer of the same guarded task executor as MCP. It does

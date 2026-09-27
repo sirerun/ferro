@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 // TabIDHeader is the header the polling extension must set on every /next

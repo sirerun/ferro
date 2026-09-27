@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 func TestRequestRejectsInvalidUnknownTrailingAndUnsupportedSchema(t *testing.T) {

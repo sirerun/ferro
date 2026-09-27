@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 type EvidenceMode string

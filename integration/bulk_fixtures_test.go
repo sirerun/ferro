@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 type pageFixture struct {

@@ -1,4 +1,4 @@
-module github.com/dndungu/ferro/deploy/cloud
+module github.com/sirerun/ferro/deploy/cloud
 
 go 1.25.11
 

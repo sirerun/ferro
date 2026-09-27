@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dndungu/ferro/internal/extbridge"
+	"github.com/sirerun/ferro/internal/extbridge"
 )
 
 type lifecycleClock struct {

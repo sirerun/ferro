@@ -7,7 +7,7 @@ import (
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/ecs"
-	"github.com/dndungu/ferro/deploy/cloud/wake"
+	"github.com/sirerun/ferro/deploy/cloud/wake"
 )
 
 func main() {

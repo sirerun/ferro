@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dndungu/ferro/internal/core"
+	"github.com/sirerun/ferro/internal/core"
 )
 
 // nextResponse is GET /next's 200 body: {"id": "...", "action": <Command JSON>}.
