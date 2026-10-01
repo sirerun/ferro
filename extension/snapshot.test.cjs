@@ -150,3 +150,48 @@ test('extension takeSnapshot() matches internal/core/snapshot.go golden (T12.2 p
     await chrome.close();
   }
 });
+
+test('execution snapshots pin input and form identity before trusted input', async (t) => {
+  if (process.env.FERRO_TEST_BROWSER !== '1' || !findChrome()) {
+    t.skip('requires FERRO_TEST_BROWSER=1 and Chrome');
+    return;
+  }
+  const chrome = await launchChrome({windowSize: WINDOW_SIZE});
+  try {
+    await chrome.navigate('file://' + FIXTURE_PATH);
+    await chrome.evaluate(fs.readFileSync(ADAPTER_PATH, 'utf8'));
+    await chrome.evaluate(`(() => {
+      globalThis.inputCalls = 0;
+      globalThis.chrome = {runtime:{sendMessage:async()=>{globalThis.inputCalls++; return {};}}};
+      const form = document.createElement('form');
+      form.id = 'identity-form'; form.action = 'https://example.test/submit'; form.method = 'post';
+      form.innerHTML = '<input id="identity-input" type="text" autocomplete="off" aria-label="Synthetic field"><button id="identity-button">Synthetic submit</button>';
+      document.body.prepend(form);
+    })()`);
+    const snapshot = await chrome.evaluate(`FerroAdapter.takeSnapshot(${MAX_ELEMENTS}, true)`);
+    const field = snapshot.elements.find((entry) => entry.selector === '#identity-input');
+    const button = snapshot.elements.find((entry) => entry.selector === '#identity-button');
+    assert.ok(field && button);
+    assert.equal(field.input_type, 'text');
+    assert.equal(field.autocomplete, 'off');
+    assert.equal(button.form_action, 'https://example.test/submit');
+    assert.equal(button.form_method, 'post');
+    const target = (entry) => 'ferro-target:' + Buffer.from(JSON.stringify(entry)).toString('base64url');
+    const link = snapshot.elements.find((entry) => entry.tag === 'a' && entry.abs_href);
+    assert.ok(link);
+    for (const href of ['https://other.example.test/target', link.abs_href + '?changed=1']) {
+      await chrome.evaluate(`document.querySelector(${JSON.stringify(link.selector)}).href = ${JSON.stringify(href)}`);
+      const result = await chrome.evaluate(`(async()=>{try {await FerroAdapter.perform({op:'click',selector:${JSON.stringify(target(link))},origin:location.origin,deadlineMs:Date.now()+5000});return 'allowed';}catch(error){return error.message;}})()`);
+      assert.match(result, /execution identity changed/);
+    }
+    await chrome.evaluate(`document.querySelector('#identity-input').type = 'email'`);
+    const fieldResult = await chrome.evaluate(`(async()=>{try {await FerroAdapter.perform({op:'fill',selector:${JSON.stringify(target(field))},text:'synthetic',origin:location.origin,deadlineMs:Date.now()+5000});return 'allowed';}catch(error){return error.message;}})()`);
+    assert.match(fieldResult, /execution identity changed/);
+    await chrome.evaluate(`document.querySelector('#identity-form').action = 'https://other.example.test/submit'`);
+    const buttonResult = await chrome.evaluate(`(async()=>{try {await FerroAdapter.perform({op:'click',selector:${JSON.stringify(target(button))},origin:location.origin,deadlineMs:Date.now()+5000});return 'allowed';}catch(error){return error.message;}})()`);
+    assert.match(buttonResult, /execution identity changed/);
+    assert.equal(await chrome.evaluate('globalThis.inputCalls'), 0, 'changed identity must be refused before trusted input');
+  } finally {
+    await chrome.close();
+  }
+});
