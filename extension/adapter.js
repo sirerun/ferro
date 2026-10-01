@@ -167,7 +167,14 @@
         text: text,
         href: href,
       };
-      if (includeSelectors) item.selector = uniqueSelector(el);
+      if (includeSelectors) {
+        item.selector = uniqueSelector(el);
+        item.input_type = tag === 'INPUT' ? (el.type || 'text') : '';
+        item.autocomplete = el.getAttribute('autocomplete') || '';
+        item.abs_href = tag === 'A' ? (el.href || '') : '';
+        item.form_action = el.getAttribute('formaction') ? (el.formAction || '') : (el.form?.action || '');
+        item.form_method = el.getAttribute('formmethod') ? (el.formMethod || '') : (el.form?.method || '');
+      }
       raw.push(item);
     }
     // --- end verbatim port ---
@@ -186,7 +193,10 @@
       if (r.name) out.name = r.name;
       if (r.text) out.text = r.text;
       if (r.href) out.href = r.href;
-      if (includeSelectors) out.selector = r.selector;
+      if (includeSelectors) {
+        out.selector = r.selector;
+        for (const key of ['input_type', 'autocomplete', 'abs_href', 'form_action', 'form_method']) out[key] = r[key];
+      }
       elements.push(out);
     }
     const snap = { url: location.href, title: document.title, elements: elements };
@@ -281,6 +291,18 @@
       const name = snapshotName(el);
       const text = snapshotText(el);
       const href = el.tagName === 'A' && el.getAttribute('href') ? new URL(el.getAttribute('href'), location.href).pathname : '';
+      const identity = {
+        input_type: el.tagName === 'INPUT' ? (el.type || 'text') : '',
+        autocomplete: el.getAttribute('autocomplete') || '',
+        abs_href: el.tagName === 'A' ? (el.href || '') : '',
+        form_action: el.getAttribute('formaction') ? (el.formAction || '') : (el.form?.action || ''),
+        form_method: el.getAttribute('formmethod') ? (el.formMethod || '') : (el.form?.method || ''),
+      };
+      for (const [key, value] of Object.entries(identity)) {
+        if (Object.prototype.hasOwnProperty.call(expected, key) && expected[key] !== value) {
+          throw new Error('stale ref: the target execution identity changed');
+        }
+      }
       if (el.tagName.toLowerCase() !== expected.tag ||
           (el.getAttribute('role') || '') !== (expected.role || '') ||
           name !== (expected.name || '') || text !== (expected.text || '') ||

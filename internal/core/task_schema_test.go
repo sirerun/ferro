@@ -74,7 +74,7 @@ func TestSchema_PartialNotSuccess(t *testing.T) {
 
 func nestedSchema(t *testing.T, wrappers int) json.RawMessage {
 	t.Helper()
-	var node map[string]any = map[string]any{"type": "string"}
+	var node = map[string]any{"type": "string"}
 	for range wrappers {
 		node = map[string]any{"properties": map[string]any{"child": node}}
 	}

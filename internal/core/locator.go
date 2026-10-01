@@ -2,12 +2,11 @@ package core
 
 import (
 	"context"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"github.com/chromedp/chromedp"
+	"github.com/sirerun/ferro/page"
 )
 
 // SelectorValidator is an optional driver capability for safely reusing a
@@ -35,7 +34,7 @@ func (x *Executor) resolveRef(ctx context.Context, ref int, kind string) (select
 	if !ok || snap == nil {
 		return "", CacheKey{}, fmt.Errorf("no snapshot in context; runner must attach one before execute")
 	}
-	el := snap.element(ref)
+	el := snapshotElement(snap, ref)
 	if el == nil {
 		return "", CacheKey{}, fmt.Errorf("ref %d not in snapshot", ref)
 	}
@@ -133,16 +132,13 @@ func firstField(s string) string {
 // now (see repair.go and the RFC discussion).
 func buildSelector(e Element) string {
 	if e.Selector != "" {
-		target, _ := json.Marshal(struct {
-			Selector string `json:"selector"`
-			Tag      string `json:"tag"`
-			Role     string `json:"role,omitempty"`
-			Name     string `json:"name,omitempty"`
-			Text     string `json:"text,omitempty"`
-			HREF     string `json:"href,omitempty"`
-		}{e.Selector, e.Tag, e.Role, e.Name, e.Text, e.HREF})
-		return "ferro-target:" + base64.RawURLEncoding.EncodeToString(target)
+		target, err := page.TargetSelector(e)
+		if err == nil {
+			return target
+		}
+		return ""
 	}
+
 	if e.HREF != "" && e.Tag == "a" {
 		return fmt.Sprintf(`a[href^="%s"]`, cssEscape(e.HREF))
 	}

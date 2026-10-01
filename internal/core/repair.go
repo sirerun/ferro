@@ -110,8 +110,8 @@ func (r *Runner) repairStep(ctx context.Context, rerr *RunError, orig, fresh *Sn
 	// ref that no longer resolves, try fuzzy-remapping against the fresh
 	// snapshot locally, using the *original* action's element as the hint —
 	// don't trust the model's guess for the ref number itself.
-	if patched.Ref > 0 && !fresh.hasRef(patched.Ref) {
-		if e := orig.element(rerr.Action.Ref); e != nil {
+	if patched.Ref > 0 && !snapshotHasRef(fresh, patched.Ref) {
+		if e := snapshotElement(orig, rerr.Action.Ref); e != nil {
 			if hint, found := fresh.RefByHint(e.Tag, firstNonEmpty(e.Name, e.Text)); found {
 				patched.Ref = hint
 			}
@@ -123,11 +123,9 @@ func (r *Runner) repairStep(ctx context.Context, rerr *RunError, orig, fresh *Sn
 
 // --- small snapshot helpers ---
 
-func (s *Snapshot) hasRef(ref int) bool {
-	return s.element(ref) != nil
-}
+func snapshotHasRef(s *Snapshot, ref int) bool { return snapshotElement(s, ref) != nil }
 
-func (s *Snapshot) element(ref int) *Element {
+func snapshotElement(s *Snapshot, ref int) *Element {
 	for i := range s.Elements {
 		if s.Elements[i].Ref == ref {
 			return &s.Elements[i]

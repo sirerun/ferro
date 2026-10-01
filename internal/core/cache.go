@@ -24,14 +24,6 @@ type CacheKey struct {
 	Signature string `json:"signature"` // element signature hash
 }
 
-// Signature is the stable identity of a target element. Built from the
-// snapshot Element, deliberately excluding positional data.
-func (e Element) Signature() string {
-	h := sha256.New()
-	_, _ = fmt.Fprintf(h, "%s|%s|%s|%s", e.Tag, e.Role, e.Name, normalizeText(e.Text))
-	return fmt.Sprintf("%x", h.Sum(nil))[:16] // short: keys are logged
-}
-
 // normalizeText lowercases and collapses whitespace so cosmetic text changes
 // (capitalization, double spaces) don't invalidate the cache.
 func normalizeText(s string) string {
@@ -203,13 +195,13 @@ func (c *ResolutionCache) Flush() error {
 	if err != nil {
 		return err
 	}
-	defer os.Remove(f.Name())
+	defer func() { _ = os.Remove(f.Name()) }()
 	if _, err = f.Write(b); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err = f.Sync(); err != nil {
-		f.Close()
+		_ = f.Close()
 		return err
 	}
 	if err = f.Close(); err != nil {
