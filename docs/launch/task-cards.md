@@ -10,27 +10,28 @@ A wave is a dependency frontier, not permission to run every task simultaneously
 
 - Wave 0: D01
 - Wave 1: D02
-- Wave 2: D03, D04
-- Wave 3: D05, D06, D07, A11
-- Wave 4: A01, A04, A10, A13, A16, F01, X01, W01
-- Wave 5: A02, A05, A07, A14, A17, F02, I01
-- Wave 6: A08, A12, A15, F03, F07, F09, I02
-- Wave 7: A03, A19, F04
-- Wave 8: A06, F05
-- Wave 9: A09, F06, X02
-- Wave 10: F08, F11, F14, X03
-- Wave 11: F10, F12, X04, I03
-- Wave 12: F13, X05, X06
-- Wave 13: A18, F15, X07, W02
-- Wave 14: W03
-- Wave 15: X08
-- Wave 16: Q01
-- Wave 17: Q02, Q03, Q06
-- Wave 18: Q04, Q05, Q08
-- Wave 19: Q07, R01
-- Wave 20: R02
-- Wave 21: R03
-- Wave 22: R04
+- Wave 2: D03
+- Wave 3: D08, A11
+- Wave 4: D04
+- Wave 5: D05, D06, D07
+- Wave 6: A01, A04, A10, A13, A16, F01, X01, W01
+- Wave 7: A02, A05, A07, A14, A17, F02, I01
+- Wave 8: A08, A12, A15, F03, F07, F09, I02
+- Wave 9: A03, A19, F04, F11
+- Wave 10: A06, F05, F12
+- Wave 11: A09, F06, F13, X02
+- Wave 12: F08, F14, X03, W02
+- Wave 13: F10, F15, X04, I03
+- Wave 14: A18, X05, X06
+- Wave 15: X07, W03
+- Wave 16: X08
+- Wave 17: Q01
+- Wave 18: Q02, Q03, Q06
+- Wave 19: Q04, Q05, Q08
+- Wave 20: Q07, R01
+- Wave 21: R02
+- Wave 22: R03
+- Wave 23: R04
 
 ## D01 — Reconcile launch baseline and active work
 
@@ -89,22 +90,43 @@ Acceptance:
 
 **Required verification:** Provenance review plus secret/private-identifier scan of proposed public artifacts
 
+## D08 — Qualify generated hosted application profile and neutral contract
+
+- Repository: `ferro`; lane: `coordinator`.
+- Dependencies: D03.
+- Owned paths: `docs/launch/architecture.md`, `docs/launch/evidence/D08.md`.
+- Reviewer: independent-security; initial size: 4-8 agent hours; status: planned.
+
+Implementation:
+
+1. Identify the versioned, public, neutral contract required to consume the generated application profile; keep private project names and source out of public artifacts.
+2. Qualify an AMOS-generated paid application and its authoritative provider/admission adapter, tenant isolation, restart/recovery, and operational ownership against the consumer journey.
+3. Compare the qualified profile with preserved preserved hosted runtime services and current Ferro behavior; record exact residual Ferro-owned browser/device responsibilities and migration constraints without inventing login or migration work.
+
+Acceptance:
+
+- Versioned public neutral contract is reviewable and provenance-safe; generated paid app/provider/tenant isolation/recovery evidence is recorded against exact revisions and limitations.
+- preserved hosted runtime preservation is explicit; no new hosted runtime adoption task is eligible until D08 is accepted and D04/D05 freeze the consumer contract.
+- Browser action authority remains based on explicit pairing, exact-origin policy, per-task interaction consent and action confirmation; authentication or paid admission alone cannot grant it.
+
+**Required verification:** Independent contract review plus cited generated-app/provider/tenant-isolation/recovery qualification evidence; no runtime result may be inferred from documentation alone
+
 ## D04 — Freeze hosted architecture and threat model
 
 - Repository: `ferro`; lane: `coordinator`.
-- Dependencies: D01, D02.
+- Dependencies: D01, D02, D08.
 - Owned paths: `docs/launch/architecture.md`, `docs/adr/011-hosted-ferro.md`.
 - Reviewer: security; initial size: 2-6 agent hours; status: planned.
 
 Implementation:
 
-1. Adopt or explicitly revise architecture defaults with rationale.
-2. Model account/device/task authority, stale worker/extension fencing, key custody, payment reconciliation and destructive-action confirmation.
+1. Adopt or explicitly revise the qualified generated application/provider profile with rationale; do not invent app-owned hosted login, billing or schema migration.
+2. Model tenant/device/task authority, stale worker/extension fencing, provider boundaries and destructive-action confirmation.
 3. Define local-mode preservation and rollback boundaries; reject unsupported browser actions.
 
 Acceptance:
 
-- No unresolved authority or replay semantics; coordinator approves single account/device/task scope and deployment profile.
+- No unresolved authority or replay semantics; coordinator approves the versioned application/provider adapter, tenant boundary, single device/task scope and deployment profile.
 
 **Required verification:** Threat-model walkthrough using readiness Gate 3 scenarios
 
@@ -117,14 +139,15 @@ Acceptance:
 
 Implementation:
 
-1. Write every architecture route and operation JSON schema with success/error examples and authorization matrix.
-2. Define SQL table ownership, key constraints, migration ranges, exact package methods/typed errors and callback/cancel/confirmation state machines.
-3. Pin reviewed SDK/tool/action/provider versions; define payload/rate/token limits and compatible protocol v1.
+1. Freeze the versioned neutral profile contract and only the consumer routes/operation schemas required for Ferro browser/device integration, with success/error examples and authority matrix.
+2. Assign hosted identity, paid-admission, persistence and migration ownership to the qualified application/provider profile; specify only residual Ferro-owned state and compatibility adapters.
+3. Pin reviewed dependencies only after D08 qualification; define bounded browser/device payloads and compatible protocol versions.
 4. Freeze the maintenance CLI/workflow contract and IAM role separately; it has no public endpoint or arbitrary SQL capability.
 
 Acceptance:
 
 - Contracts validate; examples cover denied cases; no implementation agent must invent a shared interface; lockfile owner assigned.
+- No app-owned hosted login, paid entitlement source or migration is specified unless D08 evidence proves a narrow residual requirement and D04 records its owner.
 
 **Required verification:** OpenAPI/JSON Schema validation; contract fixture round trips; interface compile checks
 
@@ -156,8 +179,8 @@ Acceptance:
 
 Implementation:
 
-1. Prepare concrete cloud cost/resource preview assumptions and required secret-reference names.
-2. Record Google/publisher IDs, cloud account/region/domain authority, Stripe legal/price/currency/refund/tax policy, support and retention owners.
+1. Prepare concrete deployment-profile cost/resource assumptions and required secret-reference names after D08.
+2. Record the qualified application/provider profile's customer identity, paid-access, support and retention ownership; separately record Ferro browser/device and deployment responsibilities.
 3. Separate prepared artifacts from authorized actual mutations; use fake values in committed examples.
 4. Obtain or prepare an authorized draft store item for its stable ID early; public publication waits for R02.
 
@@ -548,7 +571,7 @@ Acceptance:
 
 **Required verification:** go test ./internal/hosted/config ./internal/hosted/server ./cmd/ferro-cloud; local regression suite
 
-## F02 — Implement PostgreSQL schema and store foundations
+## F02 — Implement Ferro-owned browser/task persistence
 
 - Repository: `ferro`; lane: `hosted-core`.
 - Dependencies: F01.
@@ -557,17 +580,17 @@ Acceptance:
 
 Implementation:
 
-1. Apply coordinator-owned schema/constraints/indexes and migrations; integrate library-owned schema explicitly.
-2. Add account-bound query helpers, transaction rollback and lease/CAS primitives.
-3. Provide disposable Postgres fixture and expand/contract upgrade harness.
+1. Implement only D05-assigned Ferro-owned browser/task/device state and persistence boundaries.
+2. Consume tenant identity and provider/admission context from the qualified profile; do not duplicate profile-owned account, login, billing or migration state.
+3. Provide disposable fixtures and recovery/compatibility evidence for Ferro-owned state.
 
 Acceptance:
 
-- Two-process unique account/task/device guarantees tested; no global unscoped child lookup; app cannot run DDL.
+- Tenant-scoped task/device guarantees are tested; no global unscoped child lookup; no duplicate profile-owned tenant state or application migration.
 
-**Required verification:** go test ./internal/hosted/store/... with actual PostgreSQL; upgrade previous->current schema test
+**Required verification:** Tenant-scoped task/device persistence tests with the qualified store contract and recovery fixtures; no application-schema migration claim
 
-## F03 — Implement Google OIDC web login
+## F03 — Integrate qualified application authentication context
 
 - Repository: `ferro`; lane: `hosted-identity`.
 - Dependencies: F02, A10.
@@ -576,17 +599,17 @@ Acceptance:
 
 Implementation:
 
-1. Use pinned OIDC/OAuth libraries with fixed issuer/callback, state/nonce/PKCE and issuer+subject identity.
-2. Implement account creation/lookup and account-status gate; no email auto-link.
-3. Supply integration fixtures and no offline Google grants.
+1. Consume the D08/D05 versioned authentication context from the generated application profile through its supported adapter.
+2. Keep customer identity creation, login callbacks, sessions and account lifecycle in the authoritative application profile; do not add a Ferro-owned login or credential store.
+3. Bind each browser task to the authenticated tenant/device context and reject missing, stale or cross-tenant context.
 
 Acceptance:
 
-- Wrong issuer/audience/state/nonce/code replay rejected; callback cannot redirect offsite; absent email does not create ambiguous identity.
+- Only the qualified profile can establish customer identity; stale, missing and cross-tenant contexts are denied without granting browser action authority.
 
-**Required verification:** go test ./internal/hosted/auth -run TestOIDC; actual qualification Google login recorded later Q01
+**Required verification:** Consumer adapter contract checks plus actual qualified-profile context journey recorded later at Q01
 
-## F04 — Wire web session lifecycle and CSRF
+## F04 — Consume qualified application session lifecycle
 
 - Repository: `ferro`; lane: `hosted-identity`.
 - Dependencies: F03.
@@ -595,15 +618,15 @@ Acceptance:
 
 Implementation:
 
-1. Use SCS/Postgres store, secure cookies, rotation, idle/absolute expiry and CSRF.
-2. Implement logout/logout-all/recent-login requirements and disabled-account denial.
-3. Expose web-only administration principal checks.
+1. Integrate the qualified profile's session and request-integrity boundary through the versioned contract; do not create Ferro-owned web sessions.
+2. Honor logout, revoke, expiry, disabled/deleted tenant and recent-auth results from the authoritative profile.
+3. Keep web/account operations distinct from device/browser-operation authority.
 
 Acceptance:
 
-- Expired/replayed/fixed sessions, missing CSRF and foreign-origin state changes denied; logout reaches both replicas.
+- Profile session revocation/expiry and request-integrity denials propagate to Ferro; no web credential by itself authorizes browser mutation.
 
-**Required verification:** go test ./internal/hosted/auth -run TestSession with PostgreSQL
+**Required verification:** Consumer adapter checks for profile session expiry/revocation and request-integrity outcomes; no app-owned session-store claim
 
 ## F05 — Implement extension device linking and revocation
 
@@ -719,24 +742,24 @@ Acceptance:
 
 **Required verification:** go test ./internal/hosted/model/... with redirect/SSRF/rate/timeout/cancel fixtures
 
-## F11 — Enforce paid-access policy at task admission
+## F11 — Honor authoritative paid admission at task boundary
 
 - Repository: `ferro`; lane: `hosted-billing`.
-- Dependencies: A09, F07.
+- Dependencies: F07.
 - Owned paths: `internal/hosted/entitlements/`, `internal/hosted/tasks/admission_billing.go`.
 - Reviewer: security; initial size: 2-6 agent hours; status: planned.
 
 Implementation:
 
-1. Implement exact D07 subscription status/paid-through/freshness table outside AMSL.
-2. Atomically combine account enabled, subscription, device, allowlist and task admission.
-3. Keep billing/export routes available to unpaid accounts; define already-admitted task semantics.
+1. Consume the generated application's versioned paid-admission result; do not reconstruct subscription policy from checkout redirects or AMSL package state.
+2. Bind admission to tenant, device, task limits and expiry; keep browser origin and action grants in Ferro's separate policy checks.
+3. Define behavior for expired/revoked admission and already-admitted work from the qualified contract.
 
 Acceptance:
 
-- Redirect/UI bypass cannot grant access; stale/failed reconcile cannot grant unbounded free service; period boundaries deterministic.
+- Missing, stale, denied or cross-tenant paid admission fails closed; paid status never grants origin access or browser-action authority.
 
-**Required verification:** go test ./internal/hosted/entitlements/...; HTTP admission cases across all billing states
+**Required verification:** Admission adapter cases for qualified allow/deny/stale/tenant outcomes; provider lifecycle evidence remains owned by the profile qualification
 
 ## F12 — Add account quotas and abuse backpressure
 
@@ -757,22 +780,22 @@ Acceptance:
 
 **Required verification:** go test -race ./internal/hosted/limits/... with shared-DB parallel admission
 
-## F13 — Implement export and durable account deletion
+## F13 — Integrate application-owned export and deletion lifecycle
 
 - Repository: `ferro`; lane: `hosted-account`.
-- Dependencies: F04, F05, F09, A09, F12.
+- Dependencies: F04, F05, F09, F12.
 - Owned paths: `internal/hosted/account/`, `internal/hosted/retention/`.
 - Reviewer: security; initial size: 4-8 agent hours; status: planned.
 
 Implementation:
 
-1. Require recent authentication; implement export without secrets and disable/revoke/cancel/key-delete workflow.
-2. Reconcile billing cancellation before claiming final deletion; retry partial failures durably.
-3. Implement TTL purge and restore-applied tombstones per approved retention.
+1. Use the qualified application's export/deletion lifecycle and recent-auth result; Ferro may export only its own browser/task data under the contract.
+2. Propagate account disable, device revoke, task stop and provider deletion-pending outcomes without implementing a second billing cancellation ledger.
+3. Apply deletion/revocation outcomes to Ferro-owned transient data and recovery state as D05 specifies.
 
 Acceptance:
 
-- No cross-account export; deleted account cannot run/relink; failed billing cancellation stays visible pending; backups cannot resurrect access.
+- Cross-tenant export is denied; disabled/deleted tenants cannot run or relink; provider deletion-pending state remains visible; recovery cannot resurrect revoked access.
 
 **Required verification:** go test ./internal/hosted/account/... ./internal/hosted/retention/... with provider/DB failure injection
 

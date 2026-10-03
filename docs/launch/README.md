@@ -1,17 +1,18 @@
-# Ferro public launch through AMSL adoption
+# Ferro hosted customer runtime adoption
 
 Cross-track authority: [shared execution roadmap](../execution-roadmap.md). Its shared-file reservations and total lane limit apply before dispatch in either track.
 
-Status: prescriptive implementation plan, not an implementation or launch claim.
-Prepared 2026-09-24 UTC against Ferro `daa5fd8` and AMSL RFC revision 3 (remote RFC blob verified during planning).
+Status: planned adoption only. The former preserved-runtime default architecture below is historical planning input, not an accepted runtime design or launch claim. Hosted implementation is gated by D08 generated-application/provider/tenant/recovery qualification, then D04/D05 contract freeze.
+
+AMOS is the target generated paid application profile. preserved hosted runtime remains the preserved hosted runtime while that profile is unqualified; this plan does not authorize cutover, shutdown, migration, or a new preserved-runtime-specific feature path. No application-owned hosted login, paid-admission system, or schema migration is presumed. Use a versioned public neutral contract and qualify the generated app's authoritative provider/admission adapter, tenant isolation, and recovery before adopting it.
 
 ## Objective and scope
 
-A new customer visits `ferro.sire.run`, signs in, subscribes, installs the Chrome extension, connects an explicitly chosen tab, supplies an OpenRouter key, completes browser work, stops it, manages billing and deletes their account. They install no local Go service. The extension executes in their own Chrome profile; the hosted Go service plans tasks and calls the model. Chrome must remain available.
+A new customer journey remains the product goal: reach the paid application, install the Chrome extension, explicitly pair a chosen tab, supply a model key, complete bounded browser work, stop it, manage their account and recover safely. The generated application profile owns customer authentication and paid admission according to its qualified contract. Ferro owns browser execution, device pairing, exact-origin and action policy, and browser-operation receipts. Chrome must remain available.
 
-A second deliverable is demonstrated AMSL reuse: source comparison -> publishable contract -> narrow implementation or existing-library reference -> immutable dependency -> Ferro adoption -> executed consumer evidence. A package with tests but no wired Ferro consumer is unfinished. A usage count is not evidence of matching semantics.
+AMSL component adoption remains a separate evidence track: source comparison -> publishable contract -> narrow implementation or existing-library reference -> immutable dependency -> Ferro adoption -> executed consumer evidence. It does not establish the hosted application profile or authorize hosted-runtime adoption.
 
-Public launch v1 is deliberately bounded: one personal account, one active browser connection and one active task per account; one top-level paired tab; OpenRouter BYOK; one monthly subscription; Google sign-in; read-only tasks by default; explicit per-task interaction consent. Account settings and billing live on the website; chat stays in the glass side panel. Preserve local mode. No team accounts, arbitrary model endpoints, unattended schedules, autonomous campaigns, cross-frame work, file transfer, arbitrary JS/CDP execution, public remote MCP OAuth, or cross-device conversation sync in this launch.
+The intended browser journey is deliberately bounded: one customer-selected device/tab and one active task within the qualified profile's limits; model-provider choice is explicit; read-only behavior is the default; interaction consent is per task. Customer identity, paid status, plan caps and recovery are authoritative in the generated application/provider profile once D08 qualifies it. Preserve local mode. Do not assume team features, arbitrary model endpoints, unattended schedules, autonomous campaigns, cross-frame work, file transfer, arbitrary JS/CDP execution, public remote MCP OAuth, or cross-device conversation sync.
 
 Interaction consent is explicit: show the selected tab, allowed origins, task text and interaction mode before starting. It authorizes that bounded task, not future tasks. Decline tasks whose required browser capability is unsupported. An LLM cannot broaden permissions. Do not claim that a broad interaction toggle implements transaction-specific payment or message approval. User-requested destructive/sending actions require a separate visible confirmation for the specific action in v1; if its effect cannot be identified reliably, refuse that action and hand control to the human (see architecture).
 
@@ -19,12 +20,14 @@ Interaction consent is explicit: show the selected tab, allowed origins, task te
 
 1. Read [architecture](architecture.md), [AMSL boundaries](amsl.md), [agent runbook](agent-runbook.md) and [release gates](readiness.md).
 2. Use [tasks.json](tasks.json) as the dependency and ownership manifest. [task-cards.md](task-cards.md) is its generated, human-readable copy. Validate with `python3 docs/launch/check_plan.py`.
-3. The coordinator completes D01-D07 and freezes API/schema/package contracts. Lower-reasoning agents do not invent identity, payment, lease, cryptographic or deployment contracts.
+3. D08 qualifies the generated paid application/provider/tenant/recovery profile and the versioned neutral public contract. Then D04/D05 freeze only the consumer adapter and Ferro-owned browser/device contracts. Until then, hosted customer-runtime work is gated; no application-owned login, paid-admission source or migration may be invented.
 4. Assign only tasks whose dependencies have passed. Give one task per agent/worktree. Parallelize disjoint file sets, not shared composition roots. The checked manifest contains both implementation and real consumer tasks.
 5. Pass the AMSL review and immutable dependency gates before integrating a component. Preserve local Ferro regression coverage throughout.
 6. Cross the launch gates in order. “Code merged” is not “paid beta”, and “submitted to the store” is not “publicly installable”.
 
-Task states begin `planned` even where exploratory source inspection exists: each task must produce the specified reviewed artifact or execution evidence. Source inspection for this plan was read-only; no launch runtime component, cloud resource, price or store submission was created.
+Every code-changing PR has a first-class dependent review task executed through the normal apply/claim flow. Coding completes at PR URL and exact-head handoff. An independent reviewer approves that head, merges it and verifies landing. Blocking findings produce bounded, explicit fix and re-review tasks. Ordinary descendants wait for verified landing; only an explicitly declared speculative dependency may start earlier, with isolated inputs and no release authority.
+
+Task states begin `planned` even where exploratory source inspection exists: each task must produce the specified reviewed artifact or execution evidence. Source inspection for this plan was read-only; no hosted adoption, runtime component, cloud resource, price or store submission is claimed by this document.
 
 ## Inventory findings and reuse decisions
 
