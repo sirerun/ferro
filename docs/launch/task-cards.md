@@ -101,12 +101,12 @@ Implementation:
 
 1. Identify the versioned, public, neutral contract required to consume the generated application profile; keep private project names and source out of public artifacts.
 2. Qualify an AMOS-generated paid application and its authoritative provider/admission adapter, tenant isolation, restart/recovery, and operational ownership against the consumer journey.
-3. Compare the qualified profile with preserved Griffon services and current Ferro behavior; record exact residual Ferro-owned browser/device responsibilities and migration constraints without inventing login or migration work.
+3. Compare the qualified profile with preserved preserved hosted runtime services and current Ferro behavior; record exact residual Ferro-owned browser/device responsibilities and migration constraints without inventing login or migration work.
 
 Acceptance:
 
 - Versioned public neutral contract is reviewable and provenance-safe; generated paid app/provider/tenant isolation/recovery evidence is recorded against exact revisions and limitations.
-- Griffon preservation is explicit; no new hosted runtime adoption task is eligible until D08 is accepted and D04/D05 freeze the consumer contract.
+- preserved hosted runtime preservation is explicit; no new hosted runtime adoption task is eligible until D08 is accepted and D04/D05 freeze the consumer contract.
 - Browser action authority remains based on explicit pairing, exact-origin policy, per-task interaction consent and action confirmation; authentication or paid admission alone cannot grant it.
 
 **Required verification:** Independent contract review plus cited generated-app/provider/tenant-isolation/recovery qualification evidence; no runtime result may be inferred from documentation alone

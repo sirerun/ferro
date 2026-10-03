@@ -2,9 +2,9 @@
 
 Cross-track authority: [shared execution roadmap](../execution-roadmap.md). Its shared-file reservations and total lane limit apply before dispatch in either track.
 
-Status: planned adoption only. The former Griffon-default architecture below is historical planning input, not an accepted runtime design or launch claim. Hosted implementation is gated by D08 generated-application/provider/tenant/recovery qualification, then D04/D05 contract freeze.
+Status: planned adoption only. The former preserved-runtime default architecture below is historical planning input, not an accepted runtime design or launch claim. Hosted implementation is gated by D08 generated-application/provider/tenant/recovery qualification, then D04/D05 contract freeze.
 
-AMOS is the target generated paid application profile. Griffon remains the preserved hosted runtime while that profile is unqualified; this plan does not authorize cutover, shutdown, migration, or a new Griffon-specific feature path. No application-owned hosted login, paid-admission system, or schema migration is presumed. Use a versioned public neutral contract and qualify the generated app's authoritative provider/admission adapter, tenant isolation, and recovery before adopting it.
+AMOS is the target generated paid application profile. preserved hosted runtime remains the preserved hosted runtime while that profile is unqualified; this plan does not authorize cutover, shutdown, migration, or a new preserved-runtime-specific feature path. No application-owned hosted login, paid-admission system, or schema migration is presumed. Use a versioned public neutral contract and qualify the generated app's authoritative provider/admission adapter, tenant isolation, and recovery before adopting it.
 
 ## Objective and scope
 

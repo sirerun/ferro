@@ -4,7 +4,7 @@ Every row requires an evidence file naming commit/image/extension hash, environm
 
 ## Gate 0 — ready to parallelize
 
-D01-D08 done: known baseline, source comparison, provenance cleared for intended public code, versioned neutral profile contract reviewed, generated paid application/provider authority qualified, tenant isolation and recovery evidenced, threat model reviewed, and D04/D05 freeze only the residual browser/device consumer interface. Until then, hosted customer-runtime tasks remain ineligible. No app-owned login, paid-admission source or migration may be inferred from the former design draft. Griffon remains preserved; no cutover or shutdown is implied.
+D01-D08 done: known baseline, source comparison, provenance cleared for intended public code, versioned neutral profile contract reviewed, generated paid application/provider authority qualified, tenant isolation and recovery evidenced, threat model reviewed, and D04/D05 freeze only the residual browser/device consumer interface. Until then, hosted customer-runtime tasks remain ineligible. No app-owned login, paid-admission source or migration may be inferred from the former design draft. preserved hosted runtime remains preserved; no cutover or shutdown is implied.
 
 ## Gate 1 — first real hosted task
 

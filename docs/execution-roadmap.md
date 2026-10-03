@@ -2,7 +2,7 @@
 
 Historical status snapshot (2026-09-24): foundation merged; bounded runtime and private hosted transport were under final review at that time. This is not current runtime readiness evidence. Detailed historical acceptance is recorded in [the dispatch ledger](evidence/bulk-v2/dispatch.json).
 
-Hosted customer-runtime adoption is a separate, planned track gated by [launch D08](launch/tasks.json): qualify the generated paid application/provider profile, tenant isolation, recovery and a versioned neutral public contract before D04/D05 freeze Ferro's adapter. Griffon remains preserved while that evidence is pending. Authentication and paid admission are customer/task eligibility inputs only; Ferro retains browser pairing, exact-origin/action policy and browser-operation receipts. Do not infer app-owned login, billing, schema migration, cutover or runtime readiness from the older launch design.
+Hosted customer-runtime adoption is a separate, planned track gated by [launch D08](launch/tasks.json): qualify the generated paid application/provider profile, tenant isolation, recovery and a versioned neutral public contract before D04/D05 freeze Ferro's adapter. preserved hosted runtime remains preserved while that evidence is pending. Authentication and paid admission are customer/task eligibility inputs only; Ferro retains browser pairing, exact-origin/action policy and browser-operation receipts. Do not infer app-owned login, billing, schema migration, cutover or runtime readiness from the older launch design.
 
 ## Two delivery tracks, one integration owner
 
