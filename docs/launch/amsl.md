@@ -2,6 +2,8 @@
 
 Authority: [RFC revision 3](https://github.com/ajent-social/capabilities/blob/main/docs/rfc/0001-amsl-bootstrap.md). Repository instructions and user authorization govern changes; this plan does not silently publish restricted evidence or approve security-sensitive merges. Every implementation task includes a separately reviewable consumer task.
 
+This AMSL component-adoption track is independent of hosted customer-runtime adoption. A credential, checkout, reconciliation, workflow or infrastructure component—even when consumed by Ferro—does not qualify the generated paid application/provider profile, tenant isolation, recovery, or the neutral runtime contract. Hosted runtime eligibility remains gated by D08 and subsequent D04/D05 approval. The older references below to Ferro-local account policy are candidate component boundaries, not authority to create app-owned hosted login or paid admission.
+
 ## Evidence gate
 
 For each proposed component create a comparison row for intent, inputs, outputs, owner/resource binding, state lifecycle, concurrency, partial failure, storage, revocation, operational requirements and differences. Read code and tests from two independent sources or prove RFC path C (a mature source plus Ferro as immediate second real consumer). Merely finding matching filenames is DISCOVERED, not CANDIDATE.

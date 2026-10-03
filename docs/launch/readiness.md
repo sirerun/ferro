@@ -4,11 +4,11 @@ Every row requires an evidence file naming commit/image/extension hash, environm
 
 ## Gate 0 — ready to parallelize
 
-D01-D07 done: known baseline, source comparison on both machines, provenance cleared for intended public code, threat model reviewed, frozen OpenAPI/SQL/Go interfaces, fixture UI contract, approved deployment/commercial values. All tasks have ownership/dependencies. No source family or worktree counted twice.
+D01-D08 done: known baseline, source comparison, provenance cleared for intended public code, versioned neutral profile contract reviewed, generated paid application/provider authority qualified, tenant isolation and recovery evidenced, threat model reviewed, and D04/D05 freeze only the residual browser/device consumer interface. Until then, hosted customer-runtime tasks remain ineligible. No app-owned login, paid-admission source or migration may be inferred from the former design draft. Griffon remains preserved; no cutover or shutdown is implied.
 
 ## Gate 1 — first real hosted task
 
-Two separate users on two actual browser profiles authenticate, link separate devices, select their own website tab, supply their own test provider key and complete a read-only task through HTTPS. No local Go service is running. User A cannot list/read/cancel/reply to B's task or pair B's browser even with valid A credentials. Old browser generation and old credential fail. Navigation produces a fresh page snapshot. Stop prevents new commands. Verify selected DOM only goes to intended backend/provider and secrets do not enter content scripts.
+After Gate 0, two separate tenants on actual browser profiles use the qualified generated application/provider profile, link separate devices, select their own website tab, supply their own test model key and complete a read-only task through HTTPS. No local Go service is running. Cross-tenant reads, replies, pairing and task admission fail. Old browser generation and revoked device context fail. Navigation produces a fresh page snapshot. Stop prevents new commands. Verify selected DOM only goes to the intended backend/provider and secrets do not enter content scripts. Paid admission alone must not grant origin or mutation authority.
 
 ## Gate 2 — paid private beta
 

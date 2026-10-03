@@ -1,6 +1,12 @@
-# Hosted architecture and contracts to freeze
+# Hosted consumer architecture and contracts to freeze
 
-These are prescriptive defaults. D04/D05 turn them into reviewed OpenAPI, JSON Schema, SQL migrations and Go interfaces before implementation agents start. Those committed artifacts, not prose guesses by individual agents, are the wire authority. Any change returns to the coordinator with all affected tasks listed.
+Status: current target is AMOS's generated paid application profile; qualification is pending at D08. Griffon remains preserved. This document's former Google-login, app-owned session, Stripe-entitlement, account-schema and migration details are historical candidate defaults, not accepted implementation authority. Do not implement or migrate those hosted services from this draft. D08 must establish the versioned neutral contract and qualify the generated provider/admission profile, tenant isolation and recovery; D04/D05 then freeze only the residual consumer contract. No hosted adoption is ready or implemented.
+
+## Authority boundary
+
+AMOS's generated application/provider profile is expected to own customer authentication, paid admission, plan limits, hosted tenant isolation and account-level recovery, subject to D08 evidence. Griffon remains the preserved runtime until any later, separately authorized adoption decision. Ferro owns browser execution, extension/device pairing, selected-tab binding, exact-origin policy, per-task interaction consent, action-level confirmation, and browser-operation receipts/recovery. Customer authentication and paid admission only permit creation of a bounded task; they never grant browser-action authority or broaden origin/action policy. No app-owned hosted login, billing source, or schema migration is presumed.
+
+The detailed route, table, SDK and provider choices below are retained as historical design input for review. D04/D05 must replace or explicitly justify each surviving choice against the qualified profile before any implementation task becomes eligible. The sections below are not currently prescriptive defaults or implementation authority. Once approved, versioned contract artifacts—not prose guesses by individual agents—become wire authority.
 
 ## Process, storage and deployment
 
@@ -22,7 +28,7 @@ Web login: Google OIDC using maintained libraries, authorization code flow, stat
 
 Extension connection: `chrome.identity.launchWebAuthFlow`, registered stable extension ID and exact `chromiumapp.org` redirect. Backend web login creates a one-time, 60-second device authorization code bound to account, extension ID, state and PKCE S256 challenge; code is hashed at rest and atomically consumed with the verifier. Exchange returns the explicitly approved device credential once. A lost exchange response triggers revoke/relink rather than returning the secret again. Normal device lifetime 30 days, explicit revocation and expiry UI. Scope credential access to trusted extension contexts (`storage.local` restricted to TRUSTED_CONTEXTS); never content-script messages or sync storage. Device secrets are recoverable by the local OS/browser administrator; do not market extension storage as a hardware vault. Linking code is not itself a bearer credential. No arbitrary redirect/base URL, wildcard extension Origin or ambient cookie-based browser command endpoint.
 
-## Proposed API v1
+## Historical proposed API v1 (not approved)
 
 D05 must specify request/response fields, status codes, body limits, actor classes, ownership checks, idempotency, all enums and examples for every route below. No mutation on GET.
 
@@ -47,7 +53,7 @@ Error envelope: `{code, message, request_id, retryable}`; optional task/command 
 
 Default caps: prompt 16 KiB UTF-8, submitted history 64 KiB, snapshot/reply 256 KiB, HTTP body 512 KiB unless a smaller route bound applies. Depth and element limits apply before expensive decoding. Five-minute task timeout, three planning passes, sixty browser commands per task, single command in flight, model output/token limits explicitly configured. Limits are deployment-configured with startup validation and exposed safely in UI; rejected input is never partially executed.
 
-## Durable schema and ownership
+## Historical schema proposal and ownership (not approved)
 
 Coordinator owns `internal/hosted/contracts/`, OpenAPI and migration numbering. Workers submit additions there through that owner; no concurrent migration-number guessing.
 
@@ -67,7 +73,7 @@ Persist command and CAS dispatch before returning a poll response. If response i
 
 Read-only ops: snapshot/extract, scroll and allowlisted navigation. Clicking, filling, selecting and key input are mutation-capable. For mutation mode, validate target signature and fresh page generation immediately before dispatch; a stale target fails instead of retargeting. Block password/OTP/payment-card input and credential-form extraction. Prompt injection is untrusted page text: it cannot invoke APIs, change origin grants, read provider keys, enable interaction mode or approve actions. Confirmation tokens bind exact op+payload hash+target+origin+generation, expire after 60s, are consumed once and originate only from a trusted side-panel UI gesture. For ambiguous submit/send/delete/purchase effects, pause for user takeover; no classifier-only “safe to send” guarantee.
 
-## Billing contracts and Ferro policy
+## Historical billing candidate (profile-owned unless D08 proves a residual)
 
 Stripe SDK owns transport/signature primitives; AMSL owns proven durable coordination. Platform billing credentials never use a customer's connected Stripe credentials. Price ID, currency, success/cancel URLs and plan entitlement come only from approved server configuration. Refuse checkout for an active subscription and return a portal route. One active checkout attempt per account, stable payload fingerprint and provider idempotency key. A new intentional attempt differs from a retry; stale/unknown outcomes are reconciled before a new provider create. Never blindly replay beyond the provider's retention window.
 
